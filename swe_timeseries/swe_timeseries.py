@@ -90,8 +90,9 @@ class SWEDataLoader:
         
         # Continue with existing code to extract catchment IDs
         catchment_ids = np.array([
-            int(re.search(r'cat-(\d+)\.csv', os.path.basename(f)).group(1))
-            for f in csv_files if re.search(r'cat-(\d+)\.csv', os.path.basename(f))
+            int(match.group(1))  # Extract the number safely
+            for f in csv_files
+            if (match := re.search(r'cat-(\d+)', os.path.basename(f)))  # Store the match
         ])
         
         # Stop if csv_files was not empty, but no catchment_ids were parsed
@@ -120,7 +121,7 @@ class SWEDataLoader:
         s3_path = f"s3://ngwpc-forcing/snodas_csv/{prefix}_swe.csv"
         print(f"s3_path: {s3_path}")
 
-        basin_id = prefix.split('-')[1]
+        basin_id = prefix.split('_')[1]
 
         return s3_path, basin_id
 
