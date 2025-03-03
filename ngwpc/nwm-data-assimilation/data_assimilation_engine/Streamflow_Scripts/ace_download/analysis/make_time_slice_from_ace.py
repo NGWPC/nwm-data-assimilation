@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 ###############################################################################
-#  File name: make_time_slice_from_ace_xml.py                                 #
+#  File name: make_time_slice_from_ace.py                                     #
 #                                                                             #
 #  Author     : Zhengtao Cui (Zhengtao.Cui@noaa.gov)                          #
 #                                                                             #
@@ -11,6 +11,8 @@
 #  Description: The driver to create NetCDF time slice files from Army Crops  #
 #               of Engineers real-time observations                           #
 #                                                                             #
+#  12/11/2024   OWP   Update code to use JSON file instead of XML             #
+#                                                                             #
 ###############################################################################
 
 import os, sys, time, urllib, getopt
@@ -18,7 +20,6 @@ import logging
 from string import *
 import xml.etree.ElementTree as etree
 from datetime import datetime, timedelta
-from USGS_Observation import USGS_Observation
 from TimeSlice import TimeSlice
 from Observation import Observation, All_Observations
 from CWMS_Sites import CWMS_Sites
@@ -27,7 +28,7 @@ from EmptyDirOrFileException import EmptyDirOrFileException
 #import Tracer
 
 """
-   The driver to parse downloaded ACE XML observations and 
+   The driver to parse downloaded ACE JSON observations and 
    create time slices and write to NetCDF files
    Author: Zhengtao Cui (Zhengtao.Cui@noaa.gov)
    Date: May 30, 2019
@@ -40,27 +41,27 @@ def main(argv):
    try:
            opts, args = getopt.getopt(argv,"hi:o:s:",["idir=", "odir=", "sites="])
    except getopt.GetoptError:
-      print( 'make_time_slice_from_ace_xml.py -i <inputdir> -o <outputdir> -s <sitefile>' )
+      print( 'make_time_slice_from_ace.py -i <inputdir> -o <outputdir> -s <sitefile>' )
       sys.exit(2)
    for opt, arg in opts:
       if opt == '-h':
          print( \
-           'make_time_slice_from_ace_xml.py -i <inputdir> -o <outputdir> -s <sitefile>' )
+           'make_time_slice_from_ace.py -i <inputdir> -o <outputdir> -s <sitefile>' )
          sys.exit()
       elif opt in ('-i', "--idir"):
          inputdir = arg
          if not os.path.exists( inputdir ):
-                 raise RuntimeError( 'FATAL Error: inputdir ' + \
+                 raise RuntimeError( 'FATAL ERROR: inputdir ' + \
                                  inputdir + ' does not exist!' )
       elif opt in ('-o', "--odir" ):
          outputdir = arg
          if not os.path.exists( outputdir ):
-                 raise RuntimeError( 'FATAL Error: outputdir ' + \
+                 raise RuntimeError( 'FATAL ERROR: outputdir ' + \
                                  outputdir + ' does not exist!' )
       elif opt in ('-s', "--sites" ):
          sitefile = arg
          if not os.path.exists( sitefile ):
-                 raise RuntimeError( 'FATAL Error: sitefile ' + \
+                 raise RuntimeError( 'FATAL ERROR: sitefile ' + \
                                  sitefile + ' does not exist!' )
   
    return (inputdir, outputdir, sitefile)
@@ -90,7 +91,7 @@ logger.info( 'Output dir is "' + outdir + '"')
 logger.info( 'Site file is "' + sitefile + '"')
 
 #
-# Load ACE observed XML discharge data
+# Load ACE observed JSON discharge data
 #
 
 try:
@@ -103,7 +104,8 @@ try:
                                    " is not a directory or does not exist. ")
 
    for file in os.listdir( indir ): 
-       if file.endswith( ".xml" ):
+       # Process json file if file size is greater than 2 bytes (not empty)
+       if file.endswith( ".json" ) and os.path.getsize(indir+"/"+file) > 2:
              logger.info( 'Reading ' + indir + '/' + file + ' ... ' )
              try:
                      obvs.append( ACE_Observation( \
@@ -111,10 +113,12 @@ try:
              except Exception as e:
                            logger.warning( repr( e ), exc_info=True )
                            continue
+       else:
+           logger.warning('Skip ' + indir + '/' + file + ' because file is empty (2 bytes filesize).\n')
 
    if not obvs:
        raise EmptyDirOrFileException( "Input directory " + indir + \
-             " has no USACE xml files or the xml files are empty!")
+             " has no USACE json files or the json files are empty!")
 
    allobvs = All_Observations( obvs )
 
@@ -123,13 +127,13 @@ except EmptyDirOrFileException as e:
    sys.exit(0)
 
 except Exception as e:
-   logger.error("Failed to load USACE XML files: " + str(e), exc_info=True)
+   logger.error("Failed to load USACE JSON files: " + str(e), exc_info=True)
    sys.exit(3)
 
    
-logger.info( 'Earliest time in USACE XML: ' + \
+logger.info( 'Earliest time in USACE JSON: ' + \
                 allobvs.timePeriodForAll()[0].isoformat() )
-logger.info( 'Latest time in USACE XML: ' +  \
+logger.info( 'Latest time in USACE JSON: ' +  \
                 allobvs.timePeriodForAll()[1].isoformat() )
 
 #
