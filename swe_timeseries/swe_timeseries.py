@@ -37,7 +37,7 @@ class SWEDataLoader:
         start_date = min(df['time'])
         end_date = max(df['time'])
 
-        if end_date.hour >= 6:
+        if end_date.hour <= 6:
             times = np.arange(start_date, 
                             np.datetime64(end_date) + np.timedelta64(1, 'D'),
                             np.timedelta64(1, 'D')).astype('datetime64[ns]')
