@@ -1,3 +1,5 @@
+import traceback
+
 import pandas as pd
 import geopandas as gpd
 import numpy as np
@@ -146,9 +148,12 @@ class SWEDataLoader:
                 df = pd.read_csv(f)
             
             return df
-        
+
+        except FileNotFoundError:
+            print(f'File {s3_path} not found.')
+            return None
         except Exception as e:
-            print(f"Error reading S3 file {s3_path}: {e}")
+            print(f"Error reading S3 file {s3_path}: {str(e)}")
             return None
 
     @staticmethod
@@ -206,6 +211,7 @@ class SWEDataLoader:
             
         except Exception as e:
             print(f"Error processing basin average data from dataframe: {e}")
+            traceback.print_exc()
             return np.full(len(times), np.nan)
 
     @staticmethod
@@ -432,8 +438,17 @@ class SWEPlotter:
     def calculate_y_lims(simulated_avg, snodas_avg):
 
         # Calculate y-axis range for dynamic intervals
-        sim_y_min, sim_y_max = np.nanmin(simulated_avg), np.nanmax(simulated_avg)
-        snodas_y_min, snodas_y_max = np.nanmin(snodas_avg), np.nanmax(snodas_avg)
+        if np.isnan(simulated_avg).all():
+            print("Warning: simulated_avg contains only NaNs, skipping min/max calculation.")
+            sim_y_min, sim_y_max = np.nan, np.nan
+        else:
+            sim_y_min, sim_y_max = np.nanmin(simulated_avg), np.nanmax(simulated_avg)
+
+        if np.isnan(snodas_avg).all():
+            print("Warning: snodas_avg contains only NaNs, skipping min/max calculation.")
+            snodas_y_min, snodas_y_max = np.nan, np.nan
+        else:
+            snodas_y_min, snodas_y_max = np.nanmin(snodas_avg), np.nanmax(snodas_avg)
 
         y_min = min(sim_y_min, snodas_y_min)
         y_max = max(sim_y_max, snodas_y_max)
