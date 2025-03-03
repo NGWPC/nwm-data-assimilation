@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 ###############################################################################
 #  Module name: TimeSlice                                                     #
 #                                                                             #
@@ -8,7 +9,7 @@
 #  Last modification date:  7/12/2017                                         #
 #                                                                             #
 #  Description: manage a time slice file that contains real-time stream       #
-#               flow data for all USGS stations for a given time stamp        #
+#               flow data for all USACE stations for a given time stamp       #
 #                                                                             #
 ###############################################################################
 import os, sys, time, math
@@ -93,7 +94,7 @@ class TimeSlice:
         """
 
         stationIdStrLen = 15
-        stationIdLong_name = "USGS station identifer of length 15"
+        stationIdLong_name = "USACE station identifer of length 15"
         timeStrLen = 19
         timeUnit = "UTC"
         timeLong_name = "YYYY-MM-DD_HH:mm:ss UTC"
@@ -184,7 +185,7 @@ class TimeSlice:
                 qtimes.append( calendar.timegm( e[ 1 ].utctimetuple() ) )
               return qtimes
 
-        def getSliceNCFileName( self, suffix='usgsTimeSlice.ncdf' ):
+        def getSliceNCFileName( self, suffix='usaceTimeSlice.ncdf' ):
             """
               Get NetCDF file for this time slice
               Return: A NetCDF filename
@@ -206,7 +207,7 @@ class TimeSlice:
                 dq.append( e[ 3 ] )
               return dq
             
-        def toNetCDF( self, outputdir = './', suffix='usgsTimeSlice.ncdf' ):
+        def toNetCDF( self, outputdir = './', suffix='usaceTimeSlice.ncdf' ):
             """
               Write the time slice to a NetCDF file
               Input: outputdir - the directory where to write the NetCDF 
@@ -298,7 +299,7 @@ class TimeSlice:
             quality = nc_fid.variables[ 'discharge_quality'][ : ]
 
 #            for s, d, q in zip( stations, discharge, queryTime ):
-#               print 'USGS.' + s.rstrip(), d, \
+#               print 'USACE.' + s.rstrip(), d, \
 #                       datetime.utcfromtimestamp( q ).isoformat(), \
 #                       datetime.utcfromtimestamp( q ).tzname(), \
 #                       q

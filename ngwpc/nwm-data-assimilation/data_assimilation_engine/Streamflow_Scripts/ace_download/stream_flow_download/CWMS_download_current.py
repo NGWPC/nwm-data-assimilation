@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import os
 import datetime
 
@@ -41,7 +42,7 @@ def main():
         if output_format == "json":
             json_data = get_data(downloader, row["office"], row["gage"], "PT-48h", "json")
             with open(output_path+"/"+row["usace_gage_id"]+".json","w") as outfile:
-                json.dump(json_data,outfile)
+                json.dump(json_data,outfile,indent=2)
                 print( datetime.datetime.now(), end = " --- " )
                 print(  'Successfully downloaded ' + \
                                 output_path+"/"+row["usace_gage_id"]+".json" + "!" )
@@ -52,7 +53,7 @@ def main():
                    outfile.write(xml_data)
                 except Exception as e:
                    print( datetime.datetime.now(), end = " --- " )
-                   print(  'Warning: Failed writting ' + \
+                   print(  'WARNING: Failed writting ' + \
                                 output_path+"/"+row["usace_gage_id"]+".xml" + "!" )
                 else:
                    print( datetime.datetime.now(), end = " --- " )

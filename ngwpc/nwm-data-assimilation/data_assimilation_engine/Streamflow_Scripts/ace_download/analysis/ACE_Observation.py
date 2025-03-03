@@ -1,13 +1,16 @@
+#!/usr/bin/env python
 ###############################################################################
-#  Module name: ACE_Observation
+#  Module name: ACE_Observation                                               #
 #                                                                             #
 #  Author     : Zhengtao Cui (Zhengtao.Cui@noaa.gov)                          #
 #                                                                             #
 #  Initial version date:                                                      #
 #                                                                             #
-#  Last modification date:  05/28/2019                                         #
+#  Last modification date:  05/28/2019                                        #
 #                                                                             #
-#  Description: manage data in a ACE CWMS xml file                       #
+#  Description: manage data in a ACE CWMS json file                           #
+#                                                                             #
+#  12/11/2024  OWP        Add loadCwmsjson() to parse json data format        #
 #                                                                             #
 ###############################################################################
 
@@ -15,13 +18,12 @@ import os, sys, time, csv, re
 import logging
 from string import *
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import dateutil.parser
 import pytz
-#import iso8601
+import json
 import xml.etree.ElementTree as etree
 from TimeSlice import TimeSlice
-#import Tracer
 from Observation import Observation
 from CWMS_Sites import CWMS_Sites
 
@@ -46,21 +48,82 @@ def parseDuration( period ):
 
 class ACE_Observation(Observation):
         """
-           Store one USGS WaterML2.0 data
+           Store one USACE data
         """        
-        def __init__(self, cwmsxmlfilename, cwmssites ):
+        def __init__(self, cwmsxmljsonfilename, cwmssites ):
            """
               Initialize the ACE_Observation object with a given
               filename
            """
-           self.source = cwmsxmlfilename
+           self.source = cwmsxmljsonfilename
            self.timeValueQuality = OrderedDict()
            self._sites = cwmssites
-           if cwmsxmlfilename.endswith( '.xml' ):
-              self.loadCWMSxml( cwmsxmlfilename )
+           if cwmsxmljsonfilename.endswith( '.json' ):
+              self.loadCwmsjson( cwmsxmljsonfilename )
+           elif cwmsxmljsonfilename.endswith( '.xml' ):
+              self.loadCWMSxml( cwmsxmljsonfilename )
            else:
               raise RuntimeError( "FATAL ERROR: Unknow file type: " + \
-                                 cwmsxmfilename )
+                                 cwmsxmljsonfilename )
+
+        def loadCwmsjson(self, jsonfilename ):
+           """
+              Read real-time discharge data from a given CWMS JSON file
+
+              Input: jsonfilename - the CWMS json filename
+           """        
+           try:
+               json_file = open(jsonfilename)
+
+               # Reads .json file to Python dictionary
+               json_data = json.load(json_file)
+
+               name = json_data["name"]
+               officeId = json_data["office-id"]
+               self.unit = json_data["units"]
+               
+               self.stationName = officeId + "." + name
+               self.stationID = self._sites.getIndex(officeId, name )
+
+               # Get Discharge timeseries values
+               totalFcts = len(json_data["values"])
+
+               #print(f"total FCST size:  {totalFcts}")
+
+               for idx in range(totalFcts):
+                   row = json_data['values'][idx]
+                   if len(row) > 0:
+                     #print(f"ROW={row}    time={row[0]}")
+
+                     ### Convert date-time to datetime from ms
+                     t1 = self.convert_milliseconds_to_iso_format(row[0])
+                     t = dateutil.parser.parse( t1 ).astimezone(pytz.utc).replace(tzinfo=None)
+
+                     self.timeValueQuality[ t ] = ( float(row[1]), \
+                                self.calculateDataQuality(float(row[2] ) ) )
+
+                     #print( idx, t, self.timeValueQuality[ t ] )
+
+               self.obvPeriod =  list( self.timeValueQuality.keys() )[0], \
+                                 list( self.timeValueQuality.keys() )[-1]
+
+               unitConvertToM3perSec = self.getUnitConvertToM3perSec()
+
+               self.timeValueQuality = dict(map( \
+                   lambda kv: (kv[0], (kv[1][0] * unitConvertToM3perSec, \
+                                       kv[1][1])), \
+                                       iter( self.timeValueQuality.items()) ))
+               self.unit = 'm3/s'
+                      
+           except Exception as e:
+               raise RuntimeError( "WARNING: parsing JSON error: " + str( e )\
+                               + ": " + jsonfilename + '. Or Maybe "values" field are empty; ==> ' \
+                               +  jsonfilename + " Skipping ..." )
+
+           #print(f"{jsonfilename} stationName: {self.stationName} unit={self.unit}")
+           #for k, v in self.timeValueQuality.items():
+           #    print(k, v)
+
 
         def loadCWMSxml(self, xmlfilename ):
            """
@@ -90,10 +153,13 @@ class ACE_Observation(Observation):
                                + ": " + xmlfilename + " skipping ..." )
 
            self.stationName = office + '.' + name_1
+           #print(f"stationName={self.stationName}")
            self.obvPeriod =  list( self.timeValueQuality.keys() )[0], \
                              list( self.timeValueQuality.keys() )[-1]
 
            unitConvertToM3perSec = self.getUnitConvertToM3perSec()
+
+           #print(f"unitConvertToM3perSec={unitConvertToM3perSec}")
 
            self.timeValueQuality = dict(map( \
                    lambda kv: (kv[0], (kv[1][0] * unitConvertToM3perSec, \
@@ -101,14 +167,14 @@ class ACE_Observation(Observation):
                                   iter( self.timeValueQuality.items()) ))
            self.unit = 'm3/s'
 
-#           for k, v in self.timeValueQuality.items():
-#                   print(k, v)
+           #for k, v in self.timeValueQuality.items():
+           #        print(k, v)
 
         def parseRegularIntervalValues(self, regularInterval):
               self.unit = regularInterval.get('unit')
 
               interval = parseDuration( regularInterval.get('interval') )
-
+           
               for seg in regularInterval.findall('segment'):
                       beginTime = \
                          dateutil.parser.parse( seg.get('first-time')) \
@@ -123,6 +189,7 @@ class ACE_Observation(Observation):
 
         def parseIrregularIntervalValues(self, irregularInterval):
               self.unit = irregularInterval.get('unit')
+              #print(f"irregularInterval Unit={self.unit}")
               for s in irregularInterval.text.strip().split('\n'):
                       words = s.split(' ')
                       t = dateutil.parser.parse( words[0] ) \
@@ -130,17 +197,27 @@ class ACE_Observation(Observation):
                       self.timeValueQuality[ t ] = \
                                               ( float(words[1]), \
                               self.calculateDataQuality(float(words[2] ) ) )
-                    #  print( t, self.timeValueQuality[ t ] )
+                      #print( t, self.timeValueQuality[ t ] )
 
  
         def getUnitConvertToM3perSec(self):
-                if self.unit == 'cfs':
+              #print(f"self.unit={self.unit}")
+              if self.unit == 'cfs':
                   unitConvertToM3perSec = 0.028317
-                elif self.unit == 'CMS':
+              elif self.unit == 'CMS':
                   unitConvertToM3perSec = 1.0
-                else:
+              else:
                   raise RuntimeError( "FATAL ERROR: Unit " + self.unit + \
                                    " is not known. ")
-                return unitConvertToM3perSec
+              return unitConvertToM3perSec
+
         def calculateDataQuality(self, value ):
                 return 100.0
+
+        def convert_milliseconds_to_iso_format(self, milliseconds):
+              """ 
+                 Converts milliseconds to ISO 8601 format (e.g., 2016-01-01 06:00:00)
+              """
+
+              dt = datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc)
+              return dt.strftime("%Y-%m-%d %H:%M:%S")
