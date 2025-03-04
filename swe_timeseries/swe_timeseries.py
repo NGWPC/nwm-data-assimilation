@@ -240,15 +240,15 @@ class SWEDataLoader:
                 # Use lower() to make headers case-independent
                 df.columns = df.columns.str.lower()
                 if 'swe_m' not in df.columns and 'swe_mm' not in df.columns:
-                    continue
+                    raise ValueError("SWE column names not found")
                 
                 df['time'] = pd.to_datetime(df['time'])
                     
                 # Check date range - these are critical errors we want to exit on
-                #if max(times) > max(df['time']):
-                #    raise ValueError(f"End date out of range...max: {max(df['time'])}.")
-                #elif min(times) < min(df['time']):
-                #    raise ValueError(f"Start date out of range...min: {min(df['time'])}.")
+                if max(times) > max(df['time']):
+                    raise ValueError(f"End date out of range...max: {max(df['time'])}.")
+                elif min(times) < min(df['time']):
+                    raise ValueError(f"Start date out of range...min: {min(df['time'])}.")
                
                 # Use only selected date/times                      
                 mask = df['time'].isin(times)
