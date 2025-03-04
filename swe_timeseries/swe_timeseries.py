@@ -39,15 +39,10 @@ class SWEDataLoader:
         start_date = min(df['time'])
         end_date = max(df['time'])
 
-        if end_date.hour <= 6:
-            times = np.arange(start_date, 
-                            np.datetime64(end_date) + np.timedelta64(1, 'D'),
-                            np.timedelta64(1, 'D')).astype('datetime64[ns]')
-            times = times + np.timedelta64(6, 'h') 
-        else:
-            times = np.arange(start_date, np.datetime64(end_date),
-                             np.timedelta64(1, 'D')).astype('datetime64[ns]')
-            times = times + np.timedelta64(6, 'h') 
+        # Populate with 06z timesteps from within the start and end
+        times = np.arange(start_date, np.datetime64(end_date),
+                         np.timedelta64(1, 'D')).astype('datetime64[ns]')
+        times = times + np.timedelta64(6, 'h') 
 
         return times
 
@@ -120,10 +115,11 @@ class SWEDataLoader:
         """       
         filename = os.path.basename(gpkg_file)
         prefix = filename.split('.')[0]
-        s3_path = f"s3://ngwpc-forcing/snodas_csv/{prefix}_swe.csv"
-        print(f"s3_path: {s3_path}")
+        basin_id = re.search(r'(\d+)', prefix).group(1)
 
-        basin_id = prefix.split('_')[1]
+        # Construct the S3 path using the numeric part
+        s3_path = f"s3://ngwpc-forcing/snodas_csv/gages-{basin_id}_swe.csv"
+        print(f"s3_path: {s3_path}")
 
         return s3_path, basin_id
 
