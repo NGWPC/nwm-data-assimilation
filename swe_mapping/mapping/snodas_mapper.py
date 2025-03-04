@@ -18,11 +18,13 @@ def load_and_process_data(netcdf_file, gpkg_file=None, plot_type='grid'):
 
     # Open the SNODAS NetCDF file with chunking to optimize performance and memory usage.
     print('Opening netCDF file', netcdf_file)
+    # TODO In the future, we might want to dynamically set the chunk size based on the size of the basin
+    chunk_size = 100
     with fsspec.open(netcdf_file, mode='rb') as f:
-        ds = xr.open_dataset(f, chunks={"time": 1, "lat": 50, "lon": 50})
+        ds = xr.open_dataset(f, chunks={"time": 1, "lat": chunk_size, "lon": chunk_size})
         # Chunking strategy:
         # - "time": 1 → Process one timestep at a time to avoid excessive memory usage.
-        # - "lat": 50, "lon": 50 → Read 50x50 spatial chunks to balance memory usage and I/O performance.
+        # - "lat": chunk_size, "lon": chunk_size → Read chunk_size x chunk_size spatial chunks to balance memory usage and I/O performance.
 
     print(f"   NetCDF load time: {time.time() - t0:.2f}s")
 
