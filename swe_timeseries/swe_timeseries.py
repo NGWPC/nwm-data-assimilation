@@ -274,7 +274,7 @@ class SWEDataLoader:
                 continue
         
         if critical_error:
-            raise ValueError("Processing stopped due to critical error with date range.")
+            raise ValueError("Processing stopped due to critical error.")
             
         return data
 
