@@ -1,5 +1,3 @@
-import traceback
-
 import pandas as pd
 import geopandas as gpd
 import numpy as np
@@ -87,9 +85,8 @@ class SWEDataLoader:
         
         # Continue with existing code to extract catchment IDs
         catchment_ids = np.array([
-            int(match.group(1))  # Extract the number safely
-            for f in csv_files
-            if (match := re.search(r'cat-(\d+)', os.path.basename(f)))  # Store the match
+            int(re.search(r'cat-(\d+)\.csv', os.path.basename(f)).group(1))
+            for f in csv_files if re.search(r'cat-(\d+)\.csv', os.path.basename(f))
         ])
         
         # Stop if csv_files was not empty, but no catchment_ids were parsed
@@ -120,6 +117,7 @@ class SWEDataLoader:
         # Construct the S3 path using the numeric part
         s3_path = f"s3://ngwpc-forcing/snodas_csv/gages-{basin_id}_swe.csv"
         print(f"s3_path: {s3_path}")
+        print(f"basin_id: {basin_id}")
 
         return s3_path, basin_id
 
@@ -144,12 +142,9 @@ class SWEDataLoader:
                 df = pd.read_csv(f)
             
             return df
-
-        except FileNotFoundError:
-            print(f'File {s3_path} not found.')
-            return None
+        
         except Exception as e:
-            print(f"Error reading S3 file {s3_path}: {str(e)}")
+            print(f"Error reading S3 file {s3_path}: {e}")
             return None
 
     @staticmethod
@@ -207,7 +202,6 @@ class SWEDataLoader:
             
         except Exception as e:
             print(f"Error processing basin average data from dataframe: {e}")
-            traceback.print_exc()
             return np.full(len(times), np.nan)
 
     @staticmethod
@@ -274,7 +268,7 @@ class SWEDataLoader:
                 continue
         
         if critical_error:
-            raise ValueError("Processing stopped due to critical error.")
+            raise ValueError("Processing stopped due to critical error with date range.")
             
         return data
 
@@ -434,17 +428,8 @@ class SWEPlotter:
     def calculate_y_lims(simulated_avg, snodas_avg):
 
         # Calculate y-axis range for dynamic intervals
-        if np.isnan(simulated_avg).all():
-            print("Warning: simulated_avg contains only NaNs, skipping min/max calculation.")
-            sim_y_min, sim_y_max = np.nan, np.nan
-        else:
-            sim_y_min, sim_y_max = np.nanmin(simulated_avg), np.nanmax(simulated_avg)
-
-        if np.isnan(snodas_avg).all():
-            print("Warning: snodas_avg contains only NaNs, skipping min/max calculation.")
-            snodas_y_min, snodas_y_max = np.nan, np.nan
-        else:
-            snodas_y_min, snodas_y_max = np.nanmin(snodas_avg), np.nanmax(snodas_avg)
+        sim_y_min, sim_y_max = np.nanmin(simulated_avg), np.nanmax(simulated_avg)
+        snodas_y_min, snodas_y_max = np.nanmin(snodas_avg), np.nanmax(snodas_avg)
 
         y_min = min(sim_y_min, snodas_y_min)
         y_max = max(sim_y_max, snodas_y_max)

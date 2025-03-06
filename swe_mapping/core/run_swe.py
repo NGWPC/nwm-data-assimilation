@@ -90,11 +90,12 @@ def get_options(arg_list=None):
     return parser.parse_args()
 
 def execute(args):
+    t0 = time.time()
     run_convert_swe(args)
     run_sim_scan(args)
     run_snodas_mapper(args)
     run_sim_swe_mapper(args)
-
+    print(f"Total run_swe time: {time.time()-t0:.2f}s")
 def swe_map(arg_list=None):
     args = get_options(arg_list)
     execute(args)
