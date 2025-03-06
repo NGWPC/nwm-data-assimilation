@@ -159,10 +159,6 @@ class SnotelCalculator:
         
         # Filter stations within the basin
         stations_in_basin = stations_gdf[stations_gdf.intersects(basin_geometry)]
-        station_return = []
-        station_return.append(int(stations_in_basin['station_id'].iloc[0]))
-        
-        print(f"   {len(station_return)} SNOTEL stations found in basin: {station_return}")
 
         return stations_in_basin
 
