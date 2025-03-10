@@ -355,14 +355,20 @@ class SnotelPlotter:
                 'o',
                 markersize=3,
                 transform=proj,
-                color=color,
-                label='SNOTEL Stations (SWE)'
+                color=color
             )
-            
-            ax.legend(loc='upper right', 
-                      fontsize=10, 
-                      framealpha=0.5,
-                      bbox_to_anchor=(1.25, 1.05)
-                      )
+
+        # Check if the dataframe has any rows
+        if not snotel_data.empty:
+            # Create custom legend entry only once (instead of within for loop)
+            custom_lines = [Line2D([0], [0], marker='o', color='w', 
+                                  markerfacecolor=color, markersize=5,
+                                  label='SNOTEL Stations (SWE)')]
+    
+        ax.legend(handles=custom_lines,
+              loc='upper right',
+              fontsize=10, 
+              framealpha=0.5,
+              bbox_to_anchor=(1.25, 1.05))
         
         return ax
