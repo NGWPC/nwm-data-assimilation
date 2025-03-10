@@ -809,14 +809,14 @@ class SWEProcessor:
             # Create basic DataFrame with times and basin average SWE values
             data_dict = {
                 'timestamp': self.times,
-                'Simulated SWE': self.simulated_avg,
-                'SNODAS SWE': self.snodas_avg
+                'Simulated_SWE': self.simulated_avg,
+                'SNODAS_SWE': self.snodas_avg
             }
             
             # Add SNOTEL data if available
             if self.snotel_ts:
                 for station_id, station_data in self.snotel_ts.items():
-                    data_dict[f'SNOTEL {station_id} SWE'] = station_data['swe']
+                    data_dict[f'SNOTEL_{station_id}_SWE'] = station_data['swe']
             
             # Create DataFrame and save to CSV
             df = pd.DataFrame(data_dict)
