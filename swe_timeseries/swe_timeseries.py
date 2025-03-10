@@ -9,9 +9,11 @@ import re
 import argparse
 import fsspec
 import time
+from swe_mapping.utility.geo_utils import GeoUtils
+from swe_mapping.utility.snotel_utils import SnotelDataLoader, SnotelCalculator
 
-class SWEDataLoader:
-    """Handles loading and preprocessing of SWE data from CSV files"""
+class FileLoader:
+    """Handles loading and retrieving files"""
     
     @staticmethod
     def get_times(csv_files):
@@ -83,10 +85,11 @@ class SWEDataLoader:
         if not csv_files:
             raise ValueError("No CSV files found in the directory. Processing halted.")
         
-        # Continue with existing code to extract catchment IDs
+        # copied from convert_swe.py
         catchment_ids = np.array([
-            int(re.search(r'cat-(\d+)\.csv', os.path.basename(f)).group(1))
-            for f in csv_files if re.search(r'cat-(\d+)\.csv', os.path.basename(f))
+            int(match.group(1))  # Extract the number safely
+            for f in csv_files
+            if (match := re.search(r'cat-(\d+)', os.path.basename(f)))  # Store the match
         ])
         
         # Stop if csv_files was not empty, but no catchment_ids were parsed
@@ -95,6 +98,9 @@ class SWEDataLoader:
         
         return catchment_ids
 
+class S3Loader:
+    """Handles operations related to S3 storage"""
+    
     @staticmethod
     def construct_s3_path(gpkg_file):
         """
@@ -147,6 +153,9 @@ class SWEDataLoader:
             print(f"Error reading S3 file {s3_path}: {e}")
             return None
 
+class DataParser:
+    """Handles parsing and processing of data"""
+    
     @staticmethod
     def parse_snodas_dataframe(snodas_df, times):
         """
@@ -268,7 +277,7 @@ class SWEDataLoader:
                 continue
         
         if critical_error:
-            raise ValueError("Processing stopped due to critical error with date range.")
+            raise ValueError("Processing stopped due to critical error.")
             
         return data
 
@@ -425,14 +434,21 @@ class SWEPlotter:
         return x_major_interval, x_minor_interval, date_fmt
 
     @staticmethod
-    def calculate_y_lims(simulated_avg, snodas_avg):
-
+    def calculate_y_lims(simulated_avg, snodas_avg, snotel_data=None):
         # Calculate y-axis range for dynamic intervals
         sim_y_min, sim_y_max = np.nanmin(simulated_avg), np.nanmax(simulated_avg)
         snodas_y_min, snodas_y_max = np.nanmin(snodas_avg), np.nanmax(snodas_avg)
 
         y_min = min(sim_y_min, snodas_y_min)
         y_max = max(sim_y_max, snodas_y_max)
+        
+        # Include SNOTEL data in the y-axis range if available
+        if snotel_data:
+            for station_id, data in snotel_data.items():
+                snotel_y_min = np.nanmin(data['swe'])
+                snotel_y_max = np.nanmax(data['swe'])
+                y_min = min(y_min, snotel_y_min)
+                y_max = max(y_max, snotel_y_max)
 
         y_range = y_max - y_min
         
@@ -540,7 +556,7 @@ class SWEPlotter:
         ax.set_ylim(y_lim_min, y_lim_max)
 
     @staticmethod
-    def plot_basin_average(times, simulated_avg, snodas_avg):
+    def plot_basin_average(times, simulated_avg, snodas_avg, snotel_ts=None):
         """
         Create time series plot of basin-averaged SWE.
         
@@ -548,8 +564,12 @@ class SWEPlotter:
         ----------
         times : numpy.ndarray
             Array of datetime objects
-        basin_avg : numpy.ndarray
-            Array of basin-averaged SWE values
+        simulated_avg : numpy.ndarray
+            Array of simulated basin-averaged SWE values
+        snodas_avg : numpy.ndarray
+            Array of SNODAS basin-averaged SWE values
+        snotel_ts : dict, optional
+            Dictionary of SNOTEL station data
             
         Returns
         -------
@@ -573,6 +593,22 @@ class SWEPlotter:
                 linewidth=1.5,
                 alpha=.5,
                 label='SNODAS SWE')
+        
+        # Add SNOTEL data if available
+        if snotel_ts:
+            cmap = plt.cm.tab10
+            
+            for i, (station_id, data) in enumerate(snotel_ts.items()):
+                color = cmap(i % 30)
+                ax.plot(times, 
+                        data['swe'], 
+                        'o-', 
+                        markersize=3, 
+                        linewidth=1,
+                        alpha=0.7,
+                        color=color,
+                        label=f'SNOTEL {station_id}')
+        
         ax.legend()
         
         return fig, ax
@@ -632,6 +668,15 @@ class SWEProcessor:
         self.snodas_df = None
         self.basin_id = None
         
+        # SNOTEL-related containers
+        self.basin_geometry = None
+        self.snotel_data = None
+        self.snotel_ts = None
+        self.snotel_filenames = None
+        self.basin_gdf = None
+        self.stations_gdf = None
+        self.snotel_df = None
+        
         # Initialize visualization parameters
         self.x_major_interval = None
         self.x_minor_interval = None
@@ -646,50 +691,82 @@ class SWEProcessor:
     def load_data(self):
         """Load all required data"""
         tl0 = time.time()
-        self.csv_files = SWEDataLoader.get_filenames(self.csv_directory)
+        self.csv_files = FileLoader.get_filenames(self.csv_directory)
         tl1 = time.time()
-        self.times = SWEDataLoader.get_times(self.csv_files)
+        self.times = FileLoader.get_times(self.csv_files)
         tl2 = time.time()
-        self.s3_path, self.basin_id = SWEDataLoader.construct_s3_path(self.gpkg_file)
+        self.s3_path, self.basin_id = S3Loader.construct_s3_path(self.gpkg_file)
         tl3 = time.time()
-        self.snodas_df = SWEDataLoader.read_csv_from_s3(self.s3_path)
+        self.snodas_df = S3Loader.read_csv_from_s3(self.s3_path)
         tl4 = time.time()
-        self.catchment_ids = SWEDataLoader.get_ids(self.csv_files)
+        self.catchment_ids = FileLoader.get_ids(self.csv_files)
         tl5 = time.time()
-        self.simulated_data = SWEDataLoader.parse_swe_data(self.csv_files, 
-                                                           self.catchment_ids, 
-                                                           self.times)
+        self.simulated_data = DataParser.parse_swe_data(self.csv_files, 
+                                                        self.catchment_ids, 
+                                                        self.times)
         tl6 = time.time()
-        self.snodas_data = SWEDataLoader.parse_snodas_dataframe(self.snodas_df,
-                                                                self.times)
+        self.snodas_data = DataParser.parse_snodas_dataframe(self.snodas_df,
+                                                             self.times)
         tl7 = time.time()
         self.areas = CatchmentData.read_catchment_areas(self.gpkg_file)
         tl8 = time.time()
+        
+        #SNOTEL
+        self.snotel_filenames = SnotelDataLoader.list_snotel_filenames()
+        self.stations_gdf = SnotelDataLoader.parse_snotel_filenames(self.snotel_filenames)
+        self.basin_gdf = GeoUtils.read_geo(self.gpkg_file)
+        #Get basin_geometry, but we don't need bounds, so we ignore those
+        self.basin_geometry, _ = GeoUtils.get_basin_geometry(self.basin_gdf) 
+        tl9 = time.time()
 
-        print(f"\ntime in load_data: {tl8-tl0:.5f}s")
-        print(f"get_filenames time: {tl1-tl0:.5f}s")
-        print(f"get_times time: {tl2-tl1:.5f}s")
-        print(f"contruct_s3_path time: {tl3-tl2:.5f}s")
-        print(f"read_csv_from_s3 time: {tl4-tl3:.5f}s")
-        print(f"get_ids time: {tl5-tl4:.5f}s")
-        print(f"parse_swe_data time: {tl6-tl5:.5f}s")
-        print(f"parse_snodas_data time: {tl7-tl6:.5f}s")
-        print(f"read_catchment_areas time: {tl8-tl7:.5f}s")
-        print(f"\nread_from_s3 percentage of load_time: {((tl4-tl3)/(tl8-tl0))*100:.2f}%")
-        print(f"parse_swe_data percentage of load_time: {((tl6-tl5)/(tl8-tl0))*100:.2f}%\n")
+        print(f"\ntime in load_data: {tl9-tl0:.5f}s")
+        print(f" - get_filenames time: {tl1-tl0:.5f}s")
+        print(f" - get_times time: {tl2-tl1:.5f}s")
+        print(f" - contruct_s3_path time: {tl3-tl2:.5f}s")
+        print(f" - read_csv_from_s3 time: {tl4-tl3:.5f}s")
+        print(f" - get_ids time: {tl5-tl4:.5f}s")
+        print(f" - parse_swe_data time: {tl6-tl5:.5f}s")
+        print(f" - parse_snodas_data time: {tl7-tl6:.5f}s")
+        print(f" - read_catchment_areas time: {tl8-tl7:.5f}s")
+        print(f" - snotel data loading time: {tl9-tl8:.5f}s")
+        print(f"\nread_from_s3 percentage of load_time: {((tl4-tl3)/(tl9-tl0))*100:.2f}%")
+        print(f"parse_swe_data percentage of load_time: {((tl6-tl5)/(tl9-tl0))*100:.2f}%\n")
+    
     def analyze_data(self):
         """Perform analysis on loaded data"""
+        t0 = time.time()
         self.simulated_avg = SWEAnalyzer.calculate_basin_average(self.simulated_data,
                                                                  self.catchment_ids,
                                                                  self.areas)
         self.snodas_avg = self.snodas_data
-        
+        #SNOTEL
+        ta = time.time()
+        self.stations_in_basin = SnotelCalculator.find_stations_in_basin(self.stations_gdf, 
+                                                                         self.basin_geometry)
+        ta1 = time.time()                                                                         
+        self.snotel_df = SnotelDataLoader.get_snotel_timeseries(self.basin_geometry, 
+                                                                self.times, 
+                                                                self.stations_in_basin)
+        ta2 = time.time()
+        self.snotel_ts = SnotelDataLoader.extract_snotel_timeseries(self.snotel_df, self.times)        
+        tb = time.time()
+        snotel_time = tb-ta
+        analyze_time = tb-t0
+        print(f"    - find_stations_in_basin time: {ta1-ta:.2f}s")
+        print(f"    - get_snotel_timeseries time: {ta2-ta1:.2f}s")
+        print(f"    - extract_snotel_timeseries time: {tb-ta2:.2f}s")
+        print(f" - SNOTEL processing time: {snotel_time:.2f}s")
+        print(f" - SNOTEL % of analyze time: {((snotel_time)/(analyze_time))*100:.2f}%")
+
+
+
     def prepare_visualization(self):
         """Calculate parameters for visualization"""
         (self.y_lim_min, 
          self.y_lim_max,
          self.y_range) = SWEPlotter.calculate_y_lims(self.simulated_avg,
-                                                       self.snodas_avg)
+                                                     self.snodas_avg,
+                                                     self.snotel_ts)
         (self.x_major_interval, 
          self.x_minor_interval, 
          self.date_fmt) = SWEPlotter.get_x_intervals(self.times)
@@ -699,9 +776,12 @@ class SWEProcessor:
     
     def create_plot(self):
         """Create and save the plot"""
+        snotel_ts = self.snotel_ts
+        
         fig, ax = SWEPlotter.plot_basin_average(self.times, 
                                                 self.simulated_avg, 
-                                                self.snodas_avg)
+                                                self.snodas_avg,
+                                                snotel_ts)
         SWEPlotter.customize_x_axis(ax, 
                                     self.x_major_interval, 
                                     self.x_minor_interval, 
@@ -725,14 +805,20 @@ class SWEProcessor:
             return
             
         try:
-            # Create DataFrame with times and basin average SWE values
-            df = pd.DataFrame({
+            # Create basic DataFrame with times and basin average SWE values
+            data_dict = {
                 'timestamp': self.times,
-                'simulated_avg_swe': self.simulated_avg,
-                'snodas_avg_swe' : self.snodas_avg
-            })
+                'Simulated SWE': self.simulated_avg,
+                'SNODAS SWE': self.snodas_avg
+            }
             
-            # Save to csv
+            # Add SNOTEL data if available
+            if self.snotel_ts:
+                for station_id, station_data in self.snotel_ts.items():
+                    data_dict[f'SNOTEL {station_id} SWE'] = station_data['swe']
+            
+            # Create DataFrame and save to CSV
+            df = pd.DataFrame(data_dict)
             df.to_csv(self.csv_output, index=False)
             print(f"Basin average SWE data table saved to {self.csv_output}")
         except Exception as e:
@@ -744,12 +830,12 @@ class SWEProcessor:
         t0 = time.time()
         self.load_data()
         t1 = time.time()
-        print(f"load_data time: {t1-t0:.5f}s")
+        #print(f"load_data time: {t1-t0:.5f}s")
 
         t2 = time.time()
         self.analyze_data()
         t3 = time.time()
-        print(f"analyze_data time: {t3-t2:.5f}s")
+        print(f"analyze_data time: {t3-t2:.5f}s\n")
 
         # Export data to csv if csv_output is provided
         if self.csv_output:
@@ -767,9 +853,10 @@ class SWEProcessor:
             self.create_plot()
             t9 = time.time()
             print(f"create_plot time: {t9-t8:.5f}s")
-            print(f"\ntotal processing time: {t9-t0:.5f}s")
             print(f"\nload_data percentage of total runtime: {((t1-t0)/(t9-t0))*100:.2f}%")
+            print(f"analyze_data percentage of total runtime: {((t3-t2)/(t9-t0))*100:.2f}%")
             print(f"create_plot percentage of total runtime: {(t9-t8)/(t9-t0)*100:.2f}%")
+            print(f"\ntotal runtime: {t9-t0:.5f}s")
 
 def get_options(args_list=None):
     """

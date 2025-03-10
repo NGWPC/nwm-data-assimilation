@@ -2,6 +2,7 @@ import re
 import fsspec
 import pandas as pd
 import geopandas as gpd
+import numpy as np
 from shapely.geometry import Point
 
 class SnotelDataLoader:
@@ -50,6 +51,7 @@ class SnotelDataLoader:
                 continue
                 
             # Use regex to extract information from the filename
+            # Only works with files created by the pre-processor script
             match = re.search(r'(\d+)_LAT_([\d.-]+)_LON_([\d.-]+)\.csv', filename)
             
             if match:
@@ -62,13 +64,13 @@ class SnotelDataLoader:
                     'latitude': latitude,
                     'longitude': longitude,
                     'filename': filename,
-                    'geometry': Point(longitude, latitude)  # Create Point geometry (x=lon, y=lat)
+                    'geometry': Point(longitude, latitude)
                 })
         
         # Convert to GeoDataFrame for spatial operations
         stations_gdf = gpd.GeoDataFrame(data, geometry='geometry')
         
-        # Assuming WGS 84 (EPSG:4326) for the coordinates
+        # Converts to EPSG:4326 for the coordinates
         stations_gdf.crs = "EPSG:4326"
         
         return stations_gdf
@@ -77,6 +79,7 @@ class SnotelDataLoader:
     def load_snotel_data(stations_in_basin, date):
         """
         Load SNOTEL SWE data for stations within the basin for a specific date.
+        Optimized for loading a single timestep. 
         
         Parameters
         ----------
@@ -111,7 +114,7 @@ class SnotelDataLoader:
                     # Convert the target date to datetime
                     target_date = pd.to_datetime(date)
                     
-                    # Filter for rows where the date matches our target date
+                    # Filter for rows where the date matches the target date
                     df['date'] = pd.to_datetime(df['date'])
                     df_filtered = df[df['date'].dt.date == target_date.date()]
                     
@@ -134,6 +137,140 @@ class SnotelDataLoader:
         # Convert list to DataFrame
         snotel_df = pd.DataFrame(snotel_data_list)       
         return snotel_df
+        
+    @staticmethod
+    def get_snotel_timeseries(basin_geometry, times, stations_in_basin):
+        """
+        Get time series data for SNOTEL stations within a basin.
+        Optimized for loading multiple timesteps.
+        
+        Parameters
+        ----------
+        basin_geometry : shapely.geometry
+            Basin geometry to use for filtering stations
+        times : numpy.ndarray
+            Array of datetime objects representing the time points to extract
+        stations_in_basin : geopandas.GeoDataFrame
+            GeoDataFrame of SNOTEL stations that are within the basin
+        
+        Returns
+        -------
+        pandas.DataFrame
+            DataFrame with station information and SWE values for each timestamp
+        """
+        
+        if stations_in_basin.empty:
+            print("No SNOTEL stations found within the basin.")
+            return pd.DataFrame()
+        
+        start_date = pd.Timestamp(min(times))
+        end_date = pd.Timestamp(max(times))
+
+        # Initialize a list to store all station data
+        all_station_data = []
+        
+        # create an S3 filesystem
+        fs = fsspec.filesystem('s3')
+        
+        # Process each station in the basin
+        for _, station in stations_in_basin.iterrows():
+            filename = station['filename']
+            s3_path = f"s3://ngwpc-forcing/snotel_csv/{filename}"
+            
+            try:
+                # Open and read the CSV file
+                with fs.open(s3_path, 'r') as file:
+                    df = pd.read_csv(file)
+                    df['date'] = pd.to_datetime(df['date'])
+                    
+                    # Filter for dates within time range
+                    df_filtered = df[(df['date'] >= start_date) & (df['date'] <= end_date)].copy()
+                    
+                    if not df_filtered.empty:
+                        # Add station info to each row, then append to the list
+                        df_filtered.loc[:, 'station_id'] = station['station_id']
+                        df_filtered.loc[:, 'latitude'] = station['latitude']
+                        df_filtered.loc[:, 'longitude'] = station['longitude']
+                        all_station_data.append(df_filtered)
+                    else:
+                        print(f"No data found for station {station['station_id']} in date range")
+            except Exception as e:
+                print(f"Error loading SNOTEL data for station {station['station_id']}: {e}")
+        
+        # Combine all station data
+        if all_station_data:
+            snotel_df = pd.concat(all_station_data)
+            return snotel_df
+        else:
+            return pd.DataFrame()
+       
+    @staticmethod
+    def extract_snotel_timeseries(snotel_df, times):
+        """
+        Extract SNOTEL SWE values for specified dates from all stations.
+        Assumes data is pre-processed to contain only 06z measurements.
+        
+        Parameters
+        ----------
+        snotel_df : pandas.DataFrame
+            DataFrame with SNOTEL data for stations within the basin
+        times : numpy.ndarray
+            Array of datetime objects representing the time points to extract
+        
+        Returns
+        -------
+        dict
+            Dictionary with station_id as keys and arrays of SWE values as values
+        """
+        if snotel_df.empty:
+            return {}
+        
+        # Convert times to dates once and create lookup dictionary
+        time_dates = [pd.to_datetime(t).date() if not isinstance(t, pd.Timestamp) 
+                      else t.date() for t in times]
+        time_to_idx = {date: idx for idx, date in enumerate(time_dates)}
+        
+        # Add date column
+        snotel_df['date_only'] = snotel_df['date'].dt.date
+        
+        # Get unique station IDs
+        station_ids = snotel_df['station_id'].unique()
+        
+        # Initialize a dictionary to store results
+        snotel_data = {}
+        
+        for station_id in station_ids:
+            # Filter data for this station
+            station_df = snotel_df[snotel_df['station_id'] == station_id]
+            
+            # Create a time series for this station
+            swe_values = np.full(len(times), np.nan)
+            
+            # Create date->SWE lookup dictionary
+            # If multiple measurements per day, take the first one
+            date_swe_dict = {}
+            for _, row in station_df.iterrows():
+                date = row['date_only']
+                if date not in date_swe_dict:
+                    date_swe_dict[date] = row['snotel_swe']
+            
+            # Fill SWE values using lookup dictionaries
+            for date, idx in time_to_idx.items():
+                if date in date_swe_dict:
+                    swe_values[idx] = date_swe_dict[date]
+            
+            # Only add stations that have at least some valid data
+            if not np.isnan(swe_values).all():
+                snotel_data[station_id] = {
+                    'swe': swe_values,
+                    'latitude': station_df['latitude'].iloc[0],
+                    'longitude': station_df['longitude'].iloc[0]
+                }
+            else:
+                print(f"No measurements found for station {station_id} - excluding from results")
+        
+        return snotel_data
+
 
 class SnotelCalculator:
     @staticmethod
@@ -159,11 +296,15 @@ class SnotelCalculator:
         
         # Filter stations within the basin
         stations_in_basin = stations_gdf[stations_gdf.intersects(basin_geometry)]
-        station_return = []
-        station_return.append(int(stations_in_basin['station_id'].iloc[0]))
         
-        print(f"   {len(station_return)} SNOTEL stations found in basin: {station_return}")
+        #print(f"stations_in_basin: {stations_in_basin}")
 
+        if not stations_in_basin['station_id'].empty:
+            station_return = []
+            for stations in stations_in_basin['station_id']:
+                station_return.append(stations)
+            print(f"{len(station_return)} SNOTEL stations found in basin: {station_return}")
+        
         return stations_in_basin
 
 class SnotelPlotter:
