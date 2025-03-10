@@ -85,12 +85,13 @@ class FileLoader:
         if not csv_files:
             raise ValueError("No CSV files found in the directory. Processing halted.")
         
-        # copied from convert_swe.py
+        # Same code as convert_swe
         catchment_ids = np.array([
             int(match.group(1))  # Extract the number safely
             for f in csv_files
             if (match := re.search(r'cat-(\d+)', os.path.basename(f)))  # Store the match
         ])
+
         
         # Stop if csv_files was not empty, but no catchment_ids were parsed
         if len(catchment_ids) == 0:

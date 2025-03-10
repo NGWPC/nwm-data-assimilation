@@ -296,8 +296,6 @@ class SnotelCalculator:
         
         # Filter stations within the basin
         stations_in_basin = stations_gdf[stations_gdf.intersects(basin_geometry)]
-        
-        #print(f"stations_in_basin: {stations_in_basin}")
 
         if not stations_in_basin['station_id'].empty:
             station_return = []

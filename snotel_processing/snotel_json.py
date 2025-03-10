@@ -130,7 +130,7 @@ class DataParser:
         
         # If no entries, return empty DataFrame and error
         if df.empty:
-            raise ValueError("Empty swe_data returned to dataframe.")
+            print("Empty swe_data returned to dataframe.")
             return pd.DataFrame(columns=['triplet', 'date', 'snotel_swe'])
         
         # Convert date column to datetime
@@ -141,7 +141,7 @@ class DataParser:
         
         # If no matching timesteps, return empty DataFrame and error
         if df.empty:
-            raise ValueError("No matching time entries in DataFrame")
+            print("No matching time entries in DataFrame")
             return pd.DataFrame(columns=['triplet', 'date', 'snotel_swe'])
         
         # Create new date column for 06z
