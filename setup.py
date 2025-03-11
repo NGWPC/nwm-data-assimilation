@@ -15,7 +15,8 @@ setup(
         'pandas',
         's3fs',
         'dask[complete]',  # Includes Dask core + recommended dependencies
-        'distributed'  # Adds support for parallel computing
+        'distributed',  # Adds support for parallel computing
+        'requests'
     ],
     python_requires='>=3.8',
 )
