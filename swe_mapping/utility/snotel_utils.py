@@ -327,46 +327,36 @@ class SnotelPlotter:
         """
         if snotel_data.empty:
             return ax
-        
-        # Plot each SNOTEL station
-        for _, station in snotel_data.iterrows():
-            swe_value = f"{station['swe']:.2f}"
-            color = '#990000'
-            
-            # Add text of swe_values at location
-            ax.text(
-                station['longitude'] + 0.0005, 
-                station['latitude'] - 0.0005, 
-                swe_value,
-                fontsize=11,
-                ha='left',
-                va='top',
-                transform=proj,
-                fontweight='bold',
-                color= color
-            )
-            
-            # Add a marker for the station location
+
+        color='#990000'
+
+        if not snotel_data.empty:
+            # Plot all stations
             ax.plot(
-                station['longitude'], 
-                station['latitude'], 
+                snotel_data['longitude'], 
+                snotel_data['latitude'], 
                 'o',
                 markersize=3,
                 transform=proj,
-                color=color
+                color=color,
+                label='SNOTEL Stations (SWE)'
             )
-
-        # Check if the dataframe has any rows
-        if not snotel_data.empty:
-            # Create empty line to create legend once (instead of within for loop)
-            custom_lines = [Line2D([0], [0], marker='o', color='w', 
-                                  markerfacecolor=color, markersize=5,
-                                  label='SNOTEL Stations (SWE)')]
-    
-            ax.legend(handles=custom_lines,
-                loc='upper right',
-                fontsize=10, 
-                framealpha=0.5,
-                bbox_to_anchor=(1.25, 1.05))
+            
+            # Add text labels iteratively
+            for _, station in snotel_data.iterrows():
+                swe_value = f"{station['swe']:.2f}"
+                ax.text(
+                    station['longitude'] + 0.0005,
+                    station['latitude'] - 0.0005,
+                    swe_value,
+                    fontsize=11,
+                    ha='left',
+                    va='top',
+                    transform=proj,
+                    fontweight='bold',
+                    color=color
+                )
+            # Add the legend to the plot, using the specified label
+            ax.legend(loc='upper right', fontsize=10, framealpha=0.5, bbox_to_anchor=(1.25, 1.05))
         
         return ax
