@@ -37,11 +37,11 @@ class DataLoader:
         return SnotelDataLoader.parse_snotel_filenames(filenames)
 
     @staticmethod
-    def load_snotel_data(stations_in_basin, date):
+    def load_snotel_data(stations_in_basin, date, fs):
         """
         Load SNOTEL SWE data for stations within the basin for a specific date.
         """
-        return SnotelDataLoader.load_snotel_data(stations_in_basin, date)
+        return SnotelDataLoader.load_snotel_data(stations_in_basin, date, fs)
 
     @staticmethod
     def read_geo(gpkg_file):
@@ -209,6 +209,7 @@ class SimSWEProcessor:
         self.stations_gdf = None
         self.stations_in_basin = None
         self.snotel_data = None
+        self.snotel_filesystem = None
 
 
     def run(self):
@@ -222,13 +223,13 @@ class SimSWEProcessor:
         self.basin_geometry, self.bounds = Calculator.get_basin_geometry(self.basin_gdf)        
         
         # For SNOTEL data
-        self.snotel_filenames = DataLoader.list_snotel_filenames()
+        self.snotel_filenames, self.snotel_filesystem = DataLoader.list_snotel_filenames()
         self.stations_gdf = DataLoader.parse_snotel_filenames(self.snotel_filenames)
         self.stations_in_basin = Calculator.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
 
         # Load SNOTEL data if stations exist in basin
         if not self.stations_in_basin.empty:
-            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, self.date)  
+            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, self.date, self.snotel_filesystem)  
 
     def process_data(self):
         self.swe_gdf = Calculator.process_data( self.sim_ds, self.date, self.basin_gdf)

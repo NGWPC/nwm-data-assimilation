@@ -7,6 +7,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+import os
 from shapely.geometry import Point
 from ..utility.swe_minmax import get_minmax
 from ..utility.snotel_utils import SnotelDataLoader, SnotelCalculator, SnotelPlotter
@@ -30,7 +31,29 @@ class DataLoader:
             S3 path to the SNODAS NetCDF file
         """
         file_date = date.replace('-', '')
-        snodas_file = f"s3://ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
+        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
+
+        try:
+            snodas_file = f"{S3_MOUNT_POINT}/ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
+            if os.path.exists(snodas_file):
+                return snodas_file
+            else:
+                print("local mount not found, reverting to s3 uri")
+                raise Exception("Trigger catch block to try S3 uri")
+        except:
+            try:
+                snodas_file = f"s3://ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
+                fs = fsspec.filesystem('s3')
+                if fs.exists(snodas_file):
+                    return snodas_file
+                else:
+                    print(f"File not found in S3: {snodas_file}")
+                    raise FileNotFoundError(f"SNODAS file for date {date} not found in any location")
+            except FileNotFoundError:
+                raise
+            except Exception as e:
+                print(f"Could not connect to aws s3: {str(e)}")
+                raise
         return snodas_file
 
     @staticmethod
@@ -48,11 +71,11 @@ class DataLoader:
         return SnotelDataLoader.parse_snotel_filenames(filenames)
     
     @staticmethod
-    def load_snotel_data(stations_in_basin, date):
+    def load_snotel_data(stations_in_basin, date, fs):
         """
         Load SNOTEL SWE data for stations within the basin for a specific date.
         """
-        return SnotelDataLoader.load_snotel_data(stations_in_basin, date)
+        return SnotelDataLoader.load_snotel_data(stations_in_basin, date, fs)
 
     @staticmethod
     def load_netcdf(snodas_file):
@@ -378,6 +401,7 @@ class SNODASProcessor:
         self.stations_gdf = None
         self.stations_in_basin = None
         self.snotel_data = None
+        self.snotel_filesystem = None
 
         # Initialize plot attributes
         self.raw_fig = None
@@ -407,13 +431,13 @@ class SNODASProcessor:
         self.snodas_ds = DataLoader.load_netcdf(self.snodas_file)
         
         # For SNOTEL data
-        self.snotel_filenames = DataLoader.list_snotel_filenames()
+        self.snotel_filenames, self.snotel_filesystem = DataLoader.list_snotel_filenames()
         self.stations_gdf = DataLoader.parse_snotel_filenames(self.snotel_filenames)
         self.stations_in_basin = Calculator.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
 
         # Load SNOTEL data if stations exist in basin
         if not self.stations_in_basin.empty:
-            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, self.date)        
+            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, self.date, self.snotel_filesystem)        
     
     def process_raw(self):
         """

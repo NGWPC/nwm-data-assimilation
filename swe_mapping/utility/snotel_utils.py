@@ -3,6 +3,7 @@ import fsspec
 import pandas as pd
 import geopandas as gpd
 import numpy as np
+import os
 from shapely.geometry import Point
 
 class SnotelDataLoader:
@@ -16,16 +17,32 @@ class SnotelDataLoader:
         list
             List of filenames (strings) of SNOTEL CSV files in the S3 bucket
         """
-        fs = fsspec.filesystem('s3')
-        path = 'ngwpc-forcing/snotel_csv/'
-        objects = fs.ls(path)
 
+        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
+        path = 'ngwpc-forcing/snotel_csv/'
+        
+        try:
+            fs = fsspec.filesystem('local')
+            full_path = f"{S3_MOUNT_POINT}/{path}"
+            objects = fs.ls(full_path)
+            if not objects:
+                print("local mount not found, reverting to s3 uri")
+                raise Exception("Trigger catch block to try S3 uri")
+        except:
+            try:
+                fs = fsspec.filesystem('s3')
+                objects = fs.ls(path)
+                if not objects:
+                   raise Exception("Files not found anywhere")
+            except:
+                raise(FileNotFoundError)
+        
         filenames = [obj.split('/')[-1] for obj in objects if '/' in obj]
         
         # Filter out empty strings
         snotel_filenames = [f for f in filenames if f]
 
-        return snotel_filenames
+        return snotel_filenames, fs
 
     @staticmethod
     def parse_snotel_filenames(filenames):
@@ -76,7 +93,7 @@ class SnotelDataLoader:
         return stations_gdf
     
     @staticmethod
-    def load_snotel_data(stations_in_basin, date):
+    def load_snotel_data(stations_in_basin, date, fs):
         """
         Load SNOTEL SWE data for stations within the basin for a specific date.
         Optimized for loading a single timestep. 
@@ -98,15 +115,19 @@ class SnotelDataLoader:
         
         # Initialize a list to store data
         snotel_data_list = []
-        
-        # S3 filesystem
-        fs = fsspec.filesystem('s3')
-        
+
+        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
+        path = 'ngwpc-forcing/snotel_csv'
+
+        if 'local' in fs.protocol:
+            base_path = f"{S3_MOUNT_POINT}/{path}"
+        elif 's3' in fs.protocol:
+            base_path = f"s3://{path}"
+
         # Process each station in the basin
         for _, station in stations_in_basin.iterrows():
             filename = station['filename']
-            s3_path = f"s3://ngwpc-forcing/snotel_csv/{filename}"
-            
+            s3_path = f"{base_path}/{filename}"
             try:
                 # Open and read the CSV file
                 with fs.open(s3_path, 'r') as file:
@@ -139,7 +160,7 @@ class SnotelDataLoader:
         return snotel_df
         
     @staticmethod
-    def get_snotel_timeseries(basin_geometry, times, stations_in_basin):
+    def get_snotel_timeseries(basin_geometry, times, stations_in_basin, fs):
         """
         Get time series data for SNOTEL stations within a basin.
         Optimized for loading multiple timesteps.
@@ -169,14 +190,18 @@ class SnotelDataLoader:
         # Initialize a list to store all station data
         all_station_data = []
         
-        # create an S3 filesystem
-        fs = fsspec.filesystem('s3')
+        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
+        path = 'ngwpc-forcing/snotel_csv/'
+
+        if 'local' in fs.protocol:
+            base_path = f"{S3_MOUNT_POINT}/{path}"
+        elif 's3' in fs.protocol:
+            base_path = f"s3://{path}"
         
         # Process each station in the basin
         for _, station in stations_in_basin.iterrows():
             filename = station['filename']
-            s3_path = f"s3://ngwpc-forcing/snotel_csv/{filename}"
-            
+            s3_path = f"{base_path}/{filename}"
             try:
                 # Open and read the CSV file
                 with fs.open(s3_path, 'r') as file:
@@ -360,3 +385,4 @@ class SnotelPlotter:
             ax.legend(loc='upper right', fontsize=10, framealpha=0.5, bbox_to_anchor=(1.25, 1.05))
         
         return ax
+
