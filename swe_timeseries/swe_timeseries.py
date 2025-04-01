@@ -132,14 +132,14 @@ class S3Loader:
             if os.path.exists(s3_path):
                 return s3_path, basin_id
             else:
-                raise FileNotFoundError(f"Could not find local csv file for basin {basin_id}")
+                raise FileNotFoundError(f"Could not find local csv file: {s3_path}")
         else:
             fs = fsspec.filesystem('s3')
             s3_path = f"s3://ngwpc-forcing/snodas_csv/gages-{basin_id}_swe.csv"
             if fs.exists(s3_path):
                 return s3_path, basin_id 
             else:
-                raise FileNotFoundError(f"Could not find S3 csv file for basin {basin_id}")
+                raise FileNotFoundError(f"Could not find S3 csv file: {s3_path}")
 
     @staticmethod
     def read_csv_from_s3(s3_path):
