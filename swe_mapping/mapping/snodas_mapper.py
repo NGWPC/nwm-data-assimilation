@@ -16,7 +16,7 @@ from ..utility.plot_utils import PlotUtils
 
 class DataLoader:
     @staticmethod
-    def snodas_path_constructor(date):
+    def snodas_path_constructor(date, s3_mount_point, direct_s3):
         """
         Construct the S3 path to SNODAS NetCDF file.
         
@@ -31,37 +31,27 @@ class DataLoader:
             S3 path to the SNODAS NetCDF file
         """
         file_date = date.replace('-', '')
-        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
 
-        try:
-            snodas_file = f"{S3_MOUNT_POINT}/ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
+        if not direct_s3:
+            snodas_file = f"{s3_mount_point}/ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
             if os.path.exists(snodas_file):
                 return snodas_file
             else:
-                print("local mount not found, reverting to s3 uri")
-                raise Exception("Trigger catch block to try S3 uri")
-        except:
-            try:
-                snodas_file = f"s3://ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
-                fs = fsspec.filesystem('s3')
-                if fs.exists(snodas_file):
-                    return snodas_file
-                else:
-                    print(f"File not found in S3: {snodas_file}")
-                    raise FileNotFoundError(f"SNODAS file for date {date} not found in any location")
-            except FileNotFoundError:
-                raise
-            except Exception as e:
-                print(f"Could not connect to aws s3: {str(e)}")
-                raise
-        return snodas_file
+                raise FileNotFoundError(f"File not found in local mount: {snodas_file}")
+        else:
+            snodas_file = f"s3://ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
+            fs = fsspec.filesystem('s3')
+            if fs.exists(snodas_file):
+                return snodas_file
+            else:
+                raise FileNotFoundError(f"File not found in S3: {snodas_file}")
 
     @staticmethod
-    def list_snotel_filenames():
+    def list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3):
         """
         List SNOTEL CSV files available in the S3 bucket.
         """
-        return SnotelDataLoader.list_snotel_filenames()
+        return SnotelDataLoader.list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3)
 
     @staticmethod
     def parse_snotel_filenames(filenames):
@@ -71,11 +61,11 @@ class DataLoader:
         return SnotelDataLoader.parse_snotel_filenames(filenames)
     
     @staticmethod
-    def load_snotel_data(stations_in_basin, date, fs):
+    def load_snotel_data(stations_in_basin, date, fs, s3_mount_point, snotel_s3_path):
         """
         Load SNOTEL SWE data for stations within the basin for a specific date.
         """
-        return SnotelDataLoader.load_snotel_data(stations_in_basin, date, fs)
+        return SnotelDataLoader.load_snotel_data(stations_in_basin, date, fs, s3_mount_point, snotel_s3_path)
 
     @staticmethod
     def load_netcdf(snodas_file):
@@ -368,7 +358,7 @@ class Plotter:
 
 
 class SNODASProcessor:
-    def __init__(self, date=None, gpkg_file=None, output_file_raw=None, output_file_lumped=None):
+    def __init__(self, date=None, gpkg_file=None, output_file_raw=None, output_file_lumped=None, direct_s3=False):
         """
         Initialize the SNODAS Processor.
         
@@ -388,6 +378,7 @@ class SNODASProcessor:
         self.gpkg_file = gpkg_file
         self.output_file_raw = output_file_raw
         self.output_file_lumped = output_file_lumped
+        self.direct_s3 = direct_s3
         
         # Initialize data attributes
         self.snodas_file = None
@@ -395,6 +386,7 @@ class SNODASProcessor:
         self.basin_gdf = None
         self.basin_geometry = None
         self.bounds = None
+        self.s3_mount_point = None
         
         # Initialize SNOTEL-related attributes
         self.snotel_filenames = None
@@ -402,6 +394,7 @@ class SNODASProcessor:
         self.stations_in_basin = None
         self.snotel_data = None
         self.snotel_filesystem = None
+        self.snotel_s3_path = None
 
         # Initialize plot attributes
         self.raw_fig = None
@@ -425,19 +418,28 @@ class SNODASProcessor:
         """
         Load and prepare all required data for processing.
         """
-        self.snodas_file = DataLoader.snodas_path_constructor(self.date)
+
+        self.s3_mount_point = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
+        self.snotel_s3_path = 'ngwpc-forcing/snotel_csv'
+        self.snodas_file = DataLoader.snodas_path_constructor(self.date, self.s3_mount_point, self.direct_s3)
         self.basin_gdf = DataLoader.read_geo(self.gpkg_file)
         self.basin_geometry, self.bounds = DataLoader.get_basin_geometry(self.basin_gdf)
         self.snodas_ds = DataLoader.load_netcdf(self.snodas_file)
         
         # For SNOTEL data
-        self.snotel_filenames, self.snotel_filesystem = DataLoader.list_snotel_filenames()
+        self.snotel_filenames, self.snotel_filesystem = DataLoader.list_snotel_filenames(self.s3_mount_point, 
+                                                                                         self.snotel_s3_path,
+                                                                                         self.direct_s3)
         self.stations_gdf = DataLoader.parse_snotel_filenames(self.snotel_filenames)
         self.stations_in_basin = Calculator.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
 
         # Load SNOTEL data if stations exist in basin
         if not self.stations_in_basin.empty:
-            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, self.date, self.snotel_filesystem)        
+            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, 
+                                                           self.date, 
+                                                           self.snotel_filesystem, 
+                                                           self.s3_mount_point,
+                                                           self.snotel_s3_path)        
     
     def process_raw(self):
         """
@@ -526,6 +528,9 @@ def get_options(args_list=None):
                         help="Path where raw visualization output is saved.")
     parser.add_argument('output_file_lumped', type=str,
                         help="Path where catchment-averaged output is saved.")
+    parser.add_argument('--direct_s3', action='store_true', 
+                        help='Use direct S3 access instead of local mount')
+    args_list = list(args_list)
     return parser.parse_args(args_list)
 
 
@@ -545,7 +550,8 @@ def main(args_list=None):
         date=args.date,
         gpkg_file=args.gpkg_file,
         output_file_raw=args.output_file_raw,
-        output_file_lumped=args.output_file_lumped
+        output_file_lumped=args.output_file_lumped,
+        direct_s3=args.direct_s3
     )
 
     processor.run()

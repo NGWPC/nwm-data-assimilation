@@ -23,11 +23,11 @@ class DataLoader:
         return sim_ds
 
     @staticmethod
-    def list_snotel_filenames():
+    def list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3):
         """
         List SNOTEL CSV files available in the S3 bucket.
         """
-        return SnotelDataLoader.list_snotel_filenames()
+        return SnotelDataLoader.list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3)
 
     @staticmethod
     def parse_snotel_filenames(filenames):
@@ -37,11 +37,11 @@ class DataLoader:
         return SnotelDataLoader.parse_snotel_filenames(filenames)
 
     @staticmethod
-    def load_snotel_data(stations_in_basin, date, fs):
+    def load_snotel_data(stations_in_basin, date, fs, s3_mount_point, snotel_s3_path):
         """
         Load SNOTEL SWE data for stations within the basin for a specific date.
         """
-        return SnotelDataLoader.load_snotel_data(stations_in_basin, date, fs)
+        return SnotelDataLoader.load_snotel_data(stations_in_basin, date, fs, s3_mount_point, snotel_s3_path)
 
     @staticmethod
     def read_geo(gpkg_file):
@@ -179,7 +179,7 @@ class Plotter:
 
 
 class SimSWEProcessor:
-    def __init__(self, netcdf_file = None, gpkg_file = None, date=None, output_file=None, mode=None):
+    def __init__(self, netcdf_file = None, gpkg_file = None, date=None, output_file=None, mode=None, direct_s3=False):
         
         # Initialize input parameters
         self.netcdf_file = netcdf_file
@@ -187,6 +187,7 @@ class SimSWEProcessor:
         self.date = date
         self.output_file = output_file
         self.mode = mode
+        self.direct_s3 = direct_s3
         
         # Initialize data attributes        
         self.basin_gdf = None
@@ -210,7 +211,8 @@ class SimSWEProcessor:
         self.stations_in_basin = None
         self.snotel_data = None
         self.snotel_filesystem = None
-
+        self.snotel_s3_path = None
+        self.s3_mount_point = None
 
     def run(self):
         self.setup_data()
@@ -218,18 +220,26 @@ class SimSWEProcessor:
         self.plot_swe()
 
     def setup_data(self):
+        self.snotel_s3_path = 'ngwpc-forcing/snotel_csv'
+        self.s3_mount_point = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
         self.basin_gdf = DataLoader.read_geo(self.gpkg_file)
         self.sim_ds = DataLoader.load_netcdf(self.netcdf_file)
         self.basin_geometry, self.bounds = Calculator.get_basin_geometry(self.basin_gdf)        
         
         # For SNOTEL data
-        self.snotel_filenames, self.snotel_filesystem = DataLoader.list_snotel_filenames()
+        self.snotel_filenames, self.snotel_filesystem = DataLoader.list_snotel_filenames(self.s3_mount_point, 
+                                                                                         self.snotel_s3_path,
+                                                                                         self.direct_s3)
         self.stations_gdf = DataLoader.parse_snotel_filenames(self.snotel_filenames)
         self.stations_in_basin = Calculator.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
 
         # Load SNOTEL data if stations exist in basin
         if not self.stations_in_basin.empty:
-            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, self.date, self.snotel_filesystem)  
+            self.snotel_data = DataLoader.load_snotel_data(self.stations_in_basin, 
+                                                           self.date, 
+                                                           self.snotel_filesystem,
+                                                           self.s3_mount_point,
+                                                           self.snotel_s3_path)  
 
     def process_data(self):
         self.swe_gdf = Calculator.process_data( self.sim_ds, self.date, self.basin_gdf)
@@ -265,6 +275,8 @@ def get_options(args_list=None):
     parser.add_argument('--mode', type=str, default='plot',
                        choices=['plot', 'scan'],
                        help="Operation mode: 'plot' or 'scan'")
+    parser.add_argument('--direct_s3', action='store_true', 
+                        help='Use direct S3 access instead of local mount')
     return parser.parse_args(args_list)
 
 def main(args_list=None):
@@ -274,7 +286,8 @@ def main(args_list=None):
         gpkg_file = args.gpkg_file, 
         date = args.date, 
         output_file = args.output_file, 
-        mode = args.mode
+        mode = args.mode,
+        direct_s3 = args.direct_s3
         )
     processor.run()
 

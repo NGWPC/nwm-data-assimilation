@@ -8,35 +8,30 @@ from shapely.geometry import Point
 
 class SnotelDataLoader:
     @staticmethod
-    def list_snotel_filenames():
+    def list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3):
         """
         List SNOTEL CSV files available in the S3 bucket.
         
         Returns
         -------
         list
-            List of filenames (strings) of SNOTEL CSV files in the S3 bucket
+            List of filenames (strings) of SNOTEL CSV files in the S3 bucket or local mount
         """
 
-        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
-        path = 'ngwpc-forcing/snotel_csv/'
+        path = snotel_s3_path
         
-        try:
+        if not direct_s3:
             fs = fsspec.filesystem('local')
-            full_path = f"{S3_MOUNT_POINT}/{path}"
+            full_path = f"{s3_mount_point}/{path}"
             objects = fs.ls(full_path)
             if not objects:
-                print("local mount not found, reverting to s3 uri")
-                raise Exception("Trigger catch block to try S3 uri")
-        except:
-            try:
-                fs = fsspec.filesystem('s3')
-                objects = fs.ls(path)
-                if not objects:
-                   raise Exception("Files not found anywhere")
-            except:
-                raise(FileNotFoundError)
-        
+                raise FileNotFoundError(f"Local snotel files not found at {full_path}")
+        else:
+            fs = fsspec.filesystem('s3')
+            objects = fs.ls(path)
+            if not objects:
+               raise FileNotFoundError(f"Snotel files not found on S3: {path}")
+    
         filenames = [obj.split('/')[-1] for obj in objects if '/' in obj]
         
         # Filter out empty strings
@@ -93,7 +88,7 @@ class SnotelDataLoader:
         return stations_gdf
     
     @staticmethod
-    def load_snotel_data(stations_in_basin, date, fs):
+    def load_snotel_data(stations_in_basin, date, fs, s3_mount_point, snotel_s3_path):
         """
         Load SNOTEL SWE data for stations within the basin for a specific date.
         Optimized for loading a single timestep. 
@@ -116,11 +111,10 @@ class SnotelDataLoader:
         # Initialize a list to store data
         snotel_data_list = []
 
-        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
-        path = 'ngwpc-forcing/snotel_csv'
+        path = snotel_s3_path
 
         if 'local' in fs.protocol:
-            base_path = f"{S3_MOUNT_POINT}/{path}"
+            base_path = f"{s3_mount_point}/{path}"
         elif 's3' in fs.protocol:
             base_path = f"s3://{path}"
 
@@ -160,7 +154,7 @@ class SnotelDataLoader:
         return snotel_df
         
     @staticmethod
-    def get_snotel_timeseries(basin_geometry, times, stations_in_basin, fs):
+    def get_snotel_timeseries(basin_geometry, times, stations_in_basin, fs, s3_mount_point, snotel_s3_path):
         """
         Get time series data for SNOTEL stations within a basin.
         Optimized for loading multiple timesteps.
@@ -190,11 +184,10 @@ class SnotelDataLoader:
         # Initialize a list to store all station data
         all_station_data = []
         
-        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
-        path = 'ngwpc-forcing/snotel_csv/'
+        path = snotel_s3_path
 
         if 'local' in fs.protocol:
-            base_path = f"{S3_MOUNT_POINT}/{path}"
+            base_path = f"{s3_mount_point}/{path}"
         elif 's3' in fs.protocol:
             base_path = f"s3://{path}"
         

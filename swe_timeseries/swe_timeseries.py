@@ -64,7 +64,10 @@ class FileLoader:
         pattern = os.path.join(directory, "cat-*.csv")
         csv_files = glob.glob(pattern)
 
-        return csv_files
+        if csv_files:
+            return csv_files
+        else:
+            raise Exception(f"No csv files found in {directory}")
 
     @staticmethod
     def get_ids(csv_files):
@@ -103,7 +106,7 @@ class S3Loader:
     """Handles operations related to S3 storage"""
     
     @staticmethod
-    def construct_s3_path(gpkg_file):
+    def construct_s3_path(gpkg_file, direct_s3, s3_mount_point, snodas_s3_path):
         """
         Parse/construct SNODAS s3 path from gpkg filename.
         
@@ -120,28 +123,23 @@ class S3Loader:
         filename = os.path.basename(gpkg_file)
         prefix = filename.split('.')[0]
         basin_id = re.search(r'(\d+)', prefix).group(1)
-        S3_MOUNT_POINT = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
-        path = 'ngwpc-forcing/snodas_csv/'
+        path = snodas_s3_path
 
         # Construct the path using the numeric part and s3 options
-        try:
+        if not direct_s3:
             fs = fsspec.filesystem('local')
-            s3_path = f"{S3_MOUNT_POINT}/{path}/gages-{basin_id}_swe.csv"
+            s3_path = f"{s3_mount_point}/{path}/gages-{basin_id}_swe.csv"
             if os.path.exists(s3_path):
                 return s3_path, basin_id
             else:
-                print("local mount not found, reverting to s3 uri")
-                raise Exception("Trigger catch block to try s3 uri")
-        except:
-            try:
-                fs = fsspec.filesystem('s3')
-                s3_path = f"s3://ngwpc-forcing/snodas_csv/gages-{basin_id}_swe.csv"
-                if fs.exists(s3_path):
-                    return s3_path, basin_id
-                else:
-                    raise Exception("File not found anywhere")   
-            except:
-                raise(FileNotFoundError)
+                raise FileNotFoundError(f"Could not find local csv file for basin {basin_id}")
+        else:
+            fs = fsspec.filesystem('s3')
+            s3_path = f"s3://ngwpc-forcing/snodas_csv/gages-{basin_id}_swe.csv"
+            if fs.exists(s3_path):
+                return s3_path, basin_id 
+            else:
+                raise FileNotFoundError(f"Could not find S3 csv file for basin {basin_id}")
 
     @staticmethod
     def read_csv_from_s3(s3_path):
@@ -651,7 +649,7 @@ class SWEPlotter:
 class SWEProcessor:
     """Main class for processing and visualizing SWE data."""
     
-    def __init__(self, csv_directory=None, gpkg_file=None, plot_output=None, csv_output=None):
+    def __init__(self, csv_directory=None, gpkg_file=None, plot_output=None, csv_output=None, direct_s3=False):
         """
         Initialize SWE processor with input and output parameters.
         
@@ -670,6 +668,7 @@ class SWEProcessor:
         self.gpkg_file = gpkg_file
         self.plot_output = plot_output
         self.csv_output = csv_output
+        self.direct_s3 = direct_s3
         
         # Initialize data-related containers
         self.times = None
@@ -683,6 +682,8 @@ class SWEProcessor:
         self.s3_path = None
         self.snodas_df = None
         self.basin_id = None
+        self.s3_mount_point = None
+        self.snodas_s3_path = None
         
         # SNOTEL-related containers
         self.basin_geometry = None
@@ -693,6 +694,7 @@ class SWEProcessor:
         self.stations_gdf = None
         self.snotel_df = None
         self.snotel_filesystem = None
+        self.snotel_s3_path = None
         
         # Initialize visualization parameters
         self.x_major_interval = None
@@ -707,12 +709,18 @@ class SWEProcessor:
     
     def load_data(self):
         """Load all required data"""
+        self.snotel_s3_path = 'ngwpc-forcing/snotel_csv'
+        self.snodas_s3_path = 'ngwpc-forcing/snodas_csv'
+        self.s3_mount_point = os.getenv('S3_MOUNT_POINT', os.path.join(os.path.expanduser("~"), 's3'))
         tl0 = time.time()
         self.csv_files = FileLoader.get_filenames(self.csv_directory)
         tl1 = time.time()
         self.times = FileLoader.get_times(self.csv_files)
         tl2 = time.time()
-        self.s3_path, self.basin_id = S3Loader.construct_s3_path(self.gpkg_file)
+        self.s3_path, self.basin_id = S3Loader.construct_s3_path(self.gpkg_file, 
+                                                                 self.direct_s3, 
+                                                                 self.s3_mount_point,
+                                                                 self.snodas_s3_path)
         tl3 = time.time()
         self.snodas_df = S3Loader.read_csv_from_s3(self.s3_path)
         tl4 = time.time()
@@ -729,7 +737,9 @@ class SWEProcessor:
         tl8 = time.time()
         
         #SNOTEL
-        self.snotel_filenames, self.snotel_filesystem = SnotelDataLoader.list_snotel_filenames()
+        self.snotel_filenames, self.snotel_filesystem = SnotelDataLoader.list_snotel_filenames(self.s3_mount_point, 
+                                                                                               self.snotel_s3_path,
+                                                                                               self.direct_s3)
         self.stations_gdf = SnotelDataLoader.parse_snotel_filenames(self.snotel_filenames)
         self.basin_gdf = GeoUtils.read_geo(self.gpkg_file)
         #Get basin_geometry, but we don't need bounds, so we ignore those
@@ -764,7 +774,9 @@ class SWEProcessor:
         self.snotel_df = SnotelDataLoader.get_snotel_timeseries(self.basin_geometry, 
                                                                 self.times, 
                                                                 self.stations_in_basin,
-                                                                self.snotel_filesystem)
+                                                                self.snotel_filesystem,
+                                                                self.s3_mount_point,
+                                                                self.snotel_s3_path)
         ta2 = time.time()
         self.snotel_ts = SnotelDataLoader.extract_snotel_timeseries(self.snotel_df, self.times)        
         tb = time.time()
@@ -899,6 +911,8 @@ def get_options(args_list=None):
                        help="Optional output path for the simulated SWE time series PNG file.")
     parser.add_argument('--csv_output', type=str, default=None,
                        help="Optional output path for the basin average SWE data CSV file.")
+    parser.add_argument('--direct_s3', action='store_true', 
+                         help='Use direct S3 access instead of local mount')
     
     if args_list is not None:
         return parser.parse_args(args_list)
@@ -919,7 +933,8 @@ def execute(args):
         csv_directory=args.csv_directory,
         gpkg_file=args.gpkg_file,
         plot_output=args.plot_output,
-        csv_output=args.csv_output
+        csv_output=args.csv_output,
+        direct_s3=args.direct_s3
     )
     processor.process()
 

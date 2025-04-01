@@ -29,6 +29,9 @@ def run_sim_scan(args):
         args.date,
         '--mode', 'scan'
     ]
+    if args.direct_s3:
+        sim_scan_args.append('--direct_s3')
+
     start_time = time.time()
     simulated_swe_mapper.main(sim_scan_args)
     elapsed_time = time.time() - start_time
@@ -42,8 +45,12 @@ def run_snodas_mapper(args):
         args.date,
         args.gpkg_file,
         args.snodas_raw_output,
-        args.snodas_lumped_output
+        args.snodas_lumped_output,
     ]
+    
+    if args.direct_s3:
+        raw_snodas_args.append('--direct_s3')
+
     start_time = time.time()
     snodas_mapper.main(raw_snodas_args)
     elapsed_time = time.time() - start_time
@@ -58,6 +65,10 @@ def run_sim_swe_mapper(args):
         args.date,
         '--output_file', args.sim_lumped_output
     ]
+    
+    if args.direct_s3:
+        sim_swe_mapper_args.append('--direct_s3')
+        
     start_time = time.time()
     simulated_swe_mapper.main(sim_swe_mapper_args)
     elapsed_time = time.time() - start_time
@@ -85,9 +96,18 @@ def get_options(arg_list=None):
     parser.add_argument('snodas_lumped_output', type=str,
                         help="Path where snodas lumped swe map output saved.\
                         Output will be a .png file.")
-    if arg_list is not None:
+    parser.add_argument('--direct_s3', action='store_true', 
+                        help='Use direct S3 access instead of local mount', default=False)
+
+    if arg_list is None:
+        return parser.parse_args()
+    
+    try:
         return parser.parse_args(arg_list)
-    return parser.parse_args()
+    except Exception as e:
+        print(f"Error parsing arguments: {e}")
+        print(f"Argument list: {arg_list}")
+        raise
 
 def execute(args):
     t0 = time.time()
@@ -102,3 +122,4 @@ def swe_map(arg_list=None):
 
 if __name__ == "__main__":
     swe_map()
+
