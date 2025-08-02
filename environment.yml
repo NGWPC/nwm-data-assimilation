@@ -1,0 +1,18 @@
+name: soil_moisture
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - xarray
+  - netcdf4
+  - scipy
+  - matplotlib
+  - cartopy
+  - numpy
+  - geopandas
+  - pandas
+  - fsspec
+  - s3fs
+  - requests
+  - pyogrio
