@@ -4,8 +4,8 @@ import pandas as pd
 import geopandas as gpd
 import shapely.geometry
 
-from typing import Dict, Tuple
-from pathlib import Path
+from typing import Dict, List, Tuple
+from pathlib import Path, PurePath
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry import Point, Polygon, MultiPolygon
 
@@ -14,91 +14,138 @@ from utils.geo_utils import GeoUtils
 
 class ISMNPreprocessor:
     @staticmethod
-    def load_basin_geometries(gpkg_dir: str, fs: fsspec.AbstractFileSystem) -> Dict[str, BaseGeometry]:
+    def load_basin_geometries(
+        gpkg_source: str,
+        fs: fsspec.AbstractFileSystem,
+        limit: int | None = None
+    ) -> Dict[str, BaseGeometry]:
         """
-        loads all 'gages-<gage_id>.gpkg' files in gpkg_dir and returns a dict mapping each gage_id to its unified basin geometry
+        loads one or more 'gages-<gage_id>.gpkg' files from a path (file or dir)
+        and returns a dict mapping each gage_id to its unified basin geometry
 
         Parameters
-        ----------
-        gpkg_dir: str
-            path to the directory containing basin geopackages
+        ------------
+        gpkg_source: str
+            path to a single geopackage file or a directory containing geopackages
         fs: fsspec.AbstractFileSystem
-            filesystem instance for reading files
+            filesystem instance for reading files (local or remote)
+        limit: int or None, optional
+            maximum number of files to process (for testing)
 
         Returns
-        -------
+        --------
         Dict[str, BaseGeometry]
-            mapping of gage_id to its unified basin geometry
+            mapping of gage_id to unified basin geometry
         """
-        # limit the number of files processed for testing purposes
-        # limit = 10
         basin_geoms: Dict[str, BaseGeometry] = {}
-        # list everything under the directory
-        for entry in fs.ls(gpkg_dir, detail=True):
-            path = entry["name"]
-            if entry["type"] == "file" and path.lower().endswith(".gpkg"):
-                # extract gage_id from filename
-                fname = Path(path).name
-                gage_id = fname.removeprefix("gages-").removesuffix(".gpkg")
+        files_processed = 0
 
-                print(f"processing gage_id: {gage_id}...")
+        # decide whether gpkg_source is a single .gpkg file or a directory
+        if fs.isfile(gpkg_source) and gpkg_source.lower().endswith('.gpkg'):
+            # single-file input: wrap in a one-item list for uniform processing
+            entries = [{'name': gpkg_source, 'type': 'file'}]
+        elif fs.isdir(gpkg_source):
+            # directory input: list all entries (files and subdirs)
+            entries = fs.ls(gpkg_source, detail=True)
+        else:
+            raise FileNotFoundError(f"gpkg_source not found or not a .gpkg/dir: {gpkg_source}")
 
-                # read the divides layer and get its unioned geometry
+        # iterate entries and process each geopackage
+        for entry in entries:
+            path = entry['name']
+            # only handle files ending in .gpkg
+            if entry['type'] == 'file' and path.lower().endswith('.gpkg'):
+                # derive the gage identifier by stripping prefix and suffix
+                fname = PurePath(path).name
+                gage_id = fname.removeprefix('gages-').removesuffix('.gpkg')
+
+                print(f"Processing gage {gage_id}...")
+
+                # read the 'divides' layer and ensure it's in geographic CRS
                 basin_gdf = GeoUtils.read_geo(path)
-                print(f"GeoDataFrame containing the basin divides with geographic CRS for gage_id: {gage_id}...")
-                print(basin_gdf.head())
-                geom, _ = GeoUtils.get_basin_geometry(basin_gdf)
+                # compute a single, unified geometry for this basin
+                unified_geom, _ = GeoUtils.get_basin_geometry(basin_gdf)
 
-                basin_geoms[gage_id] = geom
+                # store the mapping of gage_id to its basin geometry
+                basin_geoms[gage_id] = unified_geom
+                files_processed += 1
 
-                # compute coordinate count handling both Polygon and MultiPolygon
-                if isinstance(geom, Polygon):
-                    coord_count = len(geom.exterior.coords)
-                elif isinstance(geom, MultiPolygon):
-                    coord_count = sum(len(poly.exterior.coords) for poly in geom.geoms)
-                else:
-                    coord_count = 0
+                # stop early if we've reached the specified limit
+                if limit is not None and files_processed >= limit:
+                    break
 
-                print(f"basin geometry type: {geom.geom_type}")
-                print(f"basin geometry area: {geom.area}")
-                print(f"basin geometry bounds: {geom.bounds}")
-                print(f"basin geometry centroid: {geom.centroid}")
-                print(f"basin geometry number of coordinates: {coord_count}")
-
-                # if len(basin_geoms) >= limit:
-                #     print(f"Reached limit of {limit} basin geometries, stopping further processing.")
-                #     break
+                print(f"basin geometry type: {unified_geom.geom_type}")
+                print(f"basin geometry area: {unified_geom.area}")
+                print(f"basin geometry bounds: {unified_geom.bounds}")
+                print(f"basin geometry centroid: {unified_geom.centroid}")
+                print(f"basin geometry number of coordinates: {len(unified_geom.exterior.coords)}")
 
         return basin_geoms
 
     @staticmethod
-    def get_raw_ismn_files(ismn_raw_data_base_dir: str, fs: fsspec.AbstractFileSystem, direct_s3: bool = False) -> list[str]:
+    def get_raw_ismn_files(
+        ismn_source: str,
+        fs: fsspec.AbstractFileSystem,
+        limit: int | None = None
+    ) -> List[str]:
         """
-        Get all ISMN files from the specified base directory recursively.
+        loads one or more raw .stm files from a path (file or dir), recursively if dir
 
         Parameters
-        ----------
-        ismn_raw_data_base_dir : str
-            Base directory for ISMN raw data.
-        direct_s3 : bool, optional
-            If True, use s3 filesystem. If False, use local filesystem.
+        ------------
+        ismn_source: str
+            path to a single .stm file or a directory containing .stm files
+        fs: fsspec.AbstractFileSystem
+            filesystem instance for reading files (local or remote)
+        limit: int or None
+            maximum number of files to return (for testing)
 
         Returns
-        -------
-        list[str]
-            List of ISMN file paths.
+        --------
+        List[str]
+            list of raw .stm file paths found under the source
         """
-        ismn_files = []
-        for entry in fs.ls(ismn_raw_data_base_dir, detail=True):
-            if entry['type'] == 'file' and entry['name'].endswith('.stm'):
-                ismn_files.append(entry['name'])
+        found_raw_ismn_files: List[str] = []
+        files_processed = 0
+
+        # decide whether ismn_source is a single .stm file or a directory
+        if fs.isfile(ismn_source) and ismn_source.lower().endswith('.stm'):
+            # single-file input: wrap in a list for uniform processing
+            directory_entries = [{'name': ismn_source, 'type': 'file'}]
+        elif fs.isdir(ismn_source):
+            # directory input: list directory contents
+            directory_entries = fs.ls(ismn_source, detail=True)
+        else:
+            raise FileNotFoundError(f"ismn_source not found or not a .stm file/dir: {ismn_source}")
+
+        # iterate over entries to collect .stm files
+        for entry in directory_entries:
+            entry_path = entry['name']
+            if entry['type'] == 'file' and entry_path.lower().endswith('.stm'):
+                # add file to list when extension matches
+                found_raw_ismn_files.append(entry_path)
+                files_processed += 1
+
+                # stop early if reached the specified limit
+                if limit is not None and files_processed >= limit:
+                    break
+
             elif entry['type'] == 'directory':
-                ismn_files.extend(ISMNPreprocessor.get_raw_ismn_files(entry['name'], fs))
+                # recurse into subdirectory for more .stm files
+                remaining = None if limit is None else (limit - files_processed)
+                sub_files = ISMNPreprocessor.get_raw_ismn_files(entry_path, fs, remaining)
 
-        # for ismn_file in ismn_files:
-        #     print(ismn_file)
+                for sub_file in sub_files:
+                    if limit is not None and files_processed >= limit:
+                        break
+                    found_raw_ismn_files.append(sub_file)
+                    files_processed += 1
 
-        return ismn_files
+                # break outer loop if limit reached during recursion
+                if limit is not None and files_processed >= limit:
+                    break
+
+        return found_raw_ismn_files
 
     @staticmethod
     def extract_unique_stations(raw_ismn_files: list[str], fs: fsspec.AbstractFileSystem) -> gpd.GeoDataFrame:
@@ -246,10 +293,10 @@ class ISMNPreprocessor:
 
 if __name__ == "__main__":
     fs = fsspec.filesystem('file')
-    ismn_raw_data_base_dir = "/home/miguel.pena/noaa-owp/soil_moisture_sample_data"
+    ismn_raw_data_base_path = "/home/miguel.pena/noaa-owp/soil_moisture_sample_data"
 
     # get raw ISMN files
-    raw_ismn_files = ISMNPreprocessor.get_raw_ismn_files(ismn_raw_data_base_dir, fs)
+    raw_ismn_files = ISMNPreprocessor.get_raw_ismn_files(ismn_raw_data_base_path, fs)
 
     print(f"Found {len(raw_ismn_files)} raw ISMN files...")
     # extract unique stations from raw ISMN files
@@ -260,12 +307,13 @@ if __name__ == "__main__":
     print(stations_gdf.head())
     print(stations_gdf.tail())
 
-    gpkg_dir = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages"
+    gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages"
+    # gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages/gages-08447020.gpkg"
     output_dir = "/home/s3/ngwpc-dev/miguel.pena/ismn_preprocessed_data"
 
     # load basin geometries from geopackages into a dictionary
     # where keys are gage_ids and values are shapely geometries
-    basin_geometries = ISMNPreprocessor.load_basin_geometries(gpkg_dir, fs)
+    basin_geometries = ISMNPreprocessor.load_basin_geometries(gpkg_path, fs)
     print("loaded basins:", list(basin_geometries.keys()))
 
     station_to_gage = ISMNPreprocessor.map_stations_to_basins(stations_gdf, basin_geometries)

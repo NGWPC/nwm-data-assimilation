@@ -1,5 +1,8 @@
 import geopandas as gpd
+
 from pathlib import Path
+from shapely.ops import unary_union
+from shapely.geometry.base import BaseGeometry
 
 
 class GeoUtils:
@@ -30,29 +33,42 @@ class GeoUtils:
         return basin_gdf
 
     @staticmethod
-    def get_basin_geometry(basin_gdf):
+    def get_basin_geometry(basin_gdf: gpd.GeoDataFrame) -> tuple[BaseGeometry, tuple]:
         """
-        Extract a unified basin geometry and bounds from a GeoDataFrame.
+        extract a unified basin geometry and its bounds from a GeoDataFrame containing basin divides
 
         Parameters
-        ----------
-        basin_gdf : geopandas.GeoDataFrame
-            GeoDataFrame containing basin divides
+        ------------
+        basin_gdf: geopandas.GeoDataFrame
+            GeoDataFrame with a 'geometry' column of Polygon/MultiPolygon features.
+            must be in a geographic CRS (e.g. EPSG:4326) before calling.
 
         Returns
-        -------
-        tuple
-            (basin_geometry, bounds) where:
-                - basin_geometry is a shapely geometry representing the entire basin
-                - bounds is a tuple of (minx, miny, maxx, maxy) for the basin extent
+        --------
+        tuple[BaseGeometry, tuple]
+            unified_basin_geom: combined shapely geometry representing the entire basin
+            basin_bounds: (minx, miny, maxx, maxy) tuple defining the basin extent
         """
-        # Combine all polygons for basin outline
-        try:
-            basin_geometry = basin_gdf.union_all()
-        except AttributeError:
-            basin_geometry = basin_gdf.unary_union
 
-        # Store catchment boundaries
-        bounds = basin_geometry.bounds
+        # requirements: geopandas, shapely; basin_gdf must include only the geometry column and proper CRS
 
-        return basin_geometry, bounds
+        # repair invalid geometries: buffer(0) often fixes self-intersections or slivers
+        valid_geometries = basin_gdf.geometry.apply(
+            lambda geom: geom if geom.is_valid else geom.buffer(0)
+        )
+
+        # if there's only one polygon, use it directly
+        if len(valid_geometries) == 1:
+            unified_basin_geom = valid_geometries.iloc[0]
+        else:
+            # try the fast Shapely union of multiple pieces
+            try:
+                unified_basin_geom = unary_union(valid_geometries)
+            except Exception:
+                # fallback to GeoPandas’ union_all if unary_union isn’t available
+                unified_basin_geom = basin_gdf.geometry.values.union_all()
+
+        # compute the bounding box of the final basin shape
+        basin_bounds = unified_basin_geom.bounds
+
+        return unified_basin_geom, basin_bounds
