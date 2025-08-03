@@ -20,7 +20,7 @@ class ISMNPreprocessor:
         limit: int | None = None
     ) -> Dict[str, BaseGeometry]:
         """
-        loads one or more 'gages-<gage_id>.gpkg' files from a path (file or dir)
+        loads one or more gpkg files from a path (file or dir)
         and returns a dict mapping each gage_id to its unified basin geometry
 
         Parameters
@@ -63,6 +63,7 @@ class ISMNPreprocessor:
 
                 # read the 'divides' layer and ensure it's in geographic CRS
                 basin_gdf = GeoUtils.read_geo(path)
+
                 # compute a single, unified geometry for this basin
                 unified_geom, _ = GeoUtils.get_basin_geometry(basin_gdf)
 
@@ -70,15 +71,23 @@ class ISMNPreprocessor:
                 basin_geoms[gage_id] = unified_geom
                 files_processed += 1
 
-                # stop early if we've reached the specified limit
-                if limit is not None and files_processed >= limit:
-                    break
-
                 print(f"basin geometry type: {unified_geom.geom_type}")
                 print(f"basin geometry area: {unified_geom.area}")
                 print(f"basin geometry bounds: {unified_geom.bounds}")
                 print(f"basin geometry centroid: {unified_geom.centroid}")
-                print(f"basin geometry number of coordinates: {len(unified_geom.exterior.coords)}")
+
+                # count exterior coords, handling both Polygon and MultiPolygon
+                if isinstance(unified_geom, Polygon):
+                    coord_count = len(unified_geom.exterior.coords)
+                elif isinstance(unified_geom, MultiPolygon):
+                    coord_count = sum(len(poly.exterior.coords) for poly in unified_geom.geoms)
+                else:
+                    coord_count = 0
+                print(f"basin geometry number of coordinates: {coord_count}")
+
+                # stop early if we've reached the specified limit
+                if limit is not None and files_processed >= limit:
+                    break
 
         return basin_geoms
 
