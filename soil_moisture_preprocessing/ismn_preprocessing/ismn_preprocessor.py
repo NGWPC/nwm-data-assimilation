@@ -4,7 +4,7 @@ import pandas as pd
 import geopandas as gpd
 import shapely.geometry
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Iterator, Tuple
 from pathlib import Path, PurePath
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry import Point, Polygon, MultiPolygon
@@ -13,6 +13,82 @@ from utils.geo_utils import GeoUtils
 
 
 class ISMNPreprocessor:
+    """
+    Class for preprocessing ISMN (International Soil Moisture Network) data files
+    """
+
+    """
+    regex pattern matches raw ISMN file lines with:
+    - start timestamp:
+      (YYYY/MM/DD HH:MM)
+    - end timestamp:
+      (YYYY/MM/DD HH:MM)
+    - the rest of the line:
+      (CSE Identifier, Network, Station, Latitude, Longitude,
+       Elevation, Depth from, Depth to, Soil Moisture value,
+       ISMN Quality Flag, Data Provider Quality Flag)
+    """
+    _ISMN_LINE_PATTERN = re.compile(
+        r'^(?P<start>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
+        r'(?P<end>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
+        r'(?P<rest>.*)$'
+    )
+
+    @staticmethod
+    def parse_ismn_line(raw_line: bytes) -> list[str] | None:
+        """
+        Parse a single raw ISMN file line into its constituent fields.
+
+        Parameters
+        ----------
+        raw_line : bytes
+            A raw bytes line read from an ISMN .stm file.
+
+        Returns
+        -------
+        list[str] | None
+            A list of strings:
+            [start_timestamp, end_timestamp, field1, ..., field11]
+            or None if the line doesn't match the expected format or
+            doesn't contain exactly 11 data fields after the timestamps.
+        """
+        # grab line
+        text_line = raw_line.decode('utf-8', errors='ignore').strip()
+
+        # try to match the timestamp regex
+        match = ISMNPreprocessor._ISMN_LINE_PATTERN.match(text_line)
+        if not match:
+            return None  # line didn't match the expected pattern
+
+        # split rest of line on whitespace into data fields
+        rest_fields = match.group('rest').split()
+        if len(rest_fields) != 11:
+            return None  # we expect exactly 11 data columns after timestamps
+
+        # build full record: [start, end, field1, ..., field11]
+        return [match.group('start'), match.group('end')] + rest_fields
+
+    @staticmethod
+    def iter_ismn_records(file_obj: Iterator[bytes]) -> Iterator[list[str]]:
+        """
+        Iterate over all valid ISMN records in an open file object.
+
+        Parameters
+        ----------
+        file_obj : Iterator[bytes]
+            An iterator yielding raw bytes lines (e.g., from fs.open(..., 'rb')).
+
+        Yields
+        ------
+        list[str]
+            Each yield is a list of strings corresponding to one valid record:
+            [start_timestamp, end_timestamp, field1, ..., field11]
+        """
+        for raw_line in file_obj:
+            parsed = ISMNPreprocessor.parse_ismn_line(raw_line)
+            if parsed:
+                yield parsed
+
     @staticmethod
     def load_basin_geometries(
         gpkg_source: str,
@@ -173,41 +249,42 @@ class ISMNPreprocessor:
         geopandas.GeoDataFrame
             geodataframe with unique network, station, lat, lon, and geometry columns
         """
-        # regex pattern to match the first valid line in ISMN files
-        ts_pattern = re.compile(
-            r'^(?P<start>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
-            r'(?P<end>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
-            r'(?P<rest>.*)$'
-        )
-
         records = []
-        for file_path in raw_ismn_files:
-            # open file and scan for first valid line
-            with fs.open(file_path, 'rb') as f:
-                for raw in f:
-                    line = raw.decode('utf-8').strip()
-                    m = ts_pattern.match(line)
-                    if not m:
-                        continue
-                    parts = m.group('rest').split()
-                    if len(parts) != 11:
-                        continue
-                    network, station = parts[1], parts[2]
-                    lat, lon = float(parts[4]), float(parts[5])
-                    records.append({
-                        'network': network,
-                        'station': station,
-                        'lat': lat,
-                        'lon': lon
-                    })
-                    break
 
+        for file_path in raw_ismn_files:
+            # open the raw file as bytes and get the first valid line
+            with fs.open(file_path, 'rb') as f:
+                # use iterator to get the first valid line
+                first_line = next(ISMNPreprocessor.iter_ismn_records(f), None)
+
+            # skip files with no valid lines
+            if not first_line:
+                continue
+
+            print(f"first line:\n{first_line}")
+
+            # get network, station, lat, and lon from line
+            network = first_line[3]
+            station = first_line[4]
+            lat = float(first_line[5])
+            lon = float(first_line[6])
+
+            # add data from line to records
+            records.append({
+                'network': network,
+                'station': station,
+                'lat': lat,
+                'lon': lon
+            })
+
+        # build a DataFrame, drop duplicate network/station combinations
         df = pd.DataFrame(records).drop_duplicates(['network', 'station'])
-        # create geometry column
+
+        # create geometry column from lon/lat
         df['geometry'] = df.apply(lambda row: Point(row['lon'], row['lat']), axis=1)
-        # build geodataframe
-        gdf = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
-        return gdf
+
+        # return as a GeoDataFrame in EPSG:4326
+        return gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
 
     @staticmethod
     def map_stations_to_basins(stations_gdf: gpd.GeoDataFrame, basin_geoms: Dict[str, BaseGeometry]) -> Dict[Tuple[str, str], str]:
@@ -226,12 +303,18 @@ class ISMNPreprocessor:
         Dict[Tuple[str, str], str]
             mapping of (network, station) to containing gage_id
         """
+        print("stations CRS:", stations_gdf.crs)
         # build a geodataframe of basin polygons keyed by gage_id
         basin_df = gpd.GeoDataFrame(
             {'gage_id': list(basin_geoms.keys()),
              'geometry': list(basin_geoms.values())},
             crs=stations_gdf.crs
         )
+
+        print("basins CRS:", basin_df.crs)
+
+        print("stations bounds:", stations_gdf.total_bounds)
+        print("basins   bounds:", basin_df.total_bounds)
 
         # spatial join stations to basins
         joined = gpd.sjoin(
@@ -313,7 +396,11 @@ if __name__ == "__main__":
 
     # print the first few rows of unique stations GeoDataFrame
     print(f"{len(stations_gdf)} unique ISMN stations extracted...")
+
+    print("First few rows of unique stations:")
     print(stations_gdf.head())
+
+    print("Last few rows of unique stations:")
     print(stations_gdf.tail())
 
     gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages"
@@ -326,4 +413,6 @@ if __name__ == "__main__":
     print("loaded basins:", list(basin_geometries.keys()))
 
     station_to_gage = ISMNPreprocessor.map_stations_to_basins(stations_gdf, basin_geometries)
-    print(station_to_gage)
+    print("Mapped stations to gages:")
+    for (network, station), gage_id in station_to_gage.items():
+        print(f"Network: {network}, Station: {station} -> Gage ID: {gage_id}")
