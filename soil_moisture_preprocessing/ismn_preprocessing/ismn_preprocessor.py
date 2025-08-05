@@ -5,7 +5,7 @@ import geopandas as gpd
 import shapely.geometry
 
 from typing import Dict, List, Iterator, Tuple
-from pathlib import Path, PurePath
+from pathlib import PurePath
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry import Point, Polygon, MultiPolygon
 
@@ -233,6 +233,123 @@ class ISMNPreprocessor:
         return found_raw_ismn_files
 
     @staticmethod
+    def extract_network_and_station_from_ISMN_filename(file_path: str) -> Tuple[str, str] | None:
+        """
+        parses ISMN .stm filename to extract network and station
+
+        File examples:
+            SCAN_SCAN_AAMU-JTG_sm_0.050800_0.050800_Hydraprobe-Analog-C_20240716_20250717.stm
+            USCRN_USCRN_Denio-52-WSW_sm_0.050000_0.050000_Stevens-Hydraprobe-II-Sdi-12_20240716_20250717.stm
+
+        Parameters
+        ------------
+        file_path: str
+            path to a raw .stm file
+
+        Returns
+        --------
+        Tuple[str, str] | None
+            (network, station) if filename matches expected pattern,
+            otherwise None
+        """
+        # get file name without file extension
+        filename = PurePath(file_path).stem
+
+        # split filename on underscores
+        parts = filename.split('_')
+
+        # if we don't get 8 parts, invalid filename
+        if len(parts) != 9:
+            return None
+
+        # return the network and station parts
+        return parts[1], parts[2]
+
+    @staticmethod
+    def filter_ismn_files_within_basins(
+        ismn_source: str,
+        fs: fsspec.AbstractFileSystem,
+        station_to_gage: Dict[Tuple[str, str], str],
+        limit: int | None = None
+    ) -> List[Tuple[str, str]]:
+        """
+        recursively filter raw .stm files and gage IDs under ismn_source
+        by stations that fall within known basins
+        returning tuples of (file_path, gage_id) for parsing
+
+        Parameters
+        ------------
+        ismn_source: str
+            path to a single .stm file or a directory containing .stm files
+        fs: fsspec.AbstractFileSystem
+            filesystem instance for reading files (local or remote)
+        station_to_gage: Dict[(network, station), gage_id]
+            mapping of valid stations to their basin gage_id
+        limit: int or None
+            maximum number of files to filter (for testing)
+
+        Returns
+        --------
+        List[Tuple[str, str]]
+            list of (file_path, gage_id) tuples for files belonging to known stations
+        """
+        pruned_files_and_gage_id: List[Tuple[str, str]] = []
+        files_processed = 0
+
+        # decide if source is a single file or directory
+        if fs.isfile(ismn_source) and ismn_source.lower().endswith('.stm'):
+            # emulate fs.ls for a single ISMN file by wrapping it in a dict
+            entries = [{'name': ismn_source, 'type': 'file'}]
+        elif fs.isdir(ismn_source):
+            # get all ISMN files/directories
+            entries = fs.ls(ismn_source, detail=True)
+        else:
+            raise FileNotFoundError(f"{ismn_source!r} not found or not a .stm file/dir")
+
+        # iterate entries and collect matching ISMN files
+        for entry in entries:
+            path = entry['name']
+            if entry['type'] == 'file' and path.lower().endswith('.stm'):
+                # extract the station key and check if it's known
+                network_station_tuple = ISMNPreprocessor.extract_network_and_station_from_ISMN_filename(path)
+                if network_station_tuple and network_station_tuple in station_to_gage:
+                    # add ISMN filepath and associated gage_id
+                    pruned_files_and_gage_id.append((path, station_to_gage[network_station_tuple]))
+                    files_processed += 1
+
+                    # stop early if limit reached
+                    if limit is not None and files_processed >= limit:
+                        break
+            elif entry['type'] == 'directory':
+                # recurse into subdirectories with remaining limit
+                remaining = None if limit is None else (limit - files_processed)
+
+                # get subdirectory pruned files and gage ids list of tuples
+                subdir_pruned_files_and_gage_id = ISMNPreprocessor.filter_ismn_files_within_basins(
+                    path,
+                    fs,
+                    station_to_gage,
+                    remaining
+                )
+
+                # iterate over subdir
+                for file_path, gage_id in subdir_pruned_files_and_gage_id:
+                    # stop early if limit reached
+                    if limit is not None and files_processed >= limit:
+                        break
+
+                    # add ISMN filepath and associated gage_id
+                    pruned_files_and_gage_id.append((file_path, gage_id))
+                    files_processed += 1
+
+                # break outer for loop if limit reached during recursion
+                if limit is not None and files_processed >= limit:
+                    break
+
+        # apply overall limit and return
+        return pruned_files_and_gage_id[:limit] if limit is not None else pruned_files_and_gage_id
+
+    @staticmethod
     def extract_unique_stations(raw_ismn_files: list[str], fs: fsspec.AbstractFileSystem) -> gpd.GeoDataFrame:
         """
         loads unique station points from raw .stm files by reading first valid line of each file
@@ -321,7 +438,7 @@ class ISMNPreprocessor:
             stations_gdf,
             basin_df,
             how='inner',
-            predicate='within'
+            predicate='intersects'
         )
 
         # build mapping of each station to its gage
@@ -413,6 +530,25 @@ if __name__ == "__main__":
     print("loaded basins:", list(basin_geometries.keys()))
 
     station_to_gage = ISMNPreprocessor.map_stations_to_basins(stations_gdf, basin_geometries)
-    print("Mapped stations to gages:")
+    print(f"mapped {len(station_to_gage)} SCAN and USCRN stations to CONUS gages:")
     for (network, station), gage_id in station_to_gage.items():
         print(f"Network: {network}, Station: {station} -> Gage ID: {gage_id}")
+
+    # all_stations = {(r.network, r.station) for r in stations_gdf.itertuples()}
+    # mapped = set(station_to_gage)
+    # unmapped = all_stations - mapped
+    # print(f"{len(unmapped)} stations unmapped:")
+    # for (network, station) in unmapped:
+    #     print(f"Network: {network}, Station: {station} -> Gage ID: None (unmapped)")
+
+    # filter ISMN files to only those that have stations within known basins
+    ismn_files_within_basins = ISMNPreprocessor.filter_ismn_files_within_basins(
+        ismn_raw_data_base_path,
+        fs,
+        station_to_gage,
+    )
+
+    print(f"Found {len(ismn_files_within_basins)} ISMN files within known basins...")
+    for file_path, gage_id in ismn_files_within_basins:
+        print(f"File: {file_path}")
+        print(f"Gage ID: {gage_id}")

@@ -1,7 +1,6 @@
 import re
 import csv
 import fsspec
-import shapely.geometry
 import pandas as pd
 import geopandas as gpd
 
