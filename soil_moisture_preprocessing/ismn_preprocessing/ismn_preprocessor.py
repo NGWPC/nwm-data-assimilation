@@ -2,11 +2,11 @@ import re
 import fsspec
 import pandas as pd
 import geopandas as gpd
-import shapely.geometry
 
-from typing import Dict, List, Iterator, Tuple
-from pathlib import PurePath
+from pathlib import Path, PurePath
+from datetime import datetime
 from shapely.geometry.base import BaseGeometry
+from typing import Dict, List, Iterator, Tuple
 from shapely.geometry import Point, Polygon, MultiPolygon
 
 from utils.geo_utils import GeoUtils
@@ -19,9 +19,9 @@ class ISMNPreprocessor:
 
     """
     regex pattern matches raw ISMN file lines with:
-    - start timestamp:
+    - UTC nominal date/time:
       (YYYY/MM/DD HH:MM)
-    - end timestamp:
+    - UTC actual date/time:
       (YYYY/MM/DD HH:MM)
     - the rest of the line:
       (CSE Identifier, Network, Station, Latitude, Longitude,
@@ -29,8 +29,8 @@ class ISMNPreprocessor:
        ISMN Quality Flag, Data Provider Quality Flag)
     """
     _ISMN_LINE_PATTERN = re.compile(
-        r'^(?P<start>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
-        r'(?P<end>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
+        r'^(?P<nominal_datetime>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
+        r'(?P<actual_datetime>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
         r'(?P<rest>.*)$'
     )
 
@@ -48,9 +48,9 @@ class ISMNPreprocessor:
         -------
         list[str] | None
             A list of strings:
-            [start_timestamp, end_timestamp, field1, ..., field11]
+            [nominal_datetime, actual_datetime, field3, ..., field13]
             or None if the line doesn't match the expected format or
-            doesn't contain exactly 11 data fields after the timestamps.
+            doesn't contain exactly 13 data fields.
         """
         # grab line
         text_line = raw_line.decode('utf-8', errors='ignore').strip()
@@ -65,8 +65,8 @@ class ISMNPreprocessor:
         if len(rest_fields) != 11:
             return None  # we expect exactly 11 data columns after timestamps
 
-        # build full record: [start, end, field1, ..., field11]
-        return [match.group('start'), match.group('end')] + rest_fields
+        # build full record: [nominal_datetime, actual_datetime, field3, ..., field13]
+        return [match.group('nominal_datetime'), match.group('actual_datetime')] + rest_fields
 
     @staticmethod
     def iter_ismn_records(file_obj: Iterator[bytes]) -> Iterator[list[str]]:
@@ -82,7 +82,7 @@ class ISMNPreprocessor:
         ------
         list[str]
             Each yield is a list of strings corresponding to one valid record:
-            [start_timestamp, end_timestamp, field1, ..., field11]
+            [nominal_datetime, actual_datetime, field1, ..., field11]
         """
         for raw_line in file_obj:
             parsed = ISMNPreprocessor.parse_ismn_line(raw_line)
@@ -450,54 +450,94 @@ class ISMNPreprocessor:
         return mapping
 
     @staticmethod
-    def find_stations_in_basin(ismn_data_gdf: gpd.GeoDataFrame, basin_geometry: shapely.geometry) -> gpd.GeoDataFrame:
+    def parse_and_partition_ismn_records(
+        pruned_files_and_gages: List[Tuple[str, str]],
+        output_base_dir: str,
+        fs: fsspec.AbstractFileSystem
+    ) -> None:
         """
-        Find ISMN stations within a given basin geometry.
+        parse raw .stm files and write out depth-level Parquet files partitioned by
+        (gage_id, network, station, date, depth_to)
 
         Parameters
-        ----------
-        ismn_data_gdf : geopandas.GeoDataFrame
-            GeoDataFrame with columns for station_id, latitude, longitude, filename,
-            and geometry (Point objects)
-        basin_geometry : shapely.geometry
-            Basin geometry of the basin to filter ISMN stations
+        ------------
+        pruned_files_and_gages: List[Tuple[str, str]]
+            list of (file_path, gage_id) for known stations
+        output_base_dir: str
+            base directory to write partitioned Parquet files
+        fs: fsspec.AbstractFileSystem
+            filesystem instance for writing files
 
         Returns
-        -------
-        geopandas.GeoDataFrame
-            Filtered GeoDataFrame containing only ISMN stations within the basin.
+        --------
+        None
         """
-        if hasattr(basin_geometry, 'crs') and basin_geometry.crs != ismn_data_gdf.crs:
-            ismn_data_gdf = ismn_data_gdf.to_crs(basin_geometry.crs)
+        all_records = []
 
-        # Filter stations within the basin
-        stations_in_basin = ismn_data_gdf[ismn_data_gdf.intersects(basin_geometry)]
+        # iterate over each file and its associated gage
+        for file_path, gage_id in pruned_files_and_gages:
+            with fs.open(file_path, 'rb') as f:
+                # parse each valid line into its fields
+                for fields in ISMNPreprocessor.iter_ismn_records(f):
+                    # unpack fields, renaming start/end to nominal/actual, value to soil_moisture_value
+                    nominal_datetime, actual_datetime, cse_id, network, station, \
+                    lat, lon, elevation, depth_from, depth_to, soil_moisture_value, \
+                    ismn_flag, provider_flag = fields
 
-        if not stations_in_basin['station_id'].empty:
-            station_return = []
-            for stations in stations_in_basin['station_id']:
-                station_return.append(stations)
-            print(f"{len(station_return)} SNOTEL stations found in basin: {station_return}")
+                    # get datetime from nominal_datetime for partitioning
+                    date = datetime.strptime(nominal_datetime, "%Y/%m/%d %H:%M")\
+                        .date().isoformat()
 
-        return stations_in_basin
+                    # collect all relevant columns plus the partition keys
+                    all_records.append({
+                        'gage_id': gage_id,
+                        'network': network,
+                        'station': station,
+                        'date': date,
+                        'utc_nominal': nominal_datetime,
+                        'utc_actual': actual_datetime,
+                        'cse_id': cse_id,
+                        'lat': float(lat),
+                        'lon': float(lon),
+                        'elevation': float(elevation),
+                        'depth_from': float(depth_from),
+                        'depth_to': float(depth_to),
+                        'soil_moisture_value': float(soil_moisture_value),
+                        'ismn_flag': ismn_flag,
+                        'provider_flag': provider_flag
+                    })
 
-    @staticmethod
-    def preprocess_raw_ismn_files(raw_ismn_files: list[str], output_dir: str, fs: fsspec.filesystem, direct_s3: bool = False) -> None:
-        """
-        Preprocess raw ISMN files and save them to the output directory.
+        # nothing to do if no records were parsed
+        if not all_records:
+            return
 
-        Parameters
-        ----------
-        raw_ismn_files : list[str]
-            List of raw ISMN file paths.
-        output_dir : str
-            Directory to save preprocessed ISMN files.
-        fs : fsspec.filesystem
-            Filesystem object for the specified base directory.
-        direct_s3 : bool, optional
-            If True, use s3 filesystem. If False, use local filesystem.
-        """
-        pass
+        # convert to DataFrame for grouping
+        df = pd.DataFrame(all_records)
+
+        # group by the partition keys and write each group to its own Parquet
+        for (gage_id, network, station, date, depth), group_df in df.groupby(
+            ['gage_id', 'network', 'station', 'date', 'depth_to']
+        ):
+            # build the output folder path using pathlib
+            partition_dir = (
+                Path(output_base_dir)
+                / f"gage_{gage_id}"
+                / f"network={network}"
+                / f"station={station}"
+                / f"date={date}"
+            )
+            # ensure the directory exists
+            fs.makedirs(partition_dir.as_posix(), exist_ok=True)
+
+            # filename includes the depth with three decimal places
+            out_file = partition_dir / f"depth_{depth:.3f}.parquet"
+
+            # skip if this partition file already exists
+            if fs.exists(out_file.as_posix()):
+                continue
+
+            # write the partition DataFrame to Parquet
+            group_df.to_parquet(out_file, index=False)
 
 
 if __name__ == "__main__":
@@ -522,7 +562,7 @@ if __name__ == "__main__":
 
     gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages"
     # gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages/gages-08447020.gpkg"
-    output_dir = "/home/s3/ngwpc-dev/miguel.pena/ismn_preprocessed_data"
+    output_dir = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/ismn_preprocessed_data"
 
     # load basin geometries from geopackages into a dictionary
     # where keys are gage_ids and values are shapely geometries
@@ -552,3 +592,11 @@ if __name__ == "__main__":
     for file_path, gage_id in ismn_files_within_basins:
         print(f"File: {file_path}")
         print(f"Gage ID: {gage_id}")
+
+    # parse and partition ISMN records into Parquet files
+    ISMNPreprocessor.parse_and_partition_ismn_records(
+        ismn_files_within_basins,
+        output_base_dir=output_dir,
+        fs=fs
+    )
+    print(f"Partitioned ISMN records written to {output_dir}")
