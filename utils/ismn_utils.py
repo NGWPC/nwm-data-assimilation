@@ -101,7 +101,7 @@ class ISMNDataLoader:
                         else:
                             print(f"Date directory {date_dir} does not exist for gage {gage_id}.")
 
-        print(f"Found {len(ismn_files)} ISMN files for gage {gage_id} on date {target_date}.")
+        print(f"Found {len(ismn_files)} ISMN files for gage {gage_id} on date {target_date}.\n")
         return ismn_files
 
     @staticmethod
@@ -152,16 +152,16 @@ class ISMNDataLoader:
                 all_ismn_dfs.append(ismn_file_df)
 
         if not all_ismn_dfs:
-            print(f"No valid ISMN data found for gage {gage_id} on date {target_date}.")
+            print(f"\nNo valid ISMN data found for gage {gage_id} on date {target_date}.")
             return None
 
         # concatenate all DataFrames into a single GeoDataFrame
         ismn_data_gdf = gpd.GeoDataFrame(pd.concat(all_ismn_dfs, ignore_index=True), geometry='geometry', crs='EPSG:4326')
 
-        print(f"ISMN data GeoDataFrame shape: {ismn_data_gdf.shape}")
+        print(f"\nISMN data GeoDataFrame shape: {ismn_data_gdf.shape}")
         # print 10 random rows from the ismn_data_gdf
         n = min(10, len(ismn_data_gdf))
-        print("Sample ISMN data GeoDataFrame:")
+        print("\nSample ISMN data GeoDataFrame:")
         print(ismn_data_gdf.sample(n).to_string(index=False))
 
         return ismn_data_gdf
