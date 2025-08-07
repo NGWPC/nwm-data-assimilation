@@ -6,6 +6,7 @@ import geopandas as gpd
 
 from typing import IO
 from datetime import datetime
+from pathlib import PurePath
 from shapely.geometry import Point
 from io import BytesIO, TextIOWrapper
 
@@ -49,7 +50,7 @@ class ISMNDataLoader:
         """
         ismn_files = []
         # construct the path to the gage directory
-        gage_dir = f"{ismn_base_dir}/gage_{gage_id}"
+        gage_dir = PurePath(ismn_base_dir) / f"gage_{gage_id}"
 
         # check if gage_dir exists
         if not fs.exists(gage_dir):
@@ -61,8 +62,11 @@ class ISMNDataLoader:
             if entry['type'] == 'directory':
                 network_dir = entry['name']
 
+                # get network_dir directory name
+                network_dir_name = PurePath(network_dir).name
+
                 # verify that network_dir is in 'network={network}' format
-                if not network_dir.startswith('network='):
+                if not network_dir_name.startswith('network='):
                     print(f"Skipping non-network directory: {network_dir}")
                     continue
 
@@ -76,8 +80,11 @@ class ISMNDataLoader:
                     if station_entry['type'] == 'directory':
                         station_dir = station_entry['name']
 
+                        # get station_dir directory name
+                        station_dir_name = PurePath(station_dir).name
+
                         # verify that station_dir is in 'station={station}' format
-                        if not station_dir.startswith('station='):
+                        if not station_dir_name.startswith('station='):
                             print(f"Skipping non-station directory: {station_dir}")
                             continue
 
@@ -87,7 +94,7 @@ class ISMNDataLoader:
                             continue
 
                         # construct the path to the target date directory
-                        date_dir = f"{station_dir}/date={target_date}"
+                        date_dir = PurePath(station_dir) / f"date={target_date}"
 
                         # check if the date directory exists
                         if fs.exists(date_dir):
@@ -133,6 +140,8 @@ class ISMNDataLoader:
         all_ismn_dfs = []
 
         for ismn_file in ismn_files:
+            print(f"Loading {ismn_file}...")
+
             with fs.open(ismn_file, 'rb') as file:
                 ismn_file_df = pd.read_parquet(
                     path=file,
@@ -184,25 +193,34 @@ class ISMNCalculator:
         # work on a copy to avoid mutating the input geodataframe
         gdf = ismn_data_gdf.copy()
 
-        # round each timestamp down to the start of its hour for grouping
-        gdf['hour'] = gdf['utc_nominal'].dt.floor('h')
+        # assign gdf['hour'] to a rounded down hour from gdf['utc_nominal'] which is a dtype object
+        gdf['hour'] = pd.to_datetime(gdf['utc_nominal']).dt.floor('h')
+
+        # print sample gdf['hour']
+        print("Sample gdf['hour']:")
+        print(gdf['hour'].sample(5).to_string(index=False))
+
+        # iterate over gdf columns and print the data type of each
+        for col in gdf.columns:
+            print(f"Column '{col}' has dtype: {gdf[col].dtype}")
 
         # determine the unique measurement depths (we assume depth_to == depth_from)
-        depths = sorted(gdf['depth_to'].unique())
-
-        # print(f"Measurement depths (m): {depths}")
-
         unique_depth_from = sorted(gdf['depth_from'].unique())
+        unique_depth_to = sorted(gdf['depth_to'].unique())
 
-        print("unique depth_from values (m):")
+        print("\nunique depth_from values (m):")
         for d_f in unique_depth_from:
             print(f"{d_f} m")
 
-        unique_depth_to = depths.copy()
-
-        print("unique depth_to values (m):")
+        print("\nunique depth_to values (m):")
         for d_t in unique_depth_to:
             print(f"{d_t} m")
+
+        # verify unique_from and unique_to are the same
+        if unique_depth_from == unique_depth_to:
+            print("\nunique depth_from and depth_to values match!\n")
+
+        depths = unique_depth_from
 
         # calculate the midpoints between each pair of adjacent sensor depths
         midpoints = [
@@ -234,15 +252,15 @@ class ISMNCalculator:
             print(f"Weight for depth {k} m: {v:.3f} m")
 
         # assign each measurement its layer thickness as its weight
-        df['weight'] = df['depth_to'].map(weight_map)
+        gdf['weight'] = gdf['depth_to'].map(weight_map)
 
         # create a new DataFrame hourly that holds one row per station-hour,
         # computing the depth-weighted average soil moisture for each group
         hourly = (
-            df
-            .groupby(['network', 'station', 'hour'])[['value', 'weight']]
-            .apply(lambda grp: (grp['value'] * grp['weight']).sum()
-                                / grp['weight'].sum())
+            gdf
+            .groupby(['network', 'station', 'hour'])[['soil_moisture_value', 'weight']]
+            .apply(lambda grp: (grp['soil_moisture_value'] * grp['weight']).sum()
+                   / grp['weight'].sum())
             .reset_index(name='depth_weighted_sm_avg')
         )
 
@@ -254,7 +272,7 @@ class ISMNCalculator:
 
         # build a small DataFrame 'coords' with one entry per station,
         # containing the station identifier and its latitude/longitude
-        coords = df.drop_duplicates('station')[['station', 'lat', 'lon']]
+        coords = gdf.drop_duplicates('station')[['station', 'lat', 'lon']]
 
         # merge coords into hourly to attach the geographic coordinates
         # to each station-hour weighted average, producing the result DataFrame
@@ -290,12 +308,6 @@ if __name__ == "__main__":
 
     print(f"Total ISMN files found: {len(ismn_files)}")
 
-    print("Sample ISMN files:")
-    min = min(5, len(ismn_files))
-    for i in range(min):
-        ismn_file = ismn_files[i]
-        print(ismn_file)
-
     # load ISMN data into a GeoDataFrame
     ismn_data_gdf = ISMNDataLoader.get_ismn_data(
         ismn_files=ismn_files,
@@ -305,4 +317,5 @@ if __name__ == "__main__":
     )
 
     # getting the depth-weighted average of ISMN soil moisture data into a DataFrame
-    depth_weighted_avg_df = ISMNCalculator.calculate_depth_weighted_average(ismn_data_gdf)
+    ISMNCalculator.calculate_depth_weighted_average(ismn_data_gdf)
+    # depth_weighted_avg_df = ISMNCalculator.calculate_depth_weighted_average(ismn_data_gdf)
