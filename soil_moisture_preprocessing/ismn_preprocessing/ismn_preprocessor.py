@@ -35,6 +35,22 @@ class ISMNPreprocessor:
     )
 
     @staticmethod
+    def normalize_station_name(name: str) -> str:
+        """
+        Normalize station name by removing special characters and converting to lowercase
+        Parameters
+        ----------
+        name : str
+            The station name to normalize.
+
+        Returns
+        -------
+        str
+            The normalized station name with special characters removed and in lowercase
+        """
+        return name.replace('-', '').replace('_', '').lower()
+
+    @staticmethod
     def parse_ismn_line(raw_line: bytes) -> list[str] | None:
         """
         Parse a single raw ISMN file line into its constituent fields.
@@ -306,15 +322,29 @@ class ISMNPreprocessor:
         else:
             raise FileNotFoundError(f"{ismn_source!r} not found or not a .stm file/dir")
 
+        # normalize station names in station_to_gage keys
+        normalized_station_to_gage = {
+            (network, ISMNPreprocessor.normalize_station_name(station)): gage_id
+            for (network, station), gage_id in station_to_gage.items()
+        }
+
         # iterate entries and collect matching ISMN files
         for entry in entries:
             path = entry['name']
             if entry['type'] == 'file' and path.lower().endswith('.stm'):
-                # extract the station key and check if it's known
-                network_station_tuple = ISMNPreprocessor.extract_network_and_station_from_ISMN_filename(path)
-                if network_station_tuple and network_station_tuple in station_to_gage:
+                # extract the network, station tuple from filename
+                network, station = ISMNPreprocessor.extract_network_and_station_from_ISMN_filename(path)
+
+                # normalize station name
+                station = ISMNPreprocessor.normalize_station_name(station) if station else None
+
+                # create the network, station tuple
+                network_station_tuple = (network, station) if network and station else None
+
+                # check if the network, station tuple has an associated gage_id
+                if network_station_tuple and network_station_tuple in normalized_station_to_gage:
                     # add ISMN filepath and associated gage_id
-                    pruned_files_and_gage_id.append((path, station_to_gage[network_station_tuple]))
+                    pruned_files_and_gage_id.append((path, normalized_station_to_gage[network_station_tuple]))
                     files_processed += 1
 
                     # stop early if limit reached
@@ -328,7 +358,7 @@ class ISMNPreprocessor:
                 subdir_pruned_files_and_gage_id = ISMNPreprocessor.filter_ismn_files_within_basins(
                     path,
                     fs,
-                    station_to_gage,
+                    normalized_station_to_gage,
                     remaining
                 )
 
@@ -476,6 +506,14 @@ class ISMNPreprocessor:
 
         # iterate over each file and its associated gage
         for file_path, gage_id in pruned_files_and_gages:
+            filename = PurePath(file_path).name
+
+            # extract network and station from filename
+            net, stat = ISMNPreprocessor.extract_network_and_station_from_ISMN_filename(file_path)
+
+            print(f"Processing gage: {gage_id}, network: {net}, station: {stat}")
+            print(f"file: {filename}")
+
             with fs.open(file_path, 'rb') as f:
                 # parse each valid line into its fields
                 for fields in ISMNPreprocessor.iter_ismn_records(f):
@@ -518,6 +556,8 @@ class ISMNPreprocessor:
         for (gage_id, network, station, date, depth), group_df in df.groupby(
             ['gage_id', 'network', 'station', 'date', 'depth_to']
         ):
+            print(f"Partitioning: gage_id={gage_id}, network={network}, station={station}, date={date}, depth={depth}")
+
             # build the output folder path using pathlib
             partition_dir = (
                 Path(output_base_dir)
@@ -535,6 +575,8 @@ class ISMNPreprocessor:
             # skip if this partition file already exists
             if fs.exists(out_file.as_posix()):
                 continue
+
+            print(f"Writing partition to: {out_file}...\n")
 
             # write the partition DataFrame to Parquet
             group_df.to_parquet(out_file, index=False)
@@ -567,10 +609,10 @@ if __name__ == "__main__":
     # load basin geometries from geopackages into a dictionary
     # where keys are gage_ids and values are shapely geometries
     basin_geometries = ISMNPreprocessor.load_basin_geometries(gpkg_path, fs)
-    print("loaded basins:", list(basin_geometries.keys()))
+    print("Loaded basins:", list(basin_geometries.keys()))
 
     station_to_gage = ISMNPreprocessor.map_stations_to_basins(stations_gdf, basin_geometries)
-    print(f"mapped {len(station_to_gage)} SCAN and USCRN stations to CONUS gages:")
+    print(f"Mapped {len(station_to_gage)} SCAN and USCRN stations to CONUS gages...")
     for (network, station), gage_id in station_to_gage.items():
         print(f"Network: {network}, Station: {station} -> Gage ID: {gage_id}")
 
@@ -589,9 +631,9 @@ if __name__ == "__main__":
     )
 
     print(f"Found {len(ismn_files_within_basins)} ISMN files within known basins...")
-    for file_path, gage_id in ismn_files_within_basins:
-        print(f"File: {file_path}")
-        print(f"Gage ID: {gage_id}")
+    # for file_path, gage_id in ismn_files_within_basins:
+    #     print(f"File: {file_path}")
+    #     print(f"Gage ID: {gage_id}")
 
     # parse and partition ISMN records into Parquet files
     ISMNPreprocessor.parse_and_partition_ismn_records(

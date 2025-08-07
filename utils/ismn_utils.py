@@ -11,247 +11,142 @@ from io import BytesIO, TextIOWrapper
 
 
 class ISMNDataLoader:
+    """
+    Class to load and process ISMN data.
+
+    File structure of ISMN data:
+        ismn_base_dir/
+        ├── gage_{gage_id}/
+        │   ├── network={network}/
+        │   │   ├── station={station}/
+        │   │   │   ├── date={YYY-MM-DD}/
+        │   │   │   │   ├── depth_{depth}.parquet/
+    """
+
     @staticmethod
-    def get_ismn_dirs_by_date(ismn_base_dir: str, target_date: str, direct_s3: bool = False) -> tuple:
+    def get_ismn_files(ismn_base_dir: str, gage_id: str, target_date: str, fs: fsspec.AbstractFileSystem) -> list:
         """
-        Filter ISMN directories that contain the target date between their start and end date.
+        Get all ISMN parquet files for a specific gage ID and date.
 
         Parameters
         ----------
         ismn_base_dir : str
-            Base directory containing ISMN data (can be local path or S3 prefix).
+            Base directory containing ISMN files.
+
+        gage_id : str
+            Gage ID to filter station directories.
+
         target_date : str
-            Date in the format 'YYYY-MM-DD'.
-        direct_s3 : bool
-            If True, use S3 filesystem. If False, use local filesystem.
+            Date in the format 'YYYY-MM-DD' to filter data.
 
-        Returns
-        -------
-        tuple
-        matching_dirs : list[str]
-            List of directories that match the target date.
-        fs : fsspec.filesystem
-            Filesystem object for the specified base directory.
-        """
-        fs = fsspec.filesystem('s3') if direct_s3 else fsspec.filesystem('file')
-        pattern = re.compile(r".*_(\d{8})_(\d{8})_.*")
-
-        try:
-            target = datetime.strptime(target_date, "%Y-%m-%d")
-        except ValueError:
-            raise ValueError(f"Invalid date format: {target_date}. Expected 'YYYY-MM-DD'.")
-
-        matching_dirs = []
-        for entry in fs.ls(ismn_base_dir, detail=True):
-            if entry['type'] == 'directory':
-                dir_path = entry['name']
-                dir_name = dir_path.rstrip('/').split('/')[-1]
-                match = pattern.match(dir_name)
-                if match:
-                    start_str, end_str = match.groups()
-                    try:
-                        start_date = datetime.strptime(start_str, "%Y%m%d")
-                        end_date = datetime.strptime(end_str, "%Y%m%d")
-                    except ValueError:
-                        continue  # skip invalid dates
-
-                    if start_date <= target <= end_date:
-                        matching_dirs.append(dir_path)
-
-        # print(matching_dirs)
-        return matching_dirs, fs
-
-    @staticmethod
-    def get_ismn_files(ismn_dir: str, fs: fsspec.filesystem) -> list:
-        """
-        Get all ISMN files in a given directory recursively.
-
-        Parameters
-        ----------
-        ismn_dir : str
-            Directory containing ISMN files.
-        fs : fsspec.filesystem
+        fs : fsspec.AbstractFileSystem
             Filesystem object for the specified directory.
 
         Returns
         -------
         list
-            List of ISMN file paths.
+            List of ISMN file paths for the specified gage ID and date.
         """
         ismn_files = []
-        for entry in fs.ls(ismn_dir, detail=True):
-            if entry['type'] == 'file' and entry['name'].endswith('.stm'):
-                ismn_files.append(entry['name'])
-            elif entry['type'] == 'directory':
-                ismn_files.extend(ISMNDataLoader.get_ismn_files(entry['name'], fs))
+        # construct the path to the gage directory
+        gage_dir = f"{ismn_base_dir}/gage_{gage_id}"
 
-        # for ismn_file in ismn_files:
-        #     print(ismn_file)
+        # check if gage_dir exists
+        if not fs.exists(gage_dir):
+            print(f"Gage directory {gage_dir} does not exist.")
+            return ismn_files
 
+        # iterate over all directories in the gage directory
+        for entry in fs.ls(gage_dir, detail=True):
+            if entry['type'] == 'directory':
+                network_dir = entry['name']
+
+                # verify that network_dir is in 'network={network}' format
+                if not network_dir.startswith('network='):
+                    print(f"Skipping non-network directory: {network_dir}")
+                    continue
+
+                # check if network_dir exists
+                if not fs.exists(network_dir):
+                    print(f"Network directory {network_dir} does not exist for gage {gage_id}.")
+                    continue
+
+                # iterate over all station directories in the network directory
+                for station_entry in fs.ls(network_dir, detail=True):
+                    if station_entry['type'] == 'directory':
+                        station_dir = station_entry['name']
+
+                        # verify that station_dir is in 'station={station}' format
+                        if not station_dir.startswith('station='):
+                            print(f"Skipping non-station directory: {station_dir}")
+                            continue
+
+                        # check if station_dir exists
+                        if not fs.exists(station_dir):
+                            print(f"Station directory {station_dir} does not exist for gage {gage_id}.")
+                            continue
+
+                        # construct the path to the target date directory
+                        date_dir = f"{station_dir}/date={target_date}"
+
+                        # check if the date directory exists
+                        if fs.exists(date_dir):
+                            # iterate over all files in the date directory
+                            for file_entry in fs.ls(date_dir, detail=True):
+                                if file_entry['type'] == 'file' and file_entry['name'].endswith('.parquet'):
+                                    ismn_files.append(file_entry['name'])
+
+                        else:
+                            print(f"Date directory {date_dir} does not exist for gage {gage_id}.")
+
+        print(f"Found {len(ismn_files)} ISMN files for gage {gage_id} on date {target_date}.")
         return ismn_files
 
     @staticmethod
-    def preprocess_ismn_file_to_fs_buffer(file: IO, target_date: str) -> BytesIO:
+    def get_ismn_data(ismn_files: list, gage_id: str, target_date: str, fs: fsspec.AbstractFileSystem) -> gpd.GeoDataFrame | None:
         """
-        Preprocess a raw ISMN file and filter data by target_date.
-
-        Parameters
-        ----------
-        file : IO
-            A file-like object containing the raw ISMN data
-        target_date : str
-            The target date for filtering data (format: 'YYYY-MM-DD')
-
-        Returns
-        -------
-        BytesIO
-            A binary buffer containing the preprocessed data for file
-        """
-        # compile regex to capture two datetime stamps and the rest of the line
-        ts_pattern = re.compile(
-            # start timestamp: yyyy/mm/dd hh:mm
-            r'^(?P<start>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
-            # end timestamp: yyyy/mm/dd hh:mm
-            r'(?P<end>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s+'
-            # everything else on the line
-            r'(?P<rest>.*)$'
-        )
-
-        # create a binary buffer for output
-        output = BytesIO()
-
-        # wrap the binary buffer with text mode for csv.writer
-        text_buf = TextIOWrapper(output, encoding='utf-8', newline='')
-
-        # create a csv writer that writes to the text buffer
-        writer = csv.writer(text_buf)
-
-        # track empty file
-        empty_file = True
-
-        # iterate over each raw line in the input file
-        for raw in file:
-            # decode bytes to string and strip trailing whitespace/newline
-            line = raw.decode('utf-8').strip()
-
-            # attempt to match the line against the timestamp regex
-            m = ts_pattern.match(line)
-
-            # skip this line if not regex match
-            if not m:
-                continue
-
-            # extract start timestamp
-            start_time = m.group('start')
-
-            # extract end timestamp
-            end_time = m.group('end')
-
-            # check if target_date is between start and end dates. ignore times
-            try:
-                start_dt = datetime.strptime(start_time, "%Y/%m/%d %H:%M")
-                end_dt = datetime.strptime(end_time, "%Y/%m/%d %H:%M")
-                target_dt = datetime.strptime(target_date, "%Y-%m-%d")
-
-                if not (start_dt.date() <= target_dt.date() <= end_dt.date()):
-                    # skip this line if target_date is not in range
-                    continue
-
-            except ValueError:
-                # if date parsing fails, skip the line
-                continue
-
-            # if we reach here, we have a valid line for the target date and file is not empty
-            empty_file = False
-
-            # extract rest of line
-            rest_str = m.group('rest')
-
-            # split the remainder on whitespace into exactly 11 items
-            rest = rest_str.split()
-
-            # if splitting did not yield 11 fields, skip the line
-            if len(rest) != 11:
-                continue
-            # write the row to the csv buffer (automatically adds newline)
-            writer.writerow([start_time, end_time] + rest)
-
-        # flush the text buffer to ensure all data is written to the binary buffer
-        text_buf.flush()
-
-        # detach the text buffer from the binary buffer but keep the binary buffer open
-        text_buf.detach()
-
-        # if file had no matching lines, return None
-        if empty_file:
-            print(f"No data found for date {target_date} in file.")
-            return None
-
-        # rewind the binary buffer to the beginning for reading
-        output.seek(0)
-        # return the prepared buffer
-        return output
-
-    @staticmethod
-    def get_ismn_data(ismn_files: list, target_date: str, fs: fsspec.filesystem) -> gpd.GeoDataFrame:
-        """
-        Load ISMN data from a list of ISMN files into a GeoDataFrame.
+        Get ISMN station directories which fall within basin boundaries
 
         Parameters
         ----------
         ismn_files : list
-            List of ISMN file paths.
-        fs : fsspec.filesystem
-            Filesystem object for the specified files.
+            List of ISMN parquet file paths
+        gage_id : str
+            Gage ID to filter station directories
+        target_date : str
+            Date in the format 'YYYY-MM-DD' to filter data
+        fs : fsspec.AbstractFileSystem
+            Filesystem object for the specified files
 
         Returns
         -------
-        gpd.GeoDataFrame
-            GeoDataFrame containing ISMN data.
+        gpd.GeoDataFrame | None
+            GeoDataFrame containing ISMN data for the specified gage_id and date
         """
         column_names = [
-            'utc_nominal', 'utc_actual', 'cse_id', 'network', 'station',
-            'lat', 'lon', 'elevation', 'depth_from', 'depth_to',
-            'value', 'ismn_flag', 'provider_flag'
-
-        ]
-        # print(f"number of columns: {len(column_names)}")
-
-        usecols = [
-            'utc_nominal', 'network', 'station', 'lat', 'lon',
-            'depth_from', 'depth_to', 'value', 'ismn_flag', 'provider_flag'
+            'gage_id', 'network', 'station', 'date', 'utc_nominal',
+            'utc_actual', 'cse_id', 'lat', 'lon', 'elevation',
+            'depth_from', 'depth_to', 'soil_moisture_value', 'ismn_flag',
+            'provider_flag'
         ]
 
         all_ismn_dfs = []
+
         for ismn_file in ismn_files:
             with fs.open(ismn_file, 'rb') as file:
-                # preprocess the file to handle whitespace and commas within fields
-                processed_file = ISMNDataLoader.preprocess_ismn_file_to_fs_buffer(file, target_date)
+                ismn_file_df = pd.read_parquet(
+                    path=file,
+                    columns=column_names)
 
-                if processed_file is None:
-                    print(f"Skipping file {ismn_file} as it has no data for date {target_date}.")
-                    continue
-
-                ismn_file_df = pd.read_csv(
-                    processed_file,
-                    sep=',',
-                    header=None,
-                    names=column_names,
-                    usecols=usecols
-                )
+                # create a geometry column from lat/lon
                 ismn_file_df['geometry'] = ismn_file_df.apply(
-                    lambda row: Point(row['lon'], row['lat']), axis=1
-                )
-
-                print(f"Processing file: {ismn_file}")
-                # n = min(10, len(ismn_file_df))
-                # print(ismn_file_df.sample(n).to_string(index=False))
+                    lambda row: Point(row['lon'], row['lat']), axis=1)
 
                 all_ismn_dfs.append(ismn_file_df)
 
-        print(f"Total ISMN files processed: {len(all_ismn_dfs)}")
-        # n = min(25, len(all_ismn_dfs))
-        # print(all_ismn_dfs[:n])
+        if not all_ismn_dfs:
+            print(f"No valid ISMN data found for gage {gage_id} on date {target_date}.")
+            return None
 
         # concatenate all DataFrames into a single GeoDataFrame
         ismn_data_gdf = gpd.GeoDataFrame(pd.concat(all_ismn_dfs, ignore_index=True), geometry='geometry', crs='EPSG:4326')
@@ -261,6 +156,7 @@ class ISMNDataLoader:
         n = min(10, len(ismn_data_gdf))
         print("Sample ISMN data GeoDataFrame:")
         print(ismn_data_gdf.sample(n).to_string(index=False))
+
         return ismn_data_gdf
 
 
@@ -275,34 +171,28 @@ class ISMNCalculator:
         ----------
         ismn_data_gdf : geopandas.GeoDataFrame
             GeoDataFrame containing ISMN data with columns:
-            ['utc_nominal','network','station','lat','lon',
-            'depth_from','depth_to','value','ismn_flag','provider_flag','geometry']
+            ['gage_id', 'network', 'station', 'date', 'utc_nominal',
+            'utc_actual', 'cse_id', 'lat', 'lon', 'elevation',
+            'depth_from', 'depth_to', 'soil_moisture_value', 'ismn_flag',
+            'provider_flag']
 
         Returns
         -------
         pd.DataFrame
-            DataFrame with columns ['network','station','date','hour','lat','lon','depth_weighted_sm_avg']
-            giving, for each station-hour, the date and depth-weighted soil moisture average.
+            DataFrame with columns ['gage_id', 'network','station','date','hour','lat','lon','depth_weighted_sm_avg']
         """
         # work on a copy to avoid mutating the input geodataframe
-        df = ismn_data_gdf.copy()
-
-        # ensure utc_nominal is a datetime column
-        df['utc_nominal'] = pd.to_datetime(
-            df['utc_nominal'],
-            format='%Y/%m/%d %H:%M',
-            errors='raise'
-        )
+        gdf = ismn_data_gdf.copy()
 
         # round each timestamp down to the start of its hour for grouping
-        df['hour'] = df['utc_nominal'].dt.floor('h')
+        gdf['hour'] = gdf['utc_nominal'].dt.floor('h')
 
         # determine the unique measurement depths (we assume depth_to == depth_from)
-        depths = sorted(df['depth_to'].unique())
+        depths = sorted(gdf['depth_to'].unique())
 
         # print(f"Measurement depths (m): {depths}")
 
-        unique_depth_from = sorted(df['depth_from'].unique())
+        unique_depth_from = sorted(gdf['depth_from'].unique())
 
         print("unique depth_from values (m):")
         for d_f in unique_depth_from:
@@ -383,52 +273,36 @@ class ISMNCalculator:
 
 
 class ISMNPlotter:
-    @staticmethod
-    def add_ismn_overlay(ax, ismn_data_df, proj):
-        """
-        Add ISMN data overlay to a given plot axis.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes
-            Axes object to add overlay to
-        ismn_data_df : pd.DataFrame
-            DataFrame with station information and ISMN soil moisture depth-weighted average values
-        proj : cartopy.crs
-            The projection to use for the overlay
-        """
-        pass
+    pass
 
 
 if __name__ == "__main__":
-    ismn_base_dir = "/home/miguel.pena/noaa-owp/soil_moisture_sample_data"
+    ismn_base_dir = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/ismn_preprocessed_data"
     date = "2024-09-20"
+    fs = fsspec.filesystem('file')
 
-    # get list of ISMN directories for the given date
-    ismn_dirs, fs = ISMNDataLoader.get_ismn_dirs_by_date(ismn_base_dir, date)
-    # print(f"Total ISMN directories found: {len(ismn_dirs)}\n")
+    ismn_files = ISMNDataLoader.get_ismn_files(
+        ismn_base_dir=ismn_base_dir,
+        gage_id="07241780",
+        target_date=date,
+        fs=fs
+    )
 
-    # print sample dirs
-    # n = min(5, len(ismn_dirs))
-    # print("Sample ISMN directories:")
-    # for i in range(n):
-    #     print(ismn_dirs[i])
+    print(f"Total ISMN files found: {len(ismn_files)}")
 
-    ismn_files = []
-
-    # get all ISMN files from the directories
-    for ismn_dir in ismn_dirs:
-        ismn_files.extend(ISMNDataLoader.get_ismn_files(ismn_dir, fs))
-
-    # print(f"Total ISMN files found: {len(ismn_files)}")
-
-    # print("Sample ISMN files:")
-    # for i in range(5):
-    #     ismn_file = ismn_files[i]
-    #     print(ismn_file)
+    print("Sample ISMN files:")
+    min = min(5, len(ismn_files))
+    for i in range(min):
+        ismn_file = ismn_files[i]
+        print(ismn_file)
 
     # load ISMN data into a GeoDataFrame
-    ismn_data_gdf = ISMNDataLoader.get_ismn_data(ismn_files, date, fs)
+    ismn_data_gdf = ISMNDataLoader.get_ismn_data(
+        ismn_files=ismn_files,
+        gage_id="07241780",
+        target_date=date,
+        fs=fs
+    )
 
     # getting the depth-weighted average of ISMN soil moisture data into a DataFrame
     depth_weighted_avg_df = ISMNCalculator.calculate_depth_weighted_average(ismn_data_gdf)
