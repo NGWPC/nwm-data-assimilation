@@ -1,14 +1,9 @@
-import re
-import csv
 import fsspec
 import pandas as pd
 import geopandas as gpd
 
-from typing import IO
-from datetime import datetime
 from pathlib import PurePath
 from shapely.geometry import Point
-from io import BytesIO, TextIOWrapper
 
 
 class ISMNDataLoader:
@@ -312,8 +307,6 @@ if __name__ == "__main__":
         target_date=date,
         fs=fs
     )
-
-    print(f"Total ISMN files found: {len(ismn_files)}")
 
     # load ISMN data into a GeoDataFrame
     ismn_data_gdf = ISMNDataLoader.get_ismn_data(
