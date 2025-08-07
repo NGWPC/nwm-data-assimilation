@@ -38,6 +38,7 @@ class ISMNPreprocessor:
     def normalize_station_name(name: str) -> str:
         """
         Normalize station name by removing special characters and converting to lowercase
+
         Parameters
         ----------
         name : str
@@ -85,7 +86,7 @@ class ISMNPreprocessor:
         return [match.group('nominal_datetime'), match.group('actual_datetime')] + rest_fields
 
     @staticmethod
-    def iter_ismn_records(file_obj: Iterator[bytes]) -> Iterator[list[str]]:
+    def iterate_ismn_records(file_obj: Iterator[bytes]) -> Iterator[list[str]]:
         """
         Iterate over all valid ISMN records in an open file object.
 
@@ -209,7 +210,7 @@ class ISMNPreprocessor:
         found_raw_ismn_files: List[str] = []
         files_processed = 0
 
-        # decide whether ismn_source is a single .stm file or a directory
+        # determine whether ismn_source is a single .stm file or a directory
         if fs.isfile(ismn_source) and ismn_source.lower().endswith('.stm'):
             # single-file input: wrap in a list for uniform processing
             directory_entries = [{'name': ismn_source, 'type': 'file'}]
@@ -232,13 +233,16 @@ class ISMNPreprocessor:
                     break
 
             elif entry['type'] == 'directory':
-                # recurse into subdirectory for more .stm files
+                # recursively search into subdirectories for more .stm files
                 remaining = None if limit is None else (limit - files_processed)
                 sub_files = ISMNPreprocessor.get_raw_ismn_files(entry_path, fs, remaining)
 
+                # iterate over .stm files from subdirectory
                 for sub_file in sub_files:
+                    # stop early if reached the specified limit
                     if limit is not None and files_processed >= limit:
                         break
+
                     found_raw_ismn_files.append(sub_file)
                     files_processed += 1
 
@@ -402,7 +406,7 @@ class ISMNPreprocessor:
             # open the raw file as bytes and get the first valid line
             with fs.open(file_path, 'rb') as f:
                 # use iterator to get the first valid line
-                first_line = next(ISMNPreprocessor.iter_ismn_records(f), None)
+                first_line = next(ISMNPreprocessor.iterate_ismn_records(f), None)
 
             # skip files with no valid lines
             if not first_line:
@@ -516,7 +520,7 @@ class ISMNPreprocessor:
 
             with fs.open(file_path, 'rb') as f:
                 # parse each valid line into its fields
-                for fields in ISMNPreprocessor.iter_ismn_records(f):
+                for fields in ISMNPreprocessor.iterate_ismn_records(f):
                     # unpack fields, renaming start/end to nominal/actual, value to soil_moisture_value
                     nominal_datetime, actual_datetime, cse_id, network, station, \
                     lat, lon, elevation, depth_from, depth_to, soil_moisture_value, \
@@ -526,7 +530,7 @@ class ISMNPreprocessor:
                     date = datetime.strptime(nominal_datetime, "%Y/%m/%d %H:%M")\
                         .date().isoformat()
 
-                    # collect all relevant columns plus the partition keys
+                    # collect all relevant columns along with the partition keys
                     all_records.append({
                         'gage_id': gage_id,
                         'network': network,

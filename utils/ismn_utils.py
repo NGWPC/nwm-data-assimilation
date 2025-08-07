@@ -139,10 +139,12 @@ class ISMNDataLoader:
 
         all_ismn_dfs = []
 
+        # iterate over ismn files
         for ismn_file in ismn_files:
             print(f"Loading {ismn_file}...")
 
             with fs.open(ismn_file, 'rb') as file:
+                # read parquet file into a DataFrame
                 ismn_file_df = pd.read_parquet(
                     path=file,
                     columns=column_names)
@@ -151,6 +153,7 @@ class ISMNDataLoader:
                 ismn_file_df['geometry'] = ismn_file_df.apply(
                     lambda row: Point(row['lon'], row['lat']), axis=1)
 
+                # append the DataFrame to list
                 all_ismn_dfs.append(ismn_file_df)
 
         if not all_ismn_dfs:
@@ -197,8 +200,9 @@ class ISMNCalculator:
         gdf['hour'] = pd.to_datetime(gdf['utc_nominal']).dt.floor('h')
 
         # print sample gdf['hour']
-        print("Sample gdf['hour']:")
+        print("\nSample gdf['hour']:")
         print(gdf['hour'].sample(5).to_string(index=False))
+        print()
 
         # iterate over gdf columns and print the data type of each
         for col in gdf.columns:
@@ -234,6 +238,7 @@ class ISMNCalculator:
         print("Lower bounds of depth layers (m):")
         for lb in lower_bounds:
             print(f"{lb:.3f} m")
+        print()
 
         # each layer ends at the next midpoint, except the deepest always ends at 1.25 m
         upper_bounds = midpoints + [1.25]
@@ -241,6 +246,7 @@ class ISMNCalculator:
         print("Upper bounds of depth layers (m):")
         for ub in upper_bounds:
             print(f"{ub:.3f} m")
+        print()
 
         # build a mapping from depth to layer thickness (upper_bound minus lower_bound)
         weight_map = {
@@ -250,6 +256,7 @@ class ISMNCalculator:
 
         for k, v in weight_map.items():
             print(f"Weight for depth {k} m: {v:.3f} m")
+        print()
 
         # assign each measurement its layer thickness as its weight
         gdf['weight'] = gdf['depth_to'].map(weight_map)
@@ -267,7 +274,7 @@ class ISMNCalculator:
         # add date column to 'hourly' by extracting just the calendar date from the hourly timestamp
         hourly['date'] = hourly['hour'].dt.date
 
-        # convert the 'hour' column to a string format 'HH:MM'
+        # convert the 'hour' column to a string formatted 'HH:MM'
         hourly['hour'] = hourly['hour'].dt.strftime('%H:%M')
 
         # build a small DataFrame 'coords' with one entry per station,
@@ -282,10 +289,10 @@ class ISMNCalculator:
         result = result[['network', 'station', 'date', 'hour', 'lat', 'lon', 'depth_weighted_sm_avg']]
 
         print(f"Result DataFrame shape: {result.shape}")
-        print("First 10 rows of result DataFrame:")
+        print("\nFirst 10 rows of result DataFrame:")
         print(result.head(10).to_string(index=False))
 
-        print("Last 10 rows of result DataFrame:")
+        print("\nLast 10 rows of result DataFrame:")
         print(result.tail(10).to_string(index=False))
         return result
 
@@ -317,5 +324,4 @@ if __name__ == "__main__":
     )
 
     # getting the depth-weighted average of ISMN soil moisture data into a DataFrame
-    ISMNCalculator.calculate_depth_weighted_average(ismn_data_gdf)
-    # depth_weighted_avg_df = ISMNCalculator.calculate_depth_weighted_average(ismn_data_gdf)
+    depth_weighted_avg_df = ISMNCalculator.calculate_depth_weighted_average(ismn_data_gdf)
