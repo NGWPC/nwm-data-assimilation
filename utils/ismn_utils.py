@@ -2,7 +2,7 @@ import fsspec
 import pandas as pd
 import geopandas as gpd
 
-from pathlib import PurePath
+from pathlib import PurePath, Path
 from shapely.geometry import Point
 
 
@@ -297,13 +297,17 @@ class ISMNPlotter:
 
 
 if __name__ == "__main__":
-    ismn_base_dir = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/ismn_preprocessed_data"
-    date = "2024-09-20"
+    # ismn_base_dir
+    this_file = Path(__file__).resolve()
+    soil_moisture_dir = this_file.parents[1]  # .../ngen-forcing/soil_moisture
+    ismn_base_dir = soil_moisture_dir / "sample_data" / "sample_preprocessed_ismn_data"
+    date = "2025-01-01"
+    gage_id = "07241780"
     fs = fsspec.filesystem('file')
 
     ismn_files = ISMNDataLoader.get_ismn_files(
         ismn_base_dir=ismn_base_dir,
-        gage_id="07241780",
+        gage_id=gage_id,
         target_date=date,
         fs=fs
     )
@@ -311,7 +315,7 @@ if __name__ == "__main__":
     # load ISMN data into a GeoDataFrame
     ismn_data_gdf = ISMNDataLoader.get_ismn_data(
         ismn_files=ismn_files,
-        gage_id="07241780",
+        gage_id=gage_id,
         target_date=date,
         fs=fs
     )

@@ -588,7 +588,7 @@ class ISMNPreprocessor:
 if __name__ == "__main__":
     fs = fsspec.filesystem('file')
 
-    # set sample_raw_ismn_data path
+    # set ismn_raw_data_base_path
     this_file = Path(__file__).resolve()
     soil_moisture_dir = this_file.parents[2]  # .../ngen-forcing/soil_moisture
     ismn_raw_data_base_path = (
