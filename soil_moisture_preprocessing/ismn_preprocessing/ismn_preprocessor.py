@@ -152,7 +152,7 @@ class ISMNPreprocessor:
                 fname = PurePath(path).name
                 gage_id = fname.removeprefix('gages-').removesuffix('.gpkg')
 
-                print(f"Processing gage {gage_id}...")
+                print(f"\nProcessing gage {gage_id}...")
 
                 # read the 'divides' layer and ensure it's in geographic CRS
                 basin_gdf = GeoUtils.read_geo(path)
@@ -463,9 +463,8 @@ class ISMNPreprocessor:
         )
 
         print("basins CRS:", basin_df.crs)
-
-        print("stations bounds:", stations_gdf.total_bounds)
-        print("basins   bounds:", basin_df.total_bounds)
+        print("total bounds for all ISMN stations:", stations_gdf.total_bounds)
+        print("total bounds for all basins:", basin_df.total_bounds)
 
         # spatial join stations to basins
         joined = gpd.sjoin(
@@ -588,12 +587,25 @@ class ISMNPreprocessor:
 
 if __name__ == "__main__":
     fs = fsspec.filesystem('file')
-    ismn_raw_data_base_path = "/home/miguel.pena/noaa-owp/soil_moisture_sample_data"
+
+    # set sample_raw_ismn_data path
+    this_file = Path(__file__).resolve()
+    soil_moisture_dir = this_file.parents[2]  # .../ngen-forcing/soil_moisture
+    ismn_raw_data_base_path = (
+        soil_moisture_dir / "sample_data" / "sample_raw_ismn_data" / "Data_separate_files_20250101_20250103_12344_pfwL_20250809"
+    ).as_posix()
+
+    # set basin geometries path
+    basin_geometries_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/basin_geometries.parquet"
+
+    # set gpkg_path
+    gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages"
 
     # get raw ISMN files
     raw_ismn_files = ISMNPreprocessor.get_raw_ismn_files(ismn_raw_data_base_path, fs)
 
     print(f"Found {len(raw_ismn_files)} raw ISMN files...")
+
     # extract unique stations from raw ISMN files
     stations_gdf = ISMNPreprocessor.extract_unique_stations(raw_ismn_files, fs)
 
@@ -606,26 +618,38 @@ if __name__ == "__main__":
     print("Last few rows of unique stations:")
     print(stations_gdf.tail())
 
-    gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages"
-    # gpkg_path = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/conus_geopackages/gages-08447020.gpkg"
-    output_dir = "/home/miguel.pena/s3/ngwpc-dev/miguel.pena/ismn_preprocessed_data"
+    # set output_dir path
+    output_dir = (
+        soil_moisture_dir / "sample_data" / "sample_preprocessed_ismn_data"
+    ).as_posix()
 
-    # load basin geometries from geopackages into a dictionary
+    # load basin_geometries from a parquet file or from gpkg files
     # where keys are gage_ids and values are shapely geometries
-    basin_geometries = ISMNPreprocessor.load_basin_geometries(gpkg_path, fs)
-    print("Loaded basins:", list(basin_geometries.keys()))
+
+    # if basin_geometries.parquet exists, read basin geometries back in
+    if fs.exists(basin_geometries_path):
+        print(f"\nLoading basin geometries from {basin_geometries_path}...")
+        gdf = gpd.read_parquet(basin_geometries_path)
+
+        # reconstruct basin geometries dict
+        basin_geometries = dict(zip(gdf.gage_id, gdf.geometry))
+
+    else:
+        print(f"No basin_geometries.parquet file found. Building basin_geometries from gpkg files...")
+        # load basin geometries from geopackages into a dictionary
+        basin_geometries = ISMNPreprocessor.load_basin_geometries(gpkg_path, fs)
 
     station_to_gage = ISMNPreprocessor.map_stations_to_basins(stations_gdf, basin_geometries)
-    print(f"Mapped {len(station_to_gage)} SCAN and USCRN stations to CONUS gages...")
+    print(f"\nMapped {len(station_to_gage)} SCAN and USCRN stations to CONUS gages...")
     for (network, station), gage_id in station_to_gage.items():
         print(f"Network: {network}, Station: {station} -> Gage ID: {gage_id}")
 
-    # all_stations = {(r.network, r.station) for r in stations_gdf.itertuples()}
-    # mapped = set(station_to_gage)
-    # unmapped = all_stations - mapped
-    # print(f"{len(unmapped)} stations unmapped:")
-    # for (network, station) in unmapped:
-    #     print(f"Network: {network}, Station: {station} -> Gage ID: None (unmapped)")
+    all_stations = {(r.network, r.station) for r in stations_gdf.itertuples()}
+    mapped = set(station_to_gage)
+    unmapped = all_stations - mapped
+    print(f"\n{len(unmapped)} stations unmapped:")
+    for (network, station) in unmapped:
+        print(f"Network: {network}, Station: {station} -> Gage ID: None (unmapped)")
 
     # filter ISMN files to only those that have stations within known basins
     ismn_files_within_basins = ISMNPreprocessor.filter_ismn_files_within_basins(
