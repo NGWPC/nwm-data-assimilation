@@ -38,13 +38,13 @@ class GeoUtils:
         extract a unified basin geometry and its bounds from a GeoDataFrame containing basin divides
 
         Parameters
-        ------------
+        ----------
         basin_gdf: geopandas.GeoDataFrame
             GeoDataFrame with a 'geometry' column of Polygon/MultiPolygon features.
             must be in a geographic CRS (e.g. EPSG:4326) before calling.
 
         Returns
-        --------
+        -------
         tuple[BaseGeometry, tuple]
             unified_basin_geom: combined shapely geometry representing the entire basin
             basin_bounds: (minx, miny, maxx, maxy) tuple defining the basin extent
@@ -65,7 +65,7 @@ class GeoUtils:
             try:
                 unified_basin_geom = unary_union(valid_geometries)
             except Exception:
-                # fallback to GeoPandas’ union_all if unary_union isn’t available
+                # fallback to union_all
                 unified_basin_geom = basin_gdf.geometry.values.union_all()
 
         # compute the bounding box of the final basin shape
