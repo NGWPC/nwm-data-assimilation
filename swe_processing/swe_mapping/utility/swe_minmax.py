@@ -1,13 +1,18 @@
+"""Utility functions for tracking global min/max values across multiple data arrays."""
+
 import numpy as np
 
 # Initialize global variables
-_global_min = float('inf')  
-_global_max = float('-inf')
+_global_min = float("inf")
+_global_max = float("-inf")
 
-def get_minmax(current_data):
-    """
-    Updates the global min/max with current data,
-    returns the current global values
+
+def get_minmax(current_data: np.ndarray) -> tuple:
+    """Update the global min/max with current data.
+
+    Returns:
+        The current global values
+
     """
     global _global_min, _global_max
 
@@ -18,17 +23,15 @@ def get_minmax(current_data):
     else:
         current_min = np.nanmin(current_data)
         current_max = np.nanmax(current_data)
-    
+
     _global_min = min(_global_min, current_min)
     _global_max = max(_global_max, current_max)
-    
+
     return _global_min, _global_max
 
-def reset_minmax():
-    """
-    Reset the global min/max values
-    """
-    global _global_min, _global_max
-    _global_min = float('inf')
-    _global_max = float('-inf')
 
+def reset_minmax() -> None:
+    """Reset the global min/max values."""
+    global _global_min, _global_max
+    _global_min = float("inf")
+    _global_max = float("-inf")
