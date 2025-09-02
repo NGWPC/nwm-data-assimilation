@@ -2,12 +2,14 @@
 
 import argparse
 import json
+import logging
 import os
 from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
 
+logger = logging.getLogger(__name__)
 # SNOTEL REST API root
 base_url = "https://wcc.sc.egov.usda.gov/awdbRestApi/"
 
@@ -138,37 +140,37 @@ def main() -> None:
     end_date = args.end_date
 
     if station_file:
-        print(f"Retrieving list of stations from file {station_file}")
+        logger.info(f"Retrieving list of stations from file {station_file}")
         stations = get_stations_from_file(station_file)
     else:
-        print(f"Retrieving list of stations from endpoint {stations_url}")
+        logger.info(f"Retrieving list of stations from endpoint {stations_url}")
         stations = get_stations_from_endpoint()
 
     num_stations = len(stations)
-    print(f"Number of stations: {num_stations}")
+    logger.info(f"Number of stations: {num_stations}")
     station_count = 0
 
     for station in stations:
         station_id = station["stationTriplet"]
-        print()
+        logger.info()
         try:
-            print(f"Retrieving SWE data for {station_id}")
+            logger.info(f"Retrieving SWE data for {station_id}")
             response = make_data_request(station, begin_date, end_date)
         except Exception as e:
-            print(f"ERROR: Unable to retrieve data ... skipping station\n{e}")
+            logger.info(f"ERROR: Unable to retrieve data ... skipping station\n{e}")
             continue
 
         if not response.ok:
-            print(
+            logger.info(
                 f"ERROR: HTTP response status code has unexpected value: {response.status_code} ... skippking station"
             )
-            print(f"URL: {response.url}")
+            logger.info(f"URL: {response.url}")
             continue
 
         try:
             json_data = response.json()
         except Exception as e:
-            print(
+            logger.info(
                 f"ERROR: Unable to decode JSON in HTTP response ... skipping station\n{e}"
             )
             continue
@@ -179,10 +181,10 @@ def main() -> None:
         with open(file_path, "w") as f:
             json.dump(json_data, f, indent=4)
 
-        print(f"Created file {file_path}")
+        logger.info(f"Created file {file_path}")
         station_count += 1
 
-    print(
+    logger.info(
         f"\nDownload Complete! Retrieved data for {station_count} out {num_stations} stations"
     )
 

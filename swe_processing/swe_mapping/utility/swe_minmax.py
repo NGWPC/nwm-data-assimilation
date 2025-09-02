@@ -1,10 +1,15 @@
 """Utility functions for tracking global min/max values across multiple data arrays."""
 
+import logging
+
 import numpy as np
 
 # Initialize global variables
 _global_min = float("inf")
 _global_max = float("-inf")
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_minmax(current_data: np.ndarray) -> tuple:
@@ -17,7 +22,7 @@ def get_minmax(current_data: np.ndarray) -> tuple:
     global _global_min, _global_max
 
     if np.isnan(current_data).all():
-        print("Warning: current_data contains only NaNs, skipping min/max calculation.")
+        logger.warning("current_data contains only NaNs, skipping min/max calculation.")
         current_min = np.nan  # or some default value
         current_max = np.nan
     else:

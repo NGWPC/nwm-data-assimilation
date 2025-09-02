@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import logging
 import os
 import re
 from datetime import datetime
@@ -9,6 +10,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+logger = logging.getLogger(__name__)
 
 
 def read_swe_values_from_dir(directory: str, dates: list) -> tuple:
@@ -51,7 +54,7 @@ def read_swe_values_from_dir(directory: str, dates: list) -> tuple:
     if catchment_ids.size == 0:
         raise Exception(f"No valid catchment files found in {directory}: {csv_files}")
 
-    print(f"catchment_ids: {catchment_ids}")
+    logger.info(f"catchment_ids: {catchment_ids}")
 
     # Initialize data array - 2d (times, ids)
     data = np.full((len(times), len(catchment_ids)), np.nan)
@@ -65,7 +68,7 @@ def read_swe_values_from_dir(directory: str, dates: list) -> tuple:
             df.columns = df.columns.str.lower()
 
             if "swe_m" not in df.columns and "swe_mm" not in df.columns:
-                print(f"SWE columns not found in {file_path}")
+                logger.info(f"SWE columns not found in {file_path}")
                 missing_swe_data = True
                 continue
 
@@ -83,7 +86,7 @@ def read_swe_values_from_dir(directory: str, dates: list) -> tuple:
             data[:, idx] = values
 
         except Exception as e:
-            print(f"Error processing {file_path}: {e}")
+            logger.info(f"Error processing {file_path}: {e}")
             continue
 
     # Check if any files were missing SWE data
@@ -131,9 +134,9 @@ def main(args_list=None) -> None:
     output = args.output
 
     catchment_ids, times, data = read_swe_values_from_dir(directory, dates)
-    print(f"Converted {len(catchment_ids)} catchments")
-    # print(f"Time steps: {times}")
-    # print(f"Data shape: {data.shape}")
+    logger.info(f"Converted {len(catchment_ids)} catchments")
+    # logger.info(f"Time steps: {times}")
+    # logger.info(f"Data shape: {data.shape}")
 
     write_to_netcdf(catchment_ids, times, data, output)
 

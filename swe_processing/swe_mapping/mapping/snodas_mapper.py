@@ -1,6 +1,7 @@
 """SNODAS Mapper."""
 
 import argparse
+import logging
 import os
 import time
 
@@ -18,6 +19,8 @@ from ..utility.geo_utils import GeoUtils
 from ..utility.plot_utils import PlotUtils
 from ..utility.snotel_utils import SnotelCalculator, SnotelDataLoader, SnotelPlotter
 from ..utility.swe_minmax import get_minmax
+
+logger = logging.getLogger(__name__)
 
 
 class DataLoader:
@@ -105,13 +108,13 @@ class DataLoader:
         chunk_size = 100
 
         # Open the SNODAS NetCDF file with chunking to optimize performance and memory usage.
-        print("Opening netCDF file", snodas_file)
+        logger.info(f"Opening netCDF file: {snodas_file}")
         with fsspec.open(snodas_file, mode="rb") as f:
             snodas_ds = xr.open_dataset(
                 f, chunks={"time": 1, "lat": chunk_size, "lon": chunk_size}
             )
 
-        print(f"   SNODAS NetCDF load time: {time.time() - t0:.2f}s")
+        logger.info(f"   SNODAS NetCDF load time: {time.time() - t0:.2f}s")
 
         return snodas_ds
 
@@ -265,7 +268,7 @@ class Plotter:
         return PlotUtils.add_gridlines(ax)
 
     @staticmethod
-    def add_colorbar(im: plt.Image, ax: plt.Axes) -> None:
+    def add_colorbar(im, ax: plt.Axes) -> None:
         """Add a colorbar to a map plot."""
         return PlotUtils.add_colorbar(im, ax)
 
@@ -525,9 +528,9 @@ class SNODASProcessor:
         if self.output_file_raw:
             t4 = time.time()
             Plotter.save_figure(self.raw_fig, self.output_file_raw)
-            print(f"   Raw output time: {time.time() - t4:.2f}s")
+            logger.info(f"   Raw output time: {time.time() - t4:.2f}s")
 
-        print(f"   Raw plotting time: {time.time() - t3:.2f}s")
+        logger.info(f"   Raw plotting time: {time.time() - t3:.2f}s")
 
     def process_catchment(self):
         """Process and plot catchment-averaged SNODAS data."""
@@ -562,9 +565,9 @@ class SNODASProcessor:
         if self.output_file_lumped:
             t6 = time.time()
             Plotter.save_figure(self.catchment_fig, self.output_file_lumped)
-            print(f"   Lumped output time: {time.time() - t6:.2f}s")
+            logger.info(f"   Lumped output time: {time.time() - t6:.2f}s")
 
-        print(f"   Lumped plotting time: {time.time() - t5:.2f}s")
+        logger.info(f"   Lumped plotting time: {time.time() - t5:.2f}s")
 
 
 def get_options(args_list=None) -> argparse.Namespace:

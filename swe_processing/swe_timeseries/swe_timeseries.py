@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import logging
 import os
 import re
 import time
@@ -16,6 +17,8 @@ import pandas as pd
 from matplotlib.dates import DateFormatter, DayLocator
 from swe_mapping.utility.geo_utils import GeoUtils
 from swe_mapping.utility.snotel_utils import SnotelCalculator, SnotelDataLoader
+
+logger = logging.getLogger(__name__)
 
 
 class FileLoader:
@@ -184,7 +187,7 @@ class S3Loader:
             return df
 
         except Exception as e:
-            print(f"Error reading S3 file {s3_path}: {e}")
+            logger.info(f"Error reading S3 file {s3_path}: {e}")
             return None
 
 
@@ -225,7 +228,7 @@ class DataParser:
             mask = snodas_df["timestamp"].isin(times)
 
             if not mask.any():
-                print(
+                logger.info(
                     "Warning: No matching timestamps within date range found in dataframe"
                 )
                 return snodas_data
@@ -248,7 +251,7 @@ class DataParser:
             return snodas_data
 
         except Exception as e:
-            print(f"Error processing basin average data from dataframe: {e}")
+            logger.info(f"Error processing basin average data from dataframe: {e}")
             return np.full(len(times), np.nan)
 
     @staticmethod
@@ -310,12 +313,12 @@ class DataParser:
 
             except ValueError as ve:
                 # For ValueError, set flag and break loop
-                print(f"Critical error with {file_path}: {ve}")
+                logger.info(f"Critical error with {file_path}: {ve}")
                 critical_error = True
                 break
 
             except Exception as e:
-                print(f"Error processing {file_path}: {e}")
+                logger.info(f"Error processing {file_path}: {e}")
                 continue
 
         if critical_error:
@@ -399,9 +402,9 @@ class SWEAnalyzer:
             return basin_avg
 
         except KeyError as e:
-            print(f"Error: Cannot find area for catchment {e}")
-            print(f"Catchment ID type: {type(e.args[0])}")
-            print(f"Area dictionary key type: {type(list(areas.keys())[0])}")
+            logger.info(f"Error: Cannot find area for catchment {e}")
+            logger.info(f"Catchment ID type: {type(e.args[0])}")
+            logger.info(f"Area dictionary key type: {type(list(areas.keys())[0])}")
             raise
 
 
@@ -821,20 +824,20 @@ class SWEProcessor:
         self.basin_geometry, _ = GeoUtils.get_basin_geometry(self.basin_gdf)
         tl9 = time.time()
 
-        print(f"\ntime in load_data: {tl9 - tl0:.5f}s")
-        print(f" - get_filenames time: {tl1 - tl0:.5f}s")
-        print(f" - get_times time: {tl2 - tl1:.5f}s")
-        print(f" - contruct_s3_path time: {tl3 - tl2:.5f}s")
-        print(f" - read_csv_from_s3 time: {tl4 - tl3:.5f}s")
-        print(f" - get_ids time: {tl5 - tl4:.5f}s")
-        print(f" - parse_swe_data time: {tl6 - tl5:.5f}s")
-        print(f" - parse_snodas_data time: {tl7 - tl6:.5f}s")
-        print(f" - read_catchment_areas time: {tl8 - tl7:.5f}s")
-        print(f" - snotel data loading time: {tl9 - tl8:.5f}s")
-        print(
+        logger.info(f"\ntime in load_data: {tl9 - tl0:.5f}s")
+        logger.info(f" - get_filenames time: {tl1 - tl0:.5f}s")
+        logger.info(f" - get_times time: {tl2 - tl1:.5f}s")
+        logger.info(f" - contruct_s3_path time: {tl3 - tl2:.5f}s")
+        logger.info(f" - read_csv_from_s3 time: {tl4 - tl3:.5f}s")
+        logger.info(f" - get_ids time: {tl5 - tl4:.5f}s")
+        logger.info(f" - parse_swe_data time: {tl6 - tl5:.5f}s")
+        logger.info(f" - parse_snodas_data time: {tl7 - tl6:.5f}s")
+        logger.info(f" - read_catchment_areas time: {tl8 - tl7:.5f}s")
+        logger.info(f" - snotel data loading time: {tl9 - tl8:.5f}s")
+        logger.info(
             f"\nread_from_s3 percentage of load_time: {((tl4 - tl3) / (tl9 - tl0)) * 100:.2f}%"
         )
-        print(
+        logger.info(
             f"parse_swe_data percentage of load_time: {((tl6 - tl5) / (tl9 - tl0)) * 100:.2f}%\n"
         )
 
@@ -866,11 +869,11 @@ class SWEProcessor:
         tb = time.time()
         snotel_time = tb - ta
         analyze_time = tb - t0
-        print(f"    - find_stations_in_basin time: {ta1 - ta:.2f}s")
-        print(f"    - get_snotel_timeseries time: {ta2 - ta1:.2f}s")
-        print(f"    - extract_snotel_timeseries time: {tb - ta2:.2f}s")
-        print(f" - SNOTEL processing time: {snotel_time:.2f}s")
-        print(
+        logger.info(f"    - find_stations_in_basin time: {ta1 - ta:.2f}s")
+        logger.info(f"    - get_snotel_timeseries time: {ta2 - ta1:.2f}s")
+        logger.info(f"    - extract_snotel_timeseries time: {tb - ta2:.2f}s")
+        logger.info(f" - SNOTEL processing time: {snotel_time:.2f}s")
+        logger.info(
             f" - SNOTEL % of analyze time: {((snotel_time) / (analyze_time)) * 100:.2f}%"
         )
 
@@ -907,7 +910,7 @@ class SWEProcessor:
         SWEPlotter.add_grids(ax)
         SWEPlotter.titles_labels(ax, self.basin_id)
         SWEPlotter.finalize_plot(fig, self.plot_output)
-        print(f"Basin average SWE data plot saved to {self.plot_output}")
+        logger.info(f"Basin average SWE data plot saved to {self.plot_output}")
 
     def save_basin_avg_to_csv(self) -> None:
         """Save basin average SWE data to csv file."""
@@ -930,48 +933,48 @@ class SWEProcessor:
             # Create DataFrame and save to CSV
             df = pd.DataFrame(data_dict)
             df.to_csv(self.csv_output, index=False)
-            print(f"Basin average SWE data table saved to {self.csv_output}")
+            logger.info(f"Basin average SWE data table saved to {self.csv_output}")
         except Exception as e:
-            print(f"Error saving data to CSV: {e}")
+            logger.info(f"Error saving data to CSV: {e}")
 
     def process(self) -> None:
         """Run the processing pipeline."""
         t0 = time.time()
         self.load_data()
         t1 = time.time()
-        # print(f"load_data time: {t1-t0:.5f}s")
+        # logger.info(f"load_data time: {t1-t0:.5f}s")
 
         t2 = time.time()
         self.analyze_data()
         t3 = time.time()
-        print(f"analyze_data time: {t3 - t2:.5f}s\n")
+        logger.info(f"analyze_data time: {t3 - t2:.5f}s\n")
 
         # Export data to csv if csv_output is provided
         if self.csv_output:
             t4 = time.time()
             self.save_basin_avg_to_csv()
             t5 = time.time()
-            print(f"save_to_csv time: {t5 - t4:.5f}s")
+            logger.info(f"save_to_csv time: {t5 - t4:.5f}s")
         # Generate visualization if plot_output is provided
         if self.plot_output:
             t6 = time.time()
             self.prepare_visualization()
             t7 = time.time()
-            print(f"prepare_visualization time: {t7 - t6:.5f}s")
+            logger.info(f"prepare_visualization time: {t7 - t6:.5f}s")
             t8 = time.time()
             self.create_plot()
             t9 = time.time()
-            print(f"create_plot time: {t9 - t8:.5f}s")
-            print(
+            logger.info(f"create_plot time: {t9 - t8:.5f}s")
+            logger.info(
                 f"\nload_data percentage of total runtime: {((t1 - t0) / (t9 - t0)) * 100:.2f}%"
             )
-            print(
+            logger.info(
                 f"analyze_data percentage of total runtime: {((t3 - t2) / (t9 - t0)) * 100:.2f}%"
             )
-            print(
+            logger.info(
                 f"create_plot percentage of total runtime: {(t9 - t8) / (t9 - t0) * 100:.2f}%"
             )
-            print(f"\ntotal runtime: {t9 - t0:.5f}s")
+            logger.info(f"\ntotal runtime: {t9 - t0:.5f}s")
 
 
 def get_options(args_list=None) -> argparse.Namespace:

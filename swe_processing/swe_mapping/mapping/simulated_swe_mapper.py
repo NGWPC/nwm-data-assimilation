@@ -1,6 +1,7 @@
 """Simulated SWE Mapper."""
 
 import argparse
+import logging
 import os
 import time
 from pathlib import Path
@@ -18,6 +19,8 @@ from ..utility.plot_utils import PlotUtils
 from ..utility.snotel_utils import SnotelCalculator, SnotelDataLoader, SnotelPlotter
 from ..utility.swe_minmax import get_minmax
 
+logger = logging.getLogger(__name__)
+
 
 class DataLoader:
     """Data Loader for simulated SWE data."""
@@ -27,7 +30,7 @@ class DataLoader:
         """Load a NetCDF file and return the xarray Dataset."""
         t0 = time.time()
         sim_ds = xr.open_dataset(netcdf_file)
-        print(f"   NetCDF load time: {time.time() - t0:.2f}s")
+        logger.info(f"   NetCDF load time: {time.time() - t0:.2f}s")
 
         return sim_ds
 
@@ -90,7 +93,7 @@ class Calculator:
             basin_gdf["divide_id"].str.split("-").str[1].astype(int)
         )
         basin_gdf["mean_swe"] = basin_gdf["catchment_id"].map(swe_dict).fillna(np.nan)
-        # print(f"   SWE load/process time: {time.time() - t2:.2f}s")
+        # logger.info(f"   SWE load/process time: {time.time() - t2:.2f}s")
 
         return basin_gdf
 
@@ -168,28 +171,28 @@ class Plotter:
         return PlotUtils.add_gridlines(ax)
 
     @staticmethod
-    def add_colorbar(im: plt.Image, ax: plt.Axes) -> plt.Axes:
+    def add_colorbar(im, ax: plt.Axes) -> plt.Axes:
         """Add a colorbar to a map plot."""
         return PlotUtils.add_colorbar(im, ax)
 
-    @staticmethod
-    def plot_swe_map(
-        netcdf_file: str,
-        gpkg_file: str,
-        date_str: str,
-        output_file: str,
-        mode: str = "plot",
-    ) -> None:
-        """Create a map of simulated SWE values by catchment."""
-        ds, gdf, basin_geometry, bounds = load_and_process_data(
-            netcdf_file, gpkg_file, date_str
-        )
-        # t1 = time.time()
+    # @staticmethod
+    # def plot_swe_map(
+    #     netcdf_file: str,
+    #     gpkg_file: str,
+    #     date_str: str,
+    #     output_file: str,
+    #     mode: str = "plot",
+    # ) -> None:
+    #     """Create a map of simulated SWE values by catchment."""
+    #     ds, gdf, basin_geometry, bounds = load_and_process_data(
+    #         netcdf_file, gpkg_file, date_str
+    #     )
+    #     # t1 = time.time()
 
-        # Call plot function
-        ax, im, vmin, vmax = plot_polygon_simulated_swe(ax, gdf, proj)
+    #     # Call plot function
+    #     ax, im, vmin, vmax = plot_polygon_simulated_swe(ax, gdf, proj)
 
-        # Title bar with date
+    #     # Title bar with date
 
     @staticmethod
     def add_snotel_overlay(ax: plt.Axes, snotel_data: pd.DataFrame, proj):
@@ -301,9 +304,9 @@ class SimSWEProcessor:
         self.sim_ax = Plotter.add_basin_overlay(
             self.sim_ax, self.basin_geometry, self.proj
         )
-        cbar = Plotter.add_colorbar(self.sim_im, self.sim_ax)
+        Plotter.add_colorbar(self.sim_im, self.sim_ax)
         plt.title(f"Simulated Snow Water Equivalent (SWE)\n {self.date} - 06z")
-        gl = Plotter.add_gridlines(self.sim_ax)
+        Plotter.add_gridlines(self.sim_ax)
         # Add SNOTEL data overlay if available
         if (
             self.stations_in_basin is not None

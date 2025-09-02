@@ -1,8 +1,11 @@
 """Snoda Converter."""
 
+import logging
 import os
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def create_hdr_file(dat_file_path: str | Path) -> Path:
@@ -98,15 +101,15 @@ def process_dat_file(dat_file_path: str | Path, base_mount_path: str | Path) -> 
         stdout, stderr = process.communicate()
 
         if process.returncode != 0:
-            print(f"Error processing {dat_file_path}")
-            print(f"Command output: {stdout}")
-            print(f"Error output: {stderr}")
+            logger.info(f"Error processing {dat_file_path}")
+            logger.info(f"Command output: {stdout}")
+            logger.info(f"Error output: {stderr}")
             return False
 
-        print(f"Successfully processed: {dat_file_path}")
+        logger.info(f"Successfully processed: {dat_file_path}")
         return True
     except Exception as e:
-        print(f"Error processing {dat_file_path}: {str(e)}")
+        logger.info(f"Error processing {dat_file_path}: {str(e)}")
         return False
 
 
@@ -138,7 +141,7 @@ def main() -> None:
         if process.returncode != 0:
             raise subprocess.CalledProcessError(process.returncode, process.args)
     except subprocess.CalledProcessError:
-        print("Docker image not found. Pulling image...")
+        logger.info("Docker image not found. Pulling image...")
         subprocess.call(
             ["sudo", "docker", "pull", "ghcr.io/osgeo/gdal:ubuntu-full-latest"]
         )
@@ -154,7 +157,7 @@ def main() -> None:
 
             # Check if year/month combination is valid
             if not is_valid_date(year_dir.name, month_dir.name):
-                print(f"Skipping invalid date: {year_dir.name}/{month_dir.name}")
+                logger.info(f"Skipping invalid date: {year_dir.name}/{month_dir.name}")
                 continue
 
             # Process all .dat files in the month directory
@@ -164,10 +167,10 @@ def main() -> None:
                     processed_files += 1
 
     # Print summary
-    print("\nProcessing complete!")
-    print(f"Total files found: {total_files}")
-    print(f"Successfully processed: {processed_files}")
-    print(f"Failed: {total_files - processed_files}")
+    logger.info("\nProcessing complete!")
+    logger.info(f"Total files found: {total_files}")
+    logger.info(f"Successfully processed: {processed_files}")
+    logger.info(f"Failed: {total_files - processed_files}")
 
 
 if __name__ == "__main__":

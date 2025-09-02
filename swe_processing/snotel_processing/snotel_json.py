@@ -2,11 +2,14 @@
 
 import argparse
 import json
+import logging
 import os
 import time
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class DataLoader:
@@ -32,13 +35,13 @@ class DataLoader:
                 data = json.load(file)
             return data
         except FileNotFoundError:
-            print(f"Error: File '{filepath}' not found.")
+            logger.info(f"Error: File '{filepath}' not found.")
             return None
         except json.JSONDecodeError:
-            print(f"Error: File '{filepath}' contains invalid JSON.")
+            logger.info(f"Error: File '{filepath}' contains invalid JSON.")
             return None
         except Exception as e:
-            print(f"Error loading JSON file: {str(e)}")
+            logger.info(f"Error loading JSON file: {str(e)}")
             return None
 
     @staticmethod
@@ -57,7 +60,7 @@ class DataLoader:
 
         """
         if not os.path.isdir(directory_path):
-            print(f"Error: Directory '{directory_path}' not found.")
+            logger.info(f"Error: Directory '{directory_path}' not found.")
             return []
 
         json_files = []
@@ -143,7 +146,7 @@ class DataParser:
 
         # If no entries, return empty DataFrame and error
         if df.empty:
-            print("Empty swe_data returned to dataframe.")
+            logger.info("Empty swe_data returned to dataframe.")
             return pd.DataFrame(columns=["triplet", "date", "snotel_swe"])
 
         # Convert date column to datetime
@@ -154,7 +157,7 @@ class DataParser:
 
         # If no matching timesteps, return empty DataFrame and error
         if df.empty:
-            print("No matching time entries in DataFrame")
+            logger.info("No matching time entries in DataFrame")
             return pd.DataFrame(columns=["triplet", "date", "snotel_swe"])
 
         # Create new date column for 06z
@@ -339,13 +342,13 @@ class JSONProcessor:
             )
             self.merged_df = DataParser.merge_data(self.station_df, self.swe_df)
             self.csv_path = CSVWriter.write_to_csv(self.merged_df, self.output_dir)
-            print(f"Wrote csv to: {self.csv_path}")
+            logger.info(f"Wrote csv to: {self.csv_path}")
 
         t_end = time.time()
 
         total_time = t_end - t_start
 
-        print(f"Total processing time: {total_time:.4f}s")
+        logger.info(f"Total processing time: {total_time:.4f}s")
 
 
 def get_options(args_list=None):
