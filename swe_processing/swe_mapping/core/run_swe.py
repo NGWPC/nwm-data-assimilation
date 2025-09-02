@@ -1,14 +1,23 @@
 """Runs the full SWE mapping process."""
 
 import argparse
+import logging
 import time
+
+from dotenv import load_dotenv
 
 from ..mapping import simulated_swe_mapper, snodas_mapper
 from ..utility import convert_swe
 from ..utility.swe_minmax import reset_minmax
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 # Resets global vmin/vmax
 reset_minmax()
+
+load_dotenv()
 
 
 def run_convert_swe(args: argparse.Namespace) -> None:
@@ -17,7 +26,7 @@ def run_convert_swe(args: argparse.Namespace) -> None:
     start_time = time.time()
     convert_swe.main(convert_swe_args)
     elapsed_time = time.time() - start_time
-    print(f"Finished running convert_swe in {elapsed_time:.2f} seconds")
+    logger.info(f"Finished running convert_swe in {elapsed_time:.2f} seconds")
 
 
 def run_sim_scan(args: argparse.Namespace) -> None:
@@ -29,7 +38,7 @@ def run_sim_scan(args: argparse.Namespace) -> None:
     start_time = time.time()
     simulated_swe_mapper.main(sim_scan_args)
     elapsed_time = time.time() - start_time
-    print(f"Finished running simulated_swe_mapper in {elapsed_time:.2f} seconds")
+    logger.info(f"Finished running simulated_swe_mapper in {elapsed_time:.2f} seconds")
 
 
 def run_snodas_mapper(args: argparse.Namespace) -> None:
@@ -56,7 +65,7 @@ def run_snodas_mapper(args: argparse.Namespace) -> None:
     start_time = time.time()
     snodas_mapper.main(raw_snodas_args)
     elapsed_time = time.time() - start_time
-    print(f"Finished running snodas_mapper in {elapsed_time:.2f} seconds")
+    logger.info(f"Finished running snodas_mapper in {elapsed_time:.2f} seconds")
 
 
 def run_sim_swe_mapper(args: argparse.Namespace) -> None:
@@ -75,7 +84,7 @@ def run_sim_swe_mapper(args: argparse.Namespace) -> None:
     start_time = time.time()
     simulated_swe_mapper.main(sim_swe_mapper_args)
     elapsed_time = time.time() - start_time
-    print(f"Finished running simulated_swe_mapper in {elapsed_time:.2f} seconds")
+    logger.info(f"Finished running simulated_swe_mapper in {elapsed_time:.2f} seconds")
 
 
 def get_options(arg_list=None) -> argparse.Namespace:
@@ -127,8 +136,8 @@ def get_options(arg_list=None) -> argparse.Namespace:
     try:
         return parser.parse_args(arg_list)
     except Exception as e:
-        print(f"Error parsing arguments: {e}")
-        print(f"Argument list: {arg_list}")
+        logger.info(f"Error parsing arguments: {e}")
+        logger.info(f"Argument list: {arg_list}")
         raise
 
 
@@ -139,7 +148,7 @@ def execute(args: argparse.Namespace) -> None:
     run_sim_scan(args)
     run_snodas_mapper(args)
     run_sim_swe_mapper(args)
-    print(f"Total run_swe time: {time.time() - t0:.2f}s")
+    logger.info(f"Total run_swe time: {time.time() - t0:.2f}s")
 
 
 def swe_map(arg_list=None):

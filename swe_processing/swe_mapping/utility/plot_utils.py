@@ -121,7 +121,7 @@ class PlotUtils:
         return ax
 
     @staticmethod
-    def add_gridlines(ax: matplotlib.axes.Axes) -> cartopy.mpl.gridliner.Gridliner:
+    def add_gridlines(ax: matplotlib.axes.Axes):
         """Add gridlines to a map plot.
 
         Parameters

@@ -1,5 +1,6 @@
 """Utility functions for handling SNOTEL data."""
 
+import logging
 import re
 
 import cartopy
@@ -10,6 +11,8 @@ import numpy as np
 import pandas as pd
 import shapely
 from shapely.geometry import Point
+
+logger = logging.getLogger(__name__)
 
 
 class SnotelDataLoader:
@@ -169,11 +172,11 @@ class SnotelDataLoader:
                             }
                         )
                     else:
-                        print(
+                        logger.info(
                             f"No data found for station {station['station_id']} on {date}"
                         )
             except Exception as e:
-                print(
+                logger.info(
                     f"Error loading SNOTEL data for station {station['station_id']}: {e}"
                 )
 
@@ -213,7 +216,7 @@ class SnotelDataLoader:
 
         """
         if stations_in_basin.empty:
-            print("No SNOTEL stations found within the basin.")
+            logger.info("No SNOTEL stations found within the basin.")
             return pd.DataFrame()
 
         start_date = pd.Timestamp(min(times))
@@ -251,11 +254,11 @@ class SnotelDataLoader:
                         df_filtered.loc[:, "longitude"] = station["longitude"]
                         all_station_data.append(df_filtered)
                     else:
-                        print(
+                        logger.info(
                             f"No data found for station {station['station_id']} in date range"
                         )
             except Exception as e:
-                print(
+                logger.info(
                     f"Error loading SNOTEL data for station {station['station_id']}: {e}"
                 )
 
@@ -332,7 +335,7 @@ class SnotelDataLoader:
                     "longitude": station_df["longitude"].iloc[0],
                 }
             else:
-                print(
+                logger.info(
                     f"No measurements found for station {station_id} - excluding from results"
                 )
 
@@ -372,7 +375,7 @@ class SnotelCalculator:
             station_return = []
             for stations in stations_in_basin["station_id"]:
                 station_return.append(stations)
-            print(
+            logger.info(
                 f"{len(station_return)} SNOTEL stations found in basin: {station_return}"
             )
 
