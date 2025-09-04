@@ -1,0 +1,8 @@
+.venv
+*__pycache__/
+*/build/
+*.egg-info
+.env
+*.nc
+*.png
+*/launch.json
