@@ -2,12 +2,13 @@
 
 import argparse
 import logging
-import time
 
 from dotenv import load_dotenv
 
+from utils.utils import timing_block
+
 from ..mapping import simulated_swe_mapper, snodas_mapper
-from ..utility import convert_swe
+from ..utility.convert_swe import SoilMoistureConverter, SWEConverter
 from ..utility.swe_minmax import reset_minmax
 
 logging.basicConfig(
@@ -20,71 +21,111 @@ reset_minmax()
 load_dotenv()
 
 
-def run_convert_swe(args: argparse.Namespace) -> None:
-    """Convert_swe to convert ngen swe csv files to a single netcdf file."""
-    convert_swe_args = [args.sim_csv_dir, args.date, args.sim_netcdf]
-    start_time = time.time()
-    convert_swe.main(convert_swe_args)
-    elapsed_time = time.time() - start_time
-    logger.info(f"Finished running convert_swe in {elapsed_time:.2f} seconds")
+class Mapper:
+    """Mapper class to handle SWE mapping operations."""
+
+    def __init__(self, args: argparse.Namespace):
+        """Initialize the Mapper with command line arguments."""
+        self.args = args
+
+    @property
+    def conversion_args(self):
+        """Get the arguments for to convert csv to netcdf."""
+        date = self.args.date
+        if isinstance(date, str):
+            date = [date]
+        return [self.args.sim_csv_dir, date, self.args.sim_netcdf]
+
+    def run_conversion(self) -> None:
+        """Convert_swe to convert ngen swe csv files to a single netcdf file."""
+        data = self.converter.read_values_from_dir()
+        logger.info(f"Converted {len(self.converter.catchment_ids)} catchments")
+        self.converter.write_to_netcdf(
+            self.converter.catchment_ids, self.converter.times, data
+        )
+
+    @property
+    def sim_scan_args(self):
+        """Get the arguments for simulated_swe_mapper scan."""
+        sim_scan_args = [
+            self.args.sim_netcdf,
+            self.args.gpkg_file,
+            self.args.date,
+            "--mode",
+            "scan",
+        ]
+        if self.args.direct_s3:
+            sim_scan_args.append("--direct_s3")
+        return sim_scan_args
+
+    def run_sim_scan(self) -> None:
+        """Scan simulated SWE data for vmin/vmax."""
+        simulated_swe_mapper.main(self.sim_scan_args)
+
+    @property
+    def raw_snodas_args(self):
+        """Get the arguments for snodas_mapper raw."""
+        raw_snodas_args = [
+            self.args.date,
+            self.args.gpkg_file,
+            self.args.snodas_raw_output,
+            self.args.snodas_lumped_output,
+        ]
+        if self.args.direct_s3:
+            raw_snodas_args.append("--direct_s3")
+        return raw_snodas_args
+
+    def run_snodas_mapper(self) -> None:
+        """Run the SNODAS mapper to generate SWE maps.
+
+        If SNODAS vmin/vmax are higher/lower than ngen swe range, SNODAS vmin and/or vmax values will become global
+        """
+        snodas_mapper.main(self.raw_snodas_args)
+
+    @property
+    def sim_swe_mapper_args(self):
+        """Get the arguments for simulated_swe_mapper."""
+        sim_swe_mapper_args = [
+            self.args.sim_netcdf,
+            self.args.gpkg_file,
+            self.args.date,
+            "--output_file",
+            self.args.sim_lumped_output,
+        ]
+        if self.args.direct_s3:
+            sim_swe_mapper_args.append("--direct_s3")
+        return sim_swe_mapper_args
+
+    def run_sim_swe_mapper(self) -> None:
+        """Generate the simulated SWE map."""
+        simulated_swe_mapper.main(self.sim_swe_mapper_args)
+
+    def execute_mapping(self) -> None:
+        """Execute the full SWE mapping process."""
+        with timing_block("Full SWE Mapping"):
+            with timing_block(self.run_conversion.__name__):
+                self.run_conversion()
+
+            with timing_block(self.run_sim_scan.__name__):
+                self.run_sim_scan()
+
+            with timing_block(self.run_snodas_mapper.__name__):
+                self.run_snodas_mapper()
+
+            with timing_block(self.run_sim_swe_mapper.__name__):
+                self.run_sim_swe_mapper()
 
 
-def run_sim_scan(args: argparse.Namespace) -> None:
-    """Scan simulated SWE data for vmin/vmax."""
-    sim_scan_args = [args.sim_netcdf, args.gpkg_file, args.date, "--mode", "scan"]
-    if args.direct_s3:
-        sim_scan_args.append("--direct_s3")
-
-    start_time = time.time()
-    simulated_swe_mapper.main(sim_scan_args)
-    elapsed_time = time.time() - start_time
-    logger.info(f"Finished running simulated_swe_mapper in {elapsed_time:.2f} seconds")
+class SWEMapper(Mapper):
+    def __init__(self, args):
+        super().__init__(args)
+        self.converter = SWEConverter(*self.conversion_args)
 
 
-def run_snodas_mapper(args: argparse.Namespace) -> None:
-    """Run the SNODAS mapper to generate SWE maps.
-
-    If SNODAS vmin/vmax are higher/lower than ngen swe range, SNODAS vmin and/or vmax values will become global
-
-    Args:
-    ----
-    args : Namespace
-        Command line arguments
-
-    """
-    raw_snodas_args = [
-        args.date,
-        args.gpkg_file,
-        args.snodas_raw_output,
-        args.snodas_lumped_output,
-    ]
-
-    if args.direct_s3:
-        raw_snodas_args.append("--direct_s3")
-
-    start_time = time.time()
-    snodas_mapper.main(raw_snodas_args)
-    elapsed_time = time.time() - start_time
-    logger.info(f"Finished running snodas_mapper in {elapsed_time:.2f} seconds")
-
-
-def run_sim_swe_mapper(args: argparse.Namespace) -> None:
-    """Generate the simulated SWE map."""
-    sim_swe_mapper_args = [
-        args.sim_netcdf,
-        args.gpkg_file,
-        args.date,
-        "--output_file",
-        args.sim_lumped_output,
-    ]
-
-    if args.direct_s3:
-        sim_swe_mapper_args.append("--direct_s3")
-
-    start_time = time.time()
-    simulated_swe_mapper.main(sim_swe_mapper_args)
-    elapsed_time = time.time() - start_time
-    logger.info(f"Finished running simulated_swe_mapper in {elapsed_time:.2f} seconds")
+class SoilMoistureMapper(Mapper):
+    def __init__(self, args):
+        super().__init__(args)
+        self.converter = SoilMoistureConverter(*self.conversion_args)
 
 
 def get_options(arg_list=None) -> argparse.Namespace:
@@ -141,20 +182,11 @@ def get_options(arg_list=None) -> argparse.Namespace:
         raise
 
 
-def execute(args: argparse.Namespace) -> None:
-    """Execute the full SWE mapping process."""
-    t0 = time.time()
-    run_convert_swe(args)
-    run_sim_scan(args)
-    run_snodas_mapper(args)
-    run_sim_swe_mapper(args)
-    logger.info(f"Total run_swe time: {time.time() - t0:.2f}s")
-
-
 def swe_map(arg_list=None):
     """Map the SWE data."""
     args = get_options(arg_list)
-    execute(args)
+    mapper = SWEMapper(args)
+    mapper.execute_mapping()
 
 
 if __name__ == "__main__":

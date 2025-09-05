@@ -1,6 +1,6 @@
 """Example script to run the SWE mapping process with sample data."""
 
-from swe_mapping.core.run_swe import swe_map
+from swe_processing.swe_mapping.core.run_swe import swe_map
 
 swe_map(
     [
