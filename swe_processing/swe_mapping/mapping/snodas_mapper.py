@@ -286,6 +286,8 @@ class Plotter:
         basin_geometry: shapely.geometry,
         gdf: gpd.GeoDataFrame,
         proj: cartopy.crs.Projection,
+        vmin: float = None,
+        vmax: float = None,
     ) -> None:
         """Plot raw SWE values with the basin boundary.
 
@@ -301,6 +303,10 @@ class Plotter:
             GeoDataFrame with catchment boundaries
         proj : cartopy.crs
             Projection to use for plot
+        vmin : float
+            Minimum SWE value for colormap
+        vmax : float
+            Maximum SWE value for colormap
 
         Returns
         -------
@@ -326,7 +332,7 @@ class Plotter:
         swe_data = ds_subset.Band1.where(ds_subset.Band1 != -9999).where(basin_mask)
 
         # Compute min/max values for colormap scaling
-        vmin, vmax = get_minmax(swe_data.compute())
+        vmin, vmax = get_minmax(swe_data.compute(), vmin, vmax)
 
         # Create colormesh plot
         im = ax.pcolormesh(
@@ -347,7 +353,11 @@ class Plotter:
 
     @staticmethod
     def plot_polygon_swe(
-        ax: plt.Axes, gdf: gpd.GeoDataFrame, proj: cartopy.crs.Projection
+        ax: plt.Axes,
+        gdf: gpd.GeoDataFrame,
+        proj: cartopy.crs.Projection,
+        vmin: float,
+        vmax: float,
     ) -> None:
         """Plot catchment polygons colored by mean SWE values.
 
@@ -359,6 +369,10 @@ class Plotter:
             GeoDataFrame with catchment boundaries and 'mean_swe' column
         proj : cartopy.crs
             Projection to use for plot
+        vmin : float
+            Minimum SWE value for colormap
+        vmax : float
+            Maximum SWE value for colormap
 
         Returns
         -------
@@ -370,7 +384,7 @@ class Plotter:
 
         """
         # Use vmin and vmax to explicitly define a colorbar
-        vmin, vmax = get_minmax(gdf["mean_swe"])
+        vmin, vmax = get_minmax(gdf["mean_swe"], vmin, vmax)
         norm = plt.Normalize(vmin=vmin, vmax=vmax)
         cmap = plt.cm.Blues
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -456,11 +470,11 @@ class SNODASProcessor:
         self.proj = None
         self.ext = None
 
-    def run(self) -> None:
+    def run(self, vmin: float, vmax: float) -> None:
         """Run the complete SNODAS processing pipeline."""
         self.setup_data()
-        self.process_raw()
-        self.process_catchment()
+        self.process_raw(vmin, vmax)
+        self.process_catchment(vmin, vmax)
 
     def setup_data(self) -> None:
         """Load and prepare all required data for processing."""
@@ -496,7 +510,7 @@ class SNODASProcessor:
                 self.snotel_s3_path,
             )
 
-    def process_raw(self) -> None:
+    def process_raw(self, vmin: float, vmax: float) -> None:
         """Process and plot raw SNODAS data."""
         t3 = time.time()
 
@@ -504,7 +518,13 @@ class SNODASProcessor:
         self.raw_fig, self.raw_ax, self.proj = Plotter.create_base_plot()
         self.ext = Plotter.set_map_extent(self.raw_ax, self.bounds, self.proj)
         self.raw_ax, self.raw_im, vmin, vmax = Plotter.plot_raw_swe(
-            self.raw_ax, self.snodas_ds, self.basin_geometry, self.basin_gdf, self.proj
+            self.raw_ax,
+            self.snodas_ds,
+            self.basin_geometry,
+            self.basin_gdf,
+            self.proj,
+            vmin,
+            vmax,
         )
 
         self.raw_ax = Plotter.add_basin_overlay(
@@ -532,7 +552,7 @@ class SNODASProcessor:
 
         logger.info(f"   Raw plotting time: {time.time() - t3:.2f}s")
 
-    def process_catchment(self):
+    def process_catchment(self, vmin: float, vmax: float) -> None:
         """Process and plot catchment-averaged SNODAS data."""
         t5 = time.time()
         basin_gdf_with_swe, ds_catchment = Calculator.calculate_catchment_mean(
@@ -542,7 +562,7 @@ class SNODASProcessor:
         self.catchment_fig, self.catchment_ax, self.proj = Plotter.create_base_plot()
         self.ext = Plotter.set_map_extent(self.catchment_ax, self.bounds, self.proj)
         self.catchment_ax, self.catchment_im, vmin, vmax = Plotter.plot_polygon_swe(
-            self.catchment_ax, basin_gdf_with_swe, self.proj
+            self.catchment_ax, basin_gdf_with_swe, self.proj, vmin, vmax
         )
         self.catchment_ax = Plotter.add_basin_overlay(
             self.catchment_ax, self.basin_geometry, self.proj
