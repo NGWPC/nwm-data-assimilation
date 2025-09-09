@@ -2,12 +2,14 @@
 
 import argparse
 import logging
+from functools import lru_cache
 
 from dotenv import load_dotenv
 
 from utils.utils import timing_block
 
-from ..mapping import simulated_swe_mapper, snodas_mapper
+from ..mapping.simulated_swe_mapper import SimSoilMoistureProcessor, SimSWEProcessor
+from ..mapping.snodas_mapper import SNODASProcessor
 from ..utility.convert_swe import SoilMoistureConverter, SWEConverter
 from ..utility.swe_minmax import reset_minmax
 
@@ -44,23 +46,35 @@ class Mapper:
             self.converter.catchment_ids, self.converter.times, data
         )
 
-    @property
-    def sim_scan_args(self):
-        """Get the arguments for simulated_swe_mapper scan."""
-        sim_scan_args = [
-            self.args.sim_netcdf,
-            self.args.gpkg_file,
-            self.args.date,
-            "--mode",
-            "scan",
-        ]
-        if self.args.direct_s3:
-            sim_scan_args.append("--direct_s3")
-        return sim_scan_args
+    # @property
+    # def sim_scan_args(self):
+    #     """Get the arguments for simulated_swe_mapper scan."""
+    #     sim_scan_args = [
+    #         self.args.sim_netcdf,
+    #         self.args.gpkg_file,
+    #         self.args.date,
+    #     ]
+    #     if self.args.direct_s3:
+    #         sim_scan_args.append("--direct_s3")
+    #     return sim_scan_args
 
-    def run_sim_scan(self) -> None:
-        """Scan simulated SWE data for vmin/vmax."""
-        simulated_swe_mapper.main(self.sim_scan_args)
+    # def run_sim_scan(self) -> None:
+    #     """Scan simulated data for vmin/vmax."""
+    # self.sim_processor.scan()
+
+    @property
+    @lru_cache
+    def vmin(self):
+        """Get the vmin value from the sim_processor plotter."""
+        self.sim_processor.simulated_gdf  # Ensure simulated_gdf is computed
+        return self.sim_processor.plotter.vmin
+
+    @property
+    @lru_cache
+    def vmax(self):
+        """Get the vmax value from the sim_processor plotter."""
+        self.sim_processor.simulated_gdf  # Ensure simulated_gdf is computed
+        return self.sim_processor.plotter.vmax
 
     @property
     def raw_snodas_args(self):
@@ -80,7 +94,7 @@ class Mapper:
 
         If SNODAS vmin/vmax are higher/lower than ngen swe range, SNODAS vmin and/or vmax values will become global
         """
-        snodas_mapper.main(self.raw_snodas_args)
+        self.obs_processor.run(self.vmin, self.vmax)
 
     @property
     def sim_swe_mapper_args(self):
@@ -89,7 +103,6 @@ class Mapper:
             self.args.sim_netcdf,
             self.args.gpkg_file,
             self.args.date,
-            "--output_file",
             self.args.sim_lumped_output,
         ]
         if self.args.direct_s3:
@@ -98,16 +111,13 @@ class Mapper:
 
     def run_sim_swe_mapper(self) -> None:
         """Generate the simulated SWE map."""
-        simulated_swe_mapper.main(self.sim_swe_mapper_args)
+        self.sim_processor.run()
 
     def execute_mapping(self) -> None:
         """Execute the full SWE mapping process."""
         with timing_block("Full SWE Mapping"):
             with timing_block(self.run_conversion.__name__):
                 self.run_conversion()
-
-            with timing_block(self.run_sim_scan.__name__):
-                self.run_sim_scan()
 
             with timing_block(self.run_snodas_mapper.__name__):
                 self.run_snodas_mapper()
@@ -117,15 +127,24 @@ class Mapper:
 
 
 class SWEMapper(Mapper):
+    """SWE Mapper class to handle SWE mapping operations."""
+
     def __init__(self, args):
+        """Initialize the SWEMapper with command line arguments."""
         super().__init__(args)
         self.converter = SWEConverter(*self.conversion_args)
+        self.sim_processor = SimSWEProcessor(*self.sim_swe_mapper_args)
+        self.obs_processor = SNODASProcessor(*self.raw_snodas_args)
 
 
 class SoilMoistureMapper(Mapper):
+    """Soil Moisture Mapper class to handle soil moisture mapping operations."""
+
     def __init__(self, args):
+        """Initialize the SoilMoistureMapper with command line arguments."""
         super().__init__(args)
         self.converter = SoilMoistureConverter(*self.conversion_args)
+        self.sim_processor = SimSoilMoistureProcessor(self.sim_scan_args)
 
 
 def get_options(arg_list=None) -> argparse.Namespace:
