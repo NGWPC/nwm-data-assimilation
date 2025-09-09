@@ -19,7 +19,7 @@ class SnotelDataLoader:
     """Class to load and process SNOTEL data."""
 
     @staticmethod
-    def list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3):
+    def list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3) -> tuple:
         """List SNOTEL CSV files available in the S3 bucket.
 
         Returns
