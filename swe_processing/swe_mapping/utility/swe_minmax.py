@@ -19,8 +19,6 @@ def get_minmax(current_data: np.ndarray, vmin, vmax) -> tuple:
         The current global values
 
     """
-    # global _global_min, _global_max
-
     if np.isnan(current_data).all():
         logger.warning("current_data contains only NaNs, skipping min/max calculation.")
         current_min = np.nan  # or some default value
@@ -29,14 +27,14 @@ def get_minmax(current_data: np.ndarray, vmin, vmax) -> tuple:
         current_min = np.nanmin(current_data)
         current_max = np.nanmax(current_data)
 
-    _global_min = min(vmin, current_min)
-    _global_max = max(vmax, current_max)
+    vmin = min(vmin, current_min)
+    vmax = max(vmax, current_max)
 
-    return _global_min, _global_max
+    return vmin, vmax
 
 
-def reset_minmax() -> None:
-    """Reset the global min/max values."""
-    global _global_min, _global_max
-    _global_min = float("inf")
-    _global_max = float("-inf")
+# def reset_minmax() -> None:
+#     """Reset the global min/max values."""
+#     global _global_min, _global_max
+#     _global_min = float("inf")
+#     _global_max = float("-inf")

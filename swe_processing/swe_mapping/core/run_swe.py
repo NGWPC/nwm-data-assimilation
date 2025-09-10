@@ -17,8 +17,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-# Resets global vmin/vmax
-reset_minmax()
 
 load_dotenv()
 
@@ -89,13 +87,6 @@ class Mapper:
             raw_snodas_args.append("--direct_s3")
         return raw_snodas_args
 
-    def run_snodas_mapper(self) -> None:
-        """Run the SNODAS mapper to generate SWE maps.
-
-        If SNODAS vmin/vmax are higher/lower than ngen swe range, SNODAS vmin and/or vmax values will become global
-        """
-        self.obs_processor.run(self.vmin, self.vmax)
-
     @property
     def sim_swe_mapper_args(self):
         """Get the arguments for simulated_swe_mapper."""
@@ -122,8 +113,10 @@ class Mapper:
             with timing_block(self.run_snodas_mapper.__name__):
                 self.run_snodas_mapper()
 
-            with timing_block(self.run_sim_swe_mapper.__name__):
-                self.run_sim_swe_mapper()
+            with timing_block("simulated data mapping"):
+                self.sim_processor.vmin = self.obs_processor.vmin
+                self.sim_processor.vmax = self.obs_processor.vmax
+                self.sim_processor.run()
 
 
 class SWEMapper(Mapper):
