@@ -472,8 +472,10 @@ class SNODASProcessor:
 
     def run(self, vmin: float, vmax: float) -> None:
         """Run the complete SNODAS processing pipeline."""
+        self.vmin = vmin
+        self.vmax = vmax
         self.setup_data()
-        self.process_raw(vmin, vmax)
+        self.process_raw()
         self.process_catchment(vmin, vmax)
 
     def setup_data(self) -> None:
@@ -523,8 +525,8 @@ class SNODASProcessor:
             self.basin_geometry,
             self.basin_gdf,
             self.proj,
-            vmin,
-            vmax,
+            self.vmin,
+            self.vmax,
         )
 
         self.raw_ax = Plotter.add_basin_overlay(
