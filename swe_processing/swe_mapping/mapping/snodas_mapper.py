@@ -279,8 +279,8 @@ class Plotter:
         """Add SNOTEL SWE data as text overlays on a map."""
         return SnotelPlotter.add_snotel_overlay(ax, snotel_data, proj)
 
-    @staticmethod
     def plot_raw_swe(
+        self,
         ax: plt.Axes,
         ds: xr.Dataset,
         basin_geometry: shapely.geometry,
@@ -311,18 +311,15 @@ class Plotter:
         Returns
         -------
         tuple
-            (ax, im, vmin, vmax) where:
+            (ax, im) where:
                 - ax is the updated matplotlib Axes
                 - im is the plotted image
-                - vmin, vmax are the colormap scale limits
 
         """
         # Subset dataset
         ds_subset, lons, lats = Calculator.subset_to_basin(ds, basin_geometry)
 
         # Convert lat/lon into Points for spatial operations
-        from shapely.geometry import Point
-
         points = np.array([Point(x, y) for x, y in zip(lons.ravel(), lats.ravel())])
         basin_mask = np.array([basin_geometry.contains(pt) for pt in points]).reshape(
             lons.shape
@@ -332,7 +329,7 @@ class Plotter:
         swe_data = ds_subset.Band1.where(ds_subset.Band1 != -9999).where(basin_mask)
 
         # Compute min/max values for colormap scaling
-        vmin, vmax = get_minmax(swe_data.compute(), vmin, vmax)
+        self.vmin, self.vmax = get_minmax(swe_data.compute(), vmin, vmax)
 
         # Create colormesh plot
         im = ax.pcolormesh(
@@ -341,15 +338,15 @@ class Plotter:
             swe_data,
             transform=proj,
             cmap="Blues",
-            vmin=vmin,
-            vmax=vmax,
+            vmin=self.vmin,
+            vmax=self.vmax,
             shading="auto",
         )
 
         # Add catchment boundaries
         ax = Plotter.plot_catchment_boundaries(ax, gdf, proj)
 
-        return ax, im, vmin, vmax
+        return ax, im
 
     @staticmethod
     def plot_polygon_swe(
@@ -444,31 +441,11 @@ class SNODASProcessor:
         self.output_file_lumped = output_file_lumped
         self.direct_s3 = direct_s3
 
-        # Initialize data attributes
-        self.snodas_file = None
-        self.snodas_ds = None
-        self.basin_gdf = None
-        self.basin_geometry = None
-        self.bounds = None
-        self.s3_mount_point = None
+        self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
 
-        # Initialize SNOTEL-related attributes
-        self.snotel_filenames = None
-        self.stations_gdf = None
-        self.stations_in_basin = None
-        self.snotel_data = None
-        self.snotel_filesystem = None
-        self.snotel_s3_path = None
-
-        # Initialize plot attributes
-        self.raw_fig = None
-        self.raw_ax = None
-        self.raw_im = None
-        self.catchment_fig = None
-        self.catchment_ax = None
-        self.catchment_im = None
-        self.proj = None
-        self.ext = None
+        self.plotter = Plotter()
+        self.dl = DataLoader()
+        self.calc = Calculator()
 
     def run(self, vmin: float, vmax: float) -> None:
         """Run the complete SNODAS processing pipeline."""
@@ -476,35 +453,32 @@ class SNODASProcessor:
         self.vmax = vmax
         self.setup_data()
         self.process_raw()
-        self.process_catchment(vmin, vmax)
+        self.process_catchment()
 
     def setup_data(self) -> None:
         """Load and prepare all required data for processing."""
         self.s3_mount_point = os.getenv(
             "S3_MOUNT_POINT", os.path.join(os.path.expanduser("~"), "s3")
         )
-        self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
-        self.snodas_file = DataLoader.snodas_path_constructor(
+        self.snodas_file = self.dl.snodas_path_constructor(
             self.date, self.s3_mount_point, self.direct_s3
         )
-        self.basin_gdf = DataLoader.read_geo(self.gpkg_file)
-        self.basin_geometry, self.bounds = DataLoader.get_basin_geometry(self.basin_gdf)
-        self.snodas_ds = DataLoader.load_netcdf(self.snodas_file)
+        self.basin_gdf = self.dl.read_geo(self.gpkg_file)
+        self.basin_geometry, self.bounds = self.dl.get_basin_geometry(self.basin_gdf)
+        self.snodas_ds = self.dl.load_netcdf(self.snodas_file)
 
         # For SNOTEL data
-        self.snotel_filenames, self.snotel_filesystem = (
-            DataLoader.list_snotel_filenames(
-                self.s3_mount_point, self.snotel_s3_path, self.direct_s3
-            )
+        self.snotel_filenames, self.snotel_filesystem = self.dl.list_snotel_filenames(
+            self.s3_mount_point, self.snotel_s3_path, self.direct_s3
         )
-        self.stations_gdf = DataLoader.parse_snotel_filenames(self.snotel_filenames)
-        self.stations_in_basin = Calculator.find_stations_in_basin(
+        self.stations_gdf = self.dl.parse_snotel_filenames(self.snotel_filenames)
+        self.stations_in_basin = self.calc.find_stations_in_basin(
             self.stations_gdf, self.basin_geometry
         )
 
         # Load SNOTEL data if stations exist in basin
         if not self.stations_in_basin.empty:
-            self.snotel_data = DataLoader.load_snotel_data(
+            self.snotel_data = self.dl.load_snotel_data(
                 self.stations_in_basin,
                 self.date,
                 self.snotel_filesystem,
@@ -512,14 +486,14 @@ class SNODASProcessor:
                 self.snotel_s3_path,
             )
 
-    def process_raw(self, vmin: float, vmax: float) -> None:
+    def process_raw(self) -> None:
         """Process and plot raw SNODAS data."""
         t3 = time.time()
 
         # Create base plot
-        self.raw_fig, self.raw_ax, self.proj = Plotter.create_base_plot()
-        self.ext = Plotter.set_map_extent(self.raw_ax, self.bounds, self.proj)
-        self.raw_ax, self.raw_im, vmin, vmax = Plotter.plot_raw_swe(
+        self.raw_fig, self.raw_ax, self.proj = self.plotter.create_base_plot()
+        self.ext = self.plotter.set_map_extent(self.raw_ax, self.bounds, self.proj)
+        self.raw_ax, self.raw_im = self.plotter.plot_raw_swe(
             self.raw_ax,
             self.snodas_ds,
             self.basin_geometry,
@@ -529,12 +503,12 @@ class SNODASProcessor:
             self.vmax,
         )
 
-        self.raw_ax = Plotter.add_basin_overlay(
+        self.raw_ax = self.plotter.add_basin_overlay(
             self.raw_ax, self.basin_geometry, self.proj
         )
-        Plotter.add_colorbar(self.raw_im, self.raw_ax)
+        self.plotter.add_colorbar(self.raw_im, self.raw_ax)
         plt.title(f"Raw SNODAS Snow Water Equivalent\n {self.date} - 06z")
-        Plotter.add_gridlines(self.raw_ax)
+        self.plotter.add_gridlines(self.raw_ax)
 
         # Add SNOTEL data overlay if available
         if (
@@ -549,29 +523,35 @@ class SNODASProcessor:
         # Save figure if output file is specified
         if self.output_file_raw:
             t4 = time.time()
-            Plotter.save_figure(self.raw_fig, self.output_file_raw)
+            self.plotter.save_figure(self.raw_fig, self.output_file_raw)
             logger.info(f"   Raw output time: {time.time() - t4:.2f}s")
 
         logger.info(f"   Raw plotting time: {time.time() - t3:.2f}s")
 
-    def process_catchment(self, vmin: float, vmax: float) -> None:
+    def process_catchment(self) -> None:
         """Process and plot catchment-averaged SNODAS data."""
         t5 = time.time()
         basin_gdf_with_swe, ds_catchment = Calculator.calculate_catchment_mean(
             self.snodas_ds, self.basin_geometry, self.basin_gdf
         )
 
-        self.catchment_fig, self.catchment_ax, self.proj = Plotter.create_base_plot()
-        self.ext = Plotter.set_map_extent(self.catchment_ax, self.bounds, self.proj)
-        self.catchment_ax, self.catchment_im, vmin, vmax = Plotter.plot_polygon_swe(
-            self.catchment_ax, basin_gdf_with_swe, self.proj, vmin, vmax
+        self.catchment_fig, self.catchment_ax, self.proj = (
+            self.plotter.create_base_plot()
         )
-        self.catchment_ax = Plotter.add_basin_overlay(
+        self.ext = self.plotter.set_map_extent(
+            self.catchment_ax, self.bounds, self.proj
+        )
+        self.catchment_ax, self.catchment_im, self.vmin, self.vmax = (
+            self.plotter.plot_polygon_swe(
+                self.catchment_ax, basin_gdf_with_swe, self.proj, self.vmin, self.vmax
+            )
+        )
+        self.catchment_ax = self.plotter.add_basin_overlay(
             self.catchment_ax, self.basin_geometry, self.proj
         )
-        Plotter.add_colorbar(self.catchment_im, self.catchment_ax)
+        self.plotter.add_colorbar(self.catchment_im, self.catchment_ax)
         plt.title(f"Lumped SNODAS Snow Water Equivalent\n {self.date} - 06z")
-        Plotter.add_gridlines(self.catchment_ax)
+        self.plotter.add_gridlines(self.catchment_ax)
 
         # Add SNOTEL data overlay if available
         if (
