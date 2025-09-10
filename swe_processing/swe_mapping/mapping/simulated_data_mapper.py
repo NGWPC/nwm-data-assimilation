@@ -374,6 +374,9 @@ class Plotter:
         self.cmap = plt.cm.Blues
         self._create_base_plot()
 
+        self._min = np.nan
+        self._max = np.nan
+
     def _create_base_plot(self) -> tuple:
         """Create a base map plot with cartopy projection."""
         self.fig, self.ax = plt.subplots(
@@ -394,7 +397,7 @@ class Plotter:
             )
             return np.nan  # or some default value
         else:
-            return np.nanmin(self.simulated_gdf["mean_swe"])
+            return np.nanmin(self.simulated_gdf["mean_swe"].to_list() + [self._min])
 
     @property
     def vmax(self):
@@ -405,7 +408,17 @@ class Plotter:
             )
             return np.nan
         else:
-            return np.nanmax(self.simulated_gdf["mean_swe"])
+            return np.nanmax(self.simulated_gdf["mean_swe"].to_list() + [self._max])
+
+    @vmin.setter
+    def vmin(self, value: float):
+        """Set the global minimum value for color scale."""
+        self._min = value
+
+    @vmax.setter
+    def vmax(self, value: float):
+        """Set the global maximum value for color scale."""
+        self._max = value
 
     @property
     def norm(self):

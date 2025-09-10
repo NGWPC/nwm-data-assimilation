@@ -1,8 +1,8 @@
 """Example script to run the SWE mapping process with sample data."""
 
-from swe_processing.swe_mapping.core.run_swe import swe_map
+from swe_processing.swe_mapping.core.run_swe import map_swe_data
 
-swe_map(
+map_swe_data(
     [
         "2015-12-01",
         "swe_processing/sample_data/sample_csv/13240000/",
