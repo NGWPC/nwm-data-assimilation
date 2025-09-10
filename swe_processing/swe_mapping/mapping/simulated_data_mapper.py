@@ -18,7 +18,6 @@ import shapely
 import xarray as xr
 from shapely import Point
 
-from ..utility.snotel_utils import SnotelCalculator, SnotelDataLoader, SnotelPlotter
 from ..utility.swe_minmax import get_minmax
 
 logger = logging.getLogger(__name__)
