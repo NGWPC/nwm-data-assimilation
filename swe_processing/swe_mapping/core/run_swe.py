@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from utils.utils import timing_block
 
-from ..mapping.simulated_swe_mapper import SimSoilMoistureProcessor, SimSWEProcessor
+from ..mapping.simulated_data_mapper import SimSoilMoistureProcessor, SimSWEProcessor
 from ..mapping.snodas_mapper import SNODASProcessor
 from ..utility.convert_swe import SoilMoistureConverter, SWEConverter
 from ..utility.swe_minmax import reset_minmax
@@ -44,22 +44,6 @@ class Mapper:
             self.converter.catchment_ids, self.converter.times, data
         )
 
-    # @property
-    # def sim_scan_args(self):
-    #     """Get the arguments for simulated_swe_mapper scan."""
-    #     sim_scan_args = [
-    #         self.args.sim_netcdf,
-    #         self.args.gpkg_file,
-    #         self.args.date,
-    #     ]
-    #     if self.args.direct_s3:
-    #         sim_scan_args.append("--direct_s3")
-    #     return sim_scan_args
-
-    # def run_sim_scan(self) -> None:
-    #     """Scan simulated data for vmin/vmax."""
-    # self.sim_processor.scan()
-
     @property
     @lru_cache
     def vmin(self):
@@ -88,30 +72,26 @@ class Mapper:
         return raw_snodas_args
 
     @property
-    def sim_swe_mapper_args(self):
+    def sim_mapper_args(self):
         """Get the arguments for simulated_swe_mapper."""
-        sim_swe_mapper_args = [
+        sim_mapper_args = [
             self.args.sim_netcdf,
             self.args.gpkg_file,
             self.args.date,
             self.args.sim_lumped_output,
         ]
         if self.args.direct_s3:
-            sim_swe_mapper_args.append("--direct_s3")
-        return sim_swe_mapper_args
-
-    def run_sim_swe_mapper(self) -> None:
-        """Generate the simulated SWE map."""
-        self.sim_processor.run()
+            sim_mapper_args.append("--direct_s3")
+        return sim_mapper_args
 
     def execute_mapping(self) -> None:
-        """Execute the full SWE mapping process."""
-        with timing_block("Full SWE Mapping"):
+        """Execute the full mapping process."""
+        with timing_block("Full Mapping"):
             with timing_block(self.run_conversion.__name__):
                 self.run_conversion()
 
-            with timing_block(self.run_snodas_mapper.__name__):
-                self.run_snodas_mapper()
+            with timing_block("observed data mapping"):
+                self.obs_processor.run(self.vmin, self.vmax)
 
             with timing_block("simulated data mapping"):
                 self.sim_processor.vmin = self.obs_processor.vmin
@@ -126,7 +106,7 @@ class SWEMapper(Mapper):
         """Initialize the SWEMapper with command line arguments."""
         super().__init__(args)
         self.converter = SWEConverter(*self.conversion_args)
-        self.sim_processor = SimSWEProcessor(*self.sim_swe_mapper_args)
+        self.sim_processor = SimSWEProcessor(*self.sim_mapper_args)
         self.obs_processor = SNODASProcessor(*self.raw_snodas_args)
 
 
@@ -137,7 +117,7 @@ class SoilMoistureMapper(Mapper):
         """Initialize the SoilMoistureMapper with command line arguments."""
         super().__init__(args)
         self.converter = SoilMoistureConverter(*self.conversion_args)
-        self.sim_processor = SimSoilMoistureProcessor(self.sim_scan_args)
+        self.sim_processor = SimSoilMoistureProcessor(self.sim_mapper_args)
 
 
 def get_options(arg_list=None) -> argparse.Namespace:
@@ -147,33 +127,33 @@ def get_options(arg_list=None) -> argparse.Namespace:
     parser.add_argument(
         "sim_csv_dir",
         type=str,
-        help="Path that contains ngen swe csv files.\
+        help="Path that contains ngen output csv files.\
                         This is your ngen output directory.",
     )
     parser.add_argument(
         "sim_netcdf",
         type=str,
-        help="Path for simulated swe netcdf file.\
-                        convert_csv writes to this file, simulated_swe_mapper\
+        help="Path for simulated output netcdf file.\
+                        convert_csv writes to this file, simulated_data_mapper\
                         reads from this file.",
     )
     parser.add_argument("gpkg_file", type=str, help="Path to geopackage file.")
     parser.add_argument(
         "sim_lumped_output",
         type=str,
-        help="Path where simulated lumped swe map output saved.\
+        help="Path where simulated lumped data map output saved.\
                         Output will be a .png file.",
     )
     parser.add_argument(
         "snodas_raw_output",
         type=str,
-        help="Path where snodas raw swe map output saved.\
+        help="Path where snodas raw data map output saved.\
                         Output will be a .png file.",
     )
     parser.add_argument(
         "snodas_lumped_output",
         type=str,
-        help="Path where snodas lumped swe map output saved.\
+        help="Path where snodas lumped data map output saved.\
                         Output will be a .png file.",
     )
     parser.add_argument(
@@ -194,12 +174,20 @@ def get_options(arg_list=None) -> argparse.Namespace:
         raise
 
 
-def swe_map(arg_list=None):
+def map_swe_data(arg_list=None):
     """Map the SWE data."""
     args = get_options(arg_list)
     mapper = SWEMapper(args)
     mapper.execute_mapping()
 
 
+def map_soil_moisture_data(arg_list=None):
+    """Map the soil moisture data."""
+    args = get_options(arg_list)
+    mapper = SoilMoistureMapper(args)
+    mapper.execute_mapping()
+
+
 if __name__ == "__main__":
-    swe_map()
+    map_swe_data()
+    map_soil_moisture_data()
