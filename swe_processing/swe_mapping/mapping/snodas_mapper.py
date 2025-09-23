@@ -3,32 +3,33 @@
 import argparse
 import logging
 import os
-import time
+import warnings
+from functools import lru_cache
 
-import cartopy
 import fsspec
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import shapely
 import xarray as xr
+from shapely import MultiPoint, Polygon, voronoi_polygons
 from shapely.geometry import Point
 
-from ..utility.geo_utils import GeoUtils
-from ..utility.plot_utils import PlotUtils
+from utils.utils import Calculator, DataLoader, Plotter, Processor, timing_block
+
 from ..utility.snotel_utils import SnotelCalculator, SnotelDataLoader, SnotelPlotter
 from ..utility.swe_minmax import get_minmax
 
 logger = logging.getLogger(__name__)
 
+warnings.filterwarnings("ignore", module="geopandas")
+warnings.filterwarnings("ignore", module="pandas")
 
-class DataLoader:
-    """Data Loader for SNODAS data."""
 
-    @staticmethod
-    def snodas_path_constructor(date: str, s3_mount_point: str, direct_s3: bool) -> str:
-        """Construct the S3 path to SNODAS NetCDF file.
+class ObsDataLoader(DataLoader):
+    """Data Loader for Observed data."""
+
+    def path_constructor(self, date: str, s3_mount_point: str, direct_s3: bool) -> str:
+        """Construct the S3 path to SMAP NetCDF file.
 
         Parameters
         ----------
@@ -42,373 +43,450 @@ class DataLoader:
         Returns
         -------
         str
-            S3 path to the SNODAS NetCDF file
+            S3 path to the NetCDF file
 
         """
         file_date = date.replace("-", "")
 
         if not direct_s3:
-            snodas_file = f"{s3_mount_point}/ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
-            if os.path.exists(snodas_file):
-                return snodas_file
+            netcdf_file = f"{s3_mount_point}/{self.path_str}".replace("date", file_date)
+            if os.path.exists(netcdf_file):
+                return netcdf_file
             else:
-                raise FileNotFoundError(f"File not found in local mount: {snodas_file}")
+                raise FileNotFoundError(f"File not found in local mount: {netcdf_file}")
         else:
-            snodas_file = f"s3://ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATS{file_date}05HP001.nc"
+            netcdf_file = f"s3://{self.path_str}".replace("date", file_date)
             fs = fsspec.filesystem("s3")
-            if fs.exists(snodas_file):
-                return snodas_file
+            if fs.exists(netcdf_file):
+                return netcdf_file
             else:
-                raise FileNotFoundError(f"File not found in S3: {snodas_file}")
+                raise FileNotFoundError(f"File not found in S3: {netcdf_file}")
 
-    @staticmethod
-    def list_snotel_filenames(
-        s3_mount_point: str, snotel_s3_path: str, direct_s3: bool
-    ) -> list[str]:
-        """List SNOTEL CSV files available in the S3 bucket."""
-        return SnotelDataLoader.list_snotel_filenames(
-            s3_mount_point, snotel_s3_path, direct_s3
-        )
-
-    @staticmethod
-    def parse_snotel_filenames(filenames: list[str]) -> gpd.GeoDataFrame:
-        """Parse latitude and longitude from SNOTEL filenames and create a GeoDataFrame."""
-        return SnotelDataLoader.parse_snotel_filenames(filenames)
-
-    @staticmethod
-    def load_snotel_data(
-        stations_in_basin: gpd.GeoDataFrame,
-        date: str,
-        fs: fsspec.AbstractFileSystem,
-        s3_mount_point: str,
-        snotel_s3_path: str,
-    ) -> pd.DataFrame:
-        """Load SNOTEL SWE data for stations within the basin for a specific date."""
-        return SnotelDataLoader.load_snotel_data(
-            stations_in_basin, date, fs, s3_mount_point, snotel_s3_path
-        )
-
-    @staticmethod
-    def load_netcdf(snodas_file: str) -> xr.Dataset:
-        """Load SNODAS NetCDF data from an S3 path with chunking.
+    def load_obs_netcdf(self, netcdf_file: str) -> xr.Dataset:
+        """Load NetCDF data from an S3 path with chunking.
 
         Parameters
         ----------
-        snodas_file : str
-            S3 path to the SNODAS NetCDF file
+        netcdf_file : str
+            S3 path to the NetCDF file
 
         Returns
         -------
         xarray.Dataset
-            Loaded xarray Dataset containing SNODAS data
+            Loaded xarray Dataset containing the data
 
         """
-        t0 = time.time()
-
-        chunk_size = 100
-
-        # Open the SNODAS NetCDF file with chunking to optimize performance and memory usage.
-        logger.info(f"Opening netCDF file: {snodas_file}")
-        with fsspec.open(snodas_file, mode="rb") as f:
-            snodas_ds = xr.open_dataset(
-                f, chunks={"time": 1, "lat": chunk_size, "lon": chunk_size}
-            )
-
-        logger.info(f"   SNODAS NetCDF load time: {time.time() - t0:.2f}s")
-
-        return snodas_ds
-
-    @staticmethod
-    def read_geo(gpkg_file: str) -> gpd.GeoDataFrame:
-        """Read the 'divides' layer from a geopackage file and ensure geographic CRS."""
-        return GeoUtils.read_geo(gpkg_file)
-
-    @staticmethod
-    def get_basin_geometry(basin_gdf: gpd.GeoDataFrame) -> gpd.GeoSeries:
-        """Extract a unified basin geometry and bounds from a GeoDataFrame."""
-        return GeoUtils.get_basin_geometry(basin_gdf)
+        # Open the NetCDF file with chunking to optimize performance and memory usage.
+        with timing_block(f"Loading {self.dataset_name} NetCDF"):
+            with fsspec.open(netcdf_file, mode="rb") as f:
+                return xr.open_dataset(
+                    f,
+                    chunks={
+                        "time": 1,
+                        self.x_dim_name: self._chunk_size,
+                        self.y_dim_name: self._chunk_size,
+                    },
+                ).load()
 
 
-class Calculator:
-    """Calculator for SNOTEL data processing."""
+class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
+    """Data Loader for Observed SWE data."""
 
-    @staticmethod
-    def subset_to_basin(ds: xr.Dataset, basin_geometry: gpd.GeoSeries) -> tuple:
+    def __init__(self):
+        """Initialize the SWEObsDataLoader."""
+        self.dataset_name = "Band1"  # Variable name in xarray Dataset
+        self.path_str = (
+            "ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATSdate05HP001.nc"
+        )
+        self._chunk_size = 100  # Default chunk size
+        self.x_dim_name = "lon"  # X dimension name in xarray Dataset
+        self.y_dim_name = "lat"  # Y dimension name in xarray Dataset
+
+    @property
+    def chunk_size(self):
+        """Return the chunk size used for loading data."""
+        return self._chunk_size
+
+    @chunk_size.setter
+    def chunk_size(self, value):
+        """Set the chunk size used for loading data."""
+        self._chunk_size = value
+
+
+class SoilMoistureObsDataLoader(ObsDataLoader):
+    """Data Loader for Observed Soil Moisture data."""
+
+    def __init__(self):
+        """Initialize the SoilMoistureObsDataLoader."""
+        self.dataset_name = "sm_rootzone"  # Variable name in xarray Dataset
+        self.path_str = "ngwpc-forcing/smap_nc/SMAP_L4_SM_gph_dateT013000_Vv8010_001.nc"
+        self._chunk_size = 100  # Default chunk size
+        self.x_dim_name = "x"  # X dimension name in xarray Dataset
+        self.y_dim_name = "y"  # Y dimension name in xarray Dataset
+
+    @property
+    def chunk_size(self):
+        """Return the chunk size used for loading data."""
+        return self._chunk_size
+
+    @chunk_size.setter
+    def chunk_size(self, value):
+        """Set the chunk size used for loading data."""
+        self._chunk_size = value
+
+
+class ObsCalculator(Calculator, SnotelCalculator):
+    """Calculator for Observed data processing."""
+
+    def __init__(self, basin_gdf: gpd.GeoDataFrame, ds: xr.Dataset):
+        """Initialize the calculator."""
+        super().__init__(basin_gdf)
+        self.ds = ds
+
+    @property
+    @lru_cache
+    def ds_basin_subset(self) -> xr.Dataset:
         """Subset a dataset to the basin extent and prepare for analysis.
-
-        Parameters
-        ----------
-        ds : xarray.Dataset
-            Input dataset containing SNODAS data
-        basin_geometry : shapely.geometry
-            Basin geometry to use for subsetting
 
         Returns
         -------
         tuple
             (ds_subset, lons, lats) where:
                 - ds_subset is the subsetted xarray Dataset
-                - lons is a 2D numpy array of longitudes
-                - lats is a 2D numpy array of latitudes
 
         """
-        # Use bounding box to filter dataset
-        bounds = basin_geometry.bounds
-        lon_mask = (ds.lon >= bounds[0]) & (ds.lon <= bounds[2])
-        lat_mask = (ds.lat >= bounds[1]) & (ds.lat <= bounds[3])
+        ds = self.ds.rio.write_crs(self.crs)
+        ds = ds.rio.reproject("EPSG:4326")
+        ds_subset = ds.rio.clip(self.basin_gdf.geometry, all_touched=True, drop=True)
 
-        # Apply the mask and compute to load required data
-        ds_subset = ds.where(lon_mask & lat_mask, drop=True).compute()
-        # `.compute()` ensures that the filtered dataset is fully materialized.
+        ds_subset[self.dataset_name] = self.convert_units(ds_subset)
 
-        # Convert units from millimeters to meters
-        ds_subset["Band1"] = ds_subset.Band1 / 1000
+        ds_subset = ds_subset.rio.write_crs("EPSG:4326")
 
-        # Create meshgrid of lat/lon values
-        lons, lats = np.meshgrid(ds_subset.lon, ds_subset.lat)
+        return ds_subset
 
-        return ds_subset, lons, lats
+    @lru_cache
+    def get_lons_lats(self) -> tuple[np.ndarray, np.ndarray]:
+        """Get 2D arrays of longitude and latitude values for subsetting."""
+        return np.meshgrid(
+            self.ds_basin_subset[self.x_dim_name], self.ds_basin_subset[self.y_dim_name]
+        )
 
-    @staticmethod
-    def find_stations_in_basin(
-        stations_gdf: gpd.GeoDataFrame, basin_geometry: gpd.GeoSeries
-    ) -> gpd.GeoDataFrame:
-        """Find SNOTEL stations that fall within the basin geometry."""
-        return SnotelCalculator.find_stations_in_basin(stations_gdf, basin_geometry)
+    @property
+    @lru_cache
+    def lons(self):
+        """Return the longitude values for subsetting."""
+        return self.get_lons_lats()[0]
 
-    @staticmethod
-    def calculate_catchment_mean(
-        ds: xr.Dataset, basin_geometry: gpd.GeoSeries, gdf: gpd.GeoDataFrame
-    ) -> tuple:
-        """Calculate mean SWE for each catchment and apply to dataset.
+    @property
+    @lru_cache
+    def lats(self):
+        """Return the latitude values for subsetting."""
+        return self.get_lons_lats()[1]
 
-        Parameters
-        ----------
-        ds : xarray.Dataset
-            Input dataset containing SNODAS data
-        basin_geometry : shapely.geometry
-            Basin geometry containing all catchments
-        gdf : geopandas.GeoDataFrame
-            GeoDataFrame with catchment boundaries
+    @property
+    def long_mask(self):
+        """Return the longitude mask for subsetting."""
+        return (self.ds[self.y_dim_name] >= self.bounds[0]) & (
+            self.ds[self.y_dim_name] <= self.bounds[2]
+        )
 
-        Returns
-        -------
-        tuple
-            (gdf_with_swe, ds_subset) where:
-                - gdf_with_swe is the GeoDataFrame with added 'mean_swe' column
-                - ds_subset is the xarray Dataset with catchment means applied
+    @property
+    def lat_mask(self):
+        """Return the latitude mask for subsetting."""
+        return (self.ds[self.x_dim_name] >= self.bounds[1]) & (
+            self.ds[self.x_dim_name] <= self.bounds[3]
+        )
 
-        """
-        # Subset to basin and compute to ensure faster processing
-        ds_subset, lons, lats = Calculator.subset_to_basin(ds, basin_geometry)
+    @property
+    @lru_cache
+    def points(self):
+        """Convert lat/lon arrays to Shapely Points for spatial operations."""
+        return np.array(
+            [Point(x, y) for x, y in zip(self.lons.ravel(), self.lats.ravel())]
+        )
 
-        # Convert meshgrid into Points for fast spatial operations
-        points = np.array([Point(x, y) for x, y in zip(lons.ravel(), lats.ravel())])
+    # @property
+    # @lru_cache
+    # def mean_values(
+    #     self,
+    # ) -> list[float]:
+    #     """Calculate mean value for each catchment.
 
-        mean_values = []
-        for _, row in gdf.iterrows():
-            # Mask for each catchment using Shapely `contains`
-            mask = np.array([row.geometry.contains(pt) for pt in points]).reshape(
-                lons.shape
+    #     Returns
+    #     -------
+    #     list[float]
+    #         List of mean values for each catchment
+
+    #     """
+    #     mean_values = []
+    #     for _, row in self.basin_gdf.iterrows():
+    #         # Mask for each catchment using Shapely `contains`
+    #         mask = np.array([row.geometry.contains(pt) for pt in self.points]).reshape(
+    #             self.lons.shape
+    #         )
+
+    #         # Extract SWE data for catchment and compute mean
+    #         catchment_data = self.ds_basin_subset[self.dataset_name].where(mask)
+    #         mean_swe = float(catchment_data.mean().compute())
+    #         mean_values.append(mean_swe)
+    #     return mean_values
+
+    @property
+    @lru_cache
+    def mean_values(self):
+        """Calculate mean value for each catchment using area-weighted averaging."""
+        return self.fishnet_with_values.groupby("divide_id").apply(
+            lambda x: np.average(x["value"], weights=x["area"])
+        )
+
+    @property
+    @lru_cache
+    def fishnet_with_values(self):
+        """Compute Fishnet with sampled values."""
+        gdf = gpd.overlay(self.fishnet, self.basin_gdf, how="intersection")
+        gdf["area"] = gdf.to_crs(5070).geometry.area
+        gdf["value"] = gdf.apply(self.sample_value, axis=1)
+        return gdf
+
+    def sample_value(self, row: pd.Series) -> float:
+        """Sample value from dataset at the centroid of a polygon."""
+        return float(
+            self.ds_basin_subset[self.dataset_name].sel(
+                {
+                    self.x_dim_name: row.geometry.centroid.x,
+                    self.y_dim_name: row.geometry.centroid.y,
+                },
+                method="nearest",
             )
-
-            # Extract SWE data for catchment and compute mean
-            catchment_data = ds_subset.Band1.where(mask)
-            mean_swe = float(catchment_data.mean().compute())
-            mean_values.append(mean_swe)
-
-            # Apply computed mean value efficiently
-            ds_subset["Band1"] = xr.where(mask, mean_swe, ds_subset.Band1)
-
-        # Add computed mean values to GeoDataFrame
-        gdf_with_swe = gdf.copy()
-        gdf_with_swe["mean_swe"] = mean_values
-
-        # Mask everything outside the basin
-        basin_mask = np.array([basin_geometry.contains(pt) for pt in points]).reshape(
-            lons.shape
-        )
-        ds_subset["Band1"] = ds_subset.Band1.where(basin_mask)
-
-        return gdf_with_swe, ds_subset
-
-
-class Plotter:
-    """Class for creating plots of SNOTEL data."""
-
-    @staticmethod
-    def create_base_plot() -> plt.Figure:
-        """Create a base map plot with cartopy projection."""
-        return PlotUtils.create_base_plot()
-
-    @staticmethod
-    def set_map_extent(
-        ax: plt.Axes, bounds: tuple, proj: cartopy.crs.Projection
-    ) -> None:
-        """Set the map extent with appropriate buffers around bounds."""
-        return PlotUtils.set_map_extent(ax, bounds, proj)
-
-    @staticmethod
-    def plot_catchment_boundaries(
-        ax: plt.Axes, gdf: gpd.GeoDataFrame, proj: cartopy.crs.Projection
-    ) -> None:
-        """Add catchment boundaries to a map plot."""
-        return PlotUtils.plot_catchment_boundaries(ax, gdf, proj)
-
-    @staticmethod
-    def add_basin_overlay(
-        ax: plt.Axes, basin_geometry: gpd.GeoSeries, proj: cartopy.crs.Projection
-    ) -> None:
-        """Add the basin outline to a map plot."""
-        return PlotUtils.add_basin_overlay(ax, basin_geometry, proj)
-
-    @staticmethod
-    def add_gridlines(ax: plt.Axes) -> None:
-        """Add gridlines to a map plot."""
-        return PlotUtils.add_gridlines(ax)
-
-    @staticmethod
-    def add_colorbar(im, ax: plt.Axes) -> None:
-        """Add a colorbar to a map plot."""
-        return PlotUtils.add_colorbar(im, ax)
-
-    @staticmethod
-    def add_snotel_overlay(
-        ax: plt.Axes, snotel_data: pd.DataFrame, proj: cartopy.crs.Projection
-    ) -> None:
-        """Add SNOTEL SWE data as text overlays on a map."""
-        return SnotelPlotter.add_snotel_overlay(ax, snotel_data, proj)
-
-    def plot_raw_swe(
-        self,
-        ax: plt.Axes,
-        ds: xr.Dataset,
-        basin_geometry: shapely.geometry,
-        gdf: gpd.GeoDataFrame,
-        proj: cartopy.crs.Projection,
-        vmin: float = None,
-        vmax: float = None,
-    ) -> None:
-        """Plot raw SWE values with the basin boundary.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes
-            Axes object to plot on
-        ds : xarray.Dataset
-            Dataset containing SNODAS data
-        basin_geometry : shapely.geometry
-            Basin geometry for masking
-        gdf : geopandas.GeoDataFrame
-            GeoDataFrame with catchment boundaries
-        proj : cartopy.crs
-            Projection to use for plot
-        vmin : float
-            Minimum SWE value for colormap
-        vmax : float
-            Maximum SWE value for colormap
-
-        Returns
-        -------
-        tuple
-            (ax, im) where:
-                - ax is the updated matplotlib Axes
-                - im is the plotted image
-
-        """
-        # Subset dataset
-        ds_subset, lons, lats = Calculator.subset_to_basin(ds, basin_geometry)
-
-        # Convert lat/lon into Points for spatial operations
-        points = np.array([Point(x, y) for x, y in zip(lons.ravel(), lats.ravel())])
-        basin_mask = np.array([basin_geometry.contains(pt) for pt in points]).reshape(
-            lons.shape
         )
 
-        # Mask invalid values & apply basin mask
-        swe_data = ds_subset.Band1.where(ds_subset.Band1 != -9999).where(basin_mask)
+    @property
+    @lru_cache
+    def fishnet(self):
+        """Compute Fishnet."""
+        # create fishnet geodataframe
+        mp = MultiPoint(
+            [
+                (x, y)
+                for x in self.ds_basin_subset.x.values
+                for y in self.ds_basin_subset.y.values
+            ]
+        )
 
+        polygons = voronoi_polygons(mp)
+        return gpd.GeoDataFrame(
+            {"geometry": [Polygon(i) for i in polygons.geoms]},
+            crs=self.ds_basin_subset.rio.crs,
+            geometry="geometry",
+        )
+
+    @property
+    @lru_cache
+    def calculate_catchment_mean(self):
+        """Calculate and return a GeoDataFrame with catchment mean values."""
+        with timing_block("Calculating catchment mean values"):
+            gdf_with_swe = self.basin_gdf.copy()
+            gdf_with_swe[self.column] = gdf_with_swe["divide_id"].map(self.mean_values)
+        return gdf_with_swe
+
+    @property
+    @lru_cache
+    def basin_mask(self) -> np.ndarray:
+        """Create a mask for the basin geometry."""
+        return np.array(
+            [self.basin_geometry.contains(pt) for pt in self.points]
+        ).reshape(self.lons.shape)
+
+    # @property
+    # @lru_cache
+    # def ds_to_plot(self) -> xr.Dataset:
+    #     """Get the dataset to plot for the specified date."""
+    #     # Mask invalid values & apply basin mask
+    #     # data = (
+    #     #     self.ds_basin_subset[self.dataset_name]
+    #     #     .where(self.ds_basin_subset[self.dataset_name] != -9999)
+    #     #     .where(self.basin_mask)
+    #     # )
+    #     # data = data.rio.write_crs(self.crs)
+    #     return self.ds_basin_subset[self.dataset_name]
+
+
+class SWEObsCalculator(ObsCalculator):
+    """Calculator for Observed SWE data processing."""
+
+    def __init__(self, basin_gdf: gpd.GeoDataFrame, ds: xr.Dataset):
+        """Initialize the calculator."""
+        super().__init__(basin_gdf, ds)
+        self.column = "mean_swe"  # Column to store computed values in GeoDataFrame
+        self.dataset_name = "Band1"  # Variable name in xarray Dataset
+        self.x_dim_name = "x"  # X dimension name in xarray Dataset
+        self.y_dim_name = "y"  # Y dimension name in xarray Dataset
+        self.crs = "EPSG:4326"  # Coordinate Reference System
+
+    def convert_units(self, ds: xr.Dataset) -> xr.Dataset:
+        """Convert units of the dataset if necessary."""
+        # Default implementation does nothing
+        return ds[self.dataset_name] / 1000
+
+
+class SoilMoistureObsCalculator(ObsCalculator):
+    """Calculator for Observed Soil Moisture data processing."""
+
+    def __init__(self, basin_gdf: gpd.GeoDataFrame = None, ds: xr.Dataset = None):
+        """Initialize the calculator."""
+        super().__init__(basin_gdf, ds)
+        self.column = "mean_sm"  # Column to store computed values in GeoDataFrame
+        self.dataset_name = "sm_rootzone"  # Variable name in xarray Dataset
+        self.x_dim_name = "x"  # X dimension name in xarray Dataset
+        self.y_dim_name = "y"  # Y dimension name in xarray Dataset
+        self.crs = "EPSG:6933"  # Coordinate Reference System
+
+    def convert_units(self, ds: xr.Dataset) -> xr.Dataset:
+        """Convert units of the dataset if necessary."""
+        # Default implementation does nothing
+        return ds[self.dataset_name]
+
+
+class ObservedPlotter(Plotter):
+    """Plotter for observed data."""
+
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the plotter with a GeoDataFrame."""
+        super().__init__(gdf)
+
+    def plot_raw_data_polygon(
+        self, fishnet_with_values: gpd.GeoDataFrame, ds_basin_subset: xr.Dataset
+    ):
+        """Plot raw data values with the basin boundary."""
+        for _, row in fishnet_with_values.iterrows():
+            if not np.isnan(row["value"]):
+                self.ax.add_geometries(
+                    [row.geometry],
+                    crs=self.proj,
+                    # facecolor="none",
+                    facecolor=self.scalar_mappable.to_rgba(row["value"]),
+                    edgecolor="none",
+                )
+
+    def plot_raw_data_raster(self, ds_basin_subset: xr.Dataset) -> None:
+        """Plot raw data values with the basin boundary."""
         # Compute min/max values for colormap scaling
-        self.vmin, self.vmax = get_minmax(swe_data.compute(), vmin, vmax)
+        self.vmin, self.vmax = get_minmax(
+            ds_basin_subset.compute(), self.vmin, self.vmax
+        )
 
-        # Create colormesh plot
-        im = ax.pcolormesh(
-            ds_subset.lon,
-            ds_subset.lat.compute(),
-            swe_data,
-            transform=proj,
-            cmap="Blues",
+        scalar_mappable = ds_basin_subset.plot(
+            ax=self.ax,
             vmin=self.vmin,
             vmax=self.vmax,
-            shading="auto",
+            cmap=self.cmap,
+            add_colorbar=False,
         )
+        return scalar_mappable
 
-        # Add catchment boundaries
-        ax = Plotter.plot_catchment_boundaries(ax, gdf, proj)
 
-        return ax, im
+class RawSWEObsPlotter(ObservedPlotter, SnotelPlotter):
+    """Class for creating plots of Raw SNODAS SWE data."""
 
-    @staticmethod
-    def plot_polygon_swe(
-        ax: plt.Axes,
-        gdf: gpd.GeoDataFrame,
-        proj: cartopy.crs.Projection,
-        vmin: float,
-        vmax: float,
-    ) -> None:
-        """Plot catchment polygons colored by mean SWE values.
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the RawSWEObsPlotter."""
+        super().__init__(gdf)
+        self.basin_gdf_with_data = None  # To be set externally
+        self.title_str = "Raw SNODAS Snow Water Equivalent\n date - 06z"
+        self.column = "mean_swe"
+        self.color_bar_label = "Snow Water Equivalent (m)"
+
+
+class SWEObsPlotter(ObservedPlotter, SnotelPlotter):
+    """Class for creating plots of Observed SWE data."""
+
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the SWEObsPlotter."""
+        super().__init__(gdf)
+        self.basin_gdf_with_data = None  # To be set externally
+        self.column = "mean_swe"  # Column with computed values
+        self.color_bar_label = "Snow Water Equivalent (m)"
+        self.title_str = "Lumped SNODAS Snow Water Equivalent\n date - 06z"
+
+    def add_snotel_overlay(self, snotel_data: pd.DataFrame):
+        """Add SNOTEL SWE data as text overlays on a map.
 
         Parameters
         ----------
-        ax : matplotlib.axes.Axes
-            Axes object to plot on
-        gdf : geopandas.GeoDataFrame
-            GeoDataFrame with catchment boundaries and 'mean_swe' column
-        proj : cartopy.crs
-            Projection to use for plot
-        vmin : float
-            Minimum SWE value for colormap
-        vmax : float
-            Maximum SWE value for colormap
+        snotel_data : pandas.DataFrame
+            DataFrame with station information and SWE values
 
         Returns
         -------
-        tuple
-            (ax, sm, vmin, vmax) where:
-                - ax is the updated matplotlib Axes
-                - sm is the ScalarMappable for colorbar
-                - vmin, vmax are the colormap scale limits
+        matplotlib.axes.Axes
+            Updated axes with SNOTEL overlay
 
         """
-        # Use vmin and vmax to explicitly define a colorbar
-        vmin, vmax = get_minmax(gdf["mean_swe"], vmin, vmax)
-        norm = plt.Normalize(vmin=vmin, vmax=vmax)
-        cmap = plt.cm.Blues
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
+        if snotel_data.empty:
+            return self.ax
 
-        # Plot filled polygons
-        for _, row in gdf.iterrows():
-            ax.add_geometries(
-                [row.geometry],
-                crs=proj,
-                facecolor=cmap(norm(row["mean_swe"])),
-                edgecolor="none",
+        color = "#990000"
+
+        if not snotel_data.empty:
+            # Plot all stations
+            self.ax.plot(
+                snotel_data["longitude"],
+                snotel_data["latitude"],
+                "o",
+                markersize=3,
+                transform=self.proj,
+                color=color,
+                label="SNOTEL Stations (SWE)",
             )
 
-        # Add catchment boundaries
-        ax = Plotter.plot_catchment_boundaries(ax, gdf, proj)
+            # Add text labels iteratively
+            for _, station in snotel_data.iterrows():
+                swe_value = f"{station['swe']:.2f}"
+                self.ax.text(
+                    station["longitude"] + 0.0005,
+                    station["latitude"] - 0.0005,
+                    swe_value,
+                    fontsize=11,
+                    ha="left",
+                    va="top",
+                    transform=self.proj,
+                    fontweight="bold",
+                    color=color,
+                )
+            # Add the legend to the plot, using the specified label
+            self.ax.legend(
+                loc="upper right",
+                fontsize=10,
+                framealpha=0.5,
+                bbox_to_anchor=(1.25, 1.05),
+            )
 
-        return ax, sm, vmin, vmax
 
-    @staticmethod
-    def save_figure(fig: plt.Figure, output_file: str) -> None:
-        """Save a figure to a file."""
-        return PlotUtils.save_figure(fig, output_file)
+class RawSoilMoistureObsPlotter(ObservedPlotter):
+    """Class for creating plots of Raw Soil Moisture data."""
+
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the RawSoilMoistureObsPlotter."""
+        super().__init__(gdf)
+        self.title_str = "Raw SMAP Soil Moisture\n date - 06z"
+        self.color_bar_label = "Soil Moisture (m³/m³)"
 
 
-class SNODASProcessor:
-    """Processor for SNODAS data mapping and visualization."""
+class SoilMoistureObsPlotter(ObservedPlotter):
+    """Class for creating plots of Observed Soil Moisture data."""
+
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the SoilMoistureObsPlotter."""
+        super().__init__(gdf)
+        self.basin_gdf_with_data = None  # To be set externally
+        self.column = "mean_sm"  # Column with computed values
+        self.title_str = "Lumped SMAP Soil Moisture\n date - 06z"
+        self.color_bar_label = "Soil Moisture (m³/m³)"
+
+
+class ObsProcessor(Processor):
+    """Processor for Observed data mapping and visualization."""
 
     def __init__(
         self,
@@ -418,7 +496,7 @@ class SNODASProcessor:
         output_file_lumped=None,
         direct_s3=False,
     ):
-        """Initialize the SNODAS Processor.
+        """Initialize the Observed Processor.
 
         Args:
         ----
@@ -434,51 +512,116 @@ class SNODASProcessor:
             Whether to access S3 directly or via mounted filesystem
 
         """
-        # Initialize input parameters
-        self.date = date
-        self.gpkg_file = gpkg_file
+        super().__init__(gpkg_file=gpkg_file, date=date, direct_s3=direct_s3)
+
         self.output_file_raw = output_file_raw
         self.output_file_lumped = output_file_lumped
-        self.direct_s3 = direct_s3
 
-        self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
+    @property
+    @lru_cache
+    def obs_file(self) -> str | None:
+        """Get the observed data file path."""
+        return self.dl.path_constructor(self.date, self.s3_mount_point, self.direct_s3)
 
-        self.plotter = Plotter()
-        self.dl = DataLoader()
-        self.calc = Calculator()
+    @property
+    @lru_cache
+    def obs_ds(self) -> xr.Dataset | None:
+        """Get the observed dataset."""
+        return self.dl.load_obs_netcdf(self.obs_file)
 
     def run(self, vmin: float, vmax: float) -> None:
-        """Run the complete SNODAS processing pipeline."""
-        self.vmin = vmin
-        self.vmax = vmax
-        self.setup_data()
+        """Run the complete observed data processing pipeline."""
+        logging.debug(f"Initial vmin: {vmin}, vmax: {vmax}")
+        self.set_vmin_vmax(vmin, vmax)
+        self.basin_gdf_with_data
         self.process_raw()
-        self.process_catchment()
+        self.process_lumped()
 
-    def setup_data(self) -> None:
-        """Load and prepare all required data for processing."""
-        self.s3_mount_point = os.getenv(
-            "S3_MOUNT_POINT", os.path.join(os.path.expanduser("~"), "s3")
-        )
-        self.snodas_file = self.dl.snodas_path_constructor(
-            self.date, self.s3_mount_point, self.direct_s3
-        )
-        self.basin_gdf = self.dl.read_geo(self.gpkg_file)
-        self.basin_geometry, self.bounds = self.dl.get_basin_geometry(self.basin_gdf)
-        self.snodas_ds = self.dl.load_netcdf(self.snodas_file)
+    def process_raw(self) -> None:
+        """Process and plot raw SNODAS data."""
+        self.raw_plotter.set_map_extent()
 
-        # For SNOTEL data
-        self.snotel_filenames, self.snotel_filesystem = self.dl.list_snotel_filenames(
-            self.s3_mount_point, self.snotel_s3_path, self.direct_s3
-        )
-        self.stations_gdf = self.dl.parse_snotel_filenames(self.snotel_filenames)
-        self.stations_in_basin = self.calc.find_stations_in_basin(
-            self.stations_gdf, self.basin_geometry
-        )
+        # scalar_mappable = self.raw_plotter.plot_raw_data_raster(
+        #     self.calc.ds_basin_subset[self.calc.dataset_name]
+        # )
 
-        # Load SNOTEL data if stations exist in basin
-        if not self.stations_in_basin.empty:
-            self.snotel_data = self.dl.load_snotel_data(
+        self.raw_plotter.plot_raw_data_polygon(
+            self.calc.fishnet_with_values,
+            self.calc.ds_basin_subset[self.calc.dataset_name],
+        )
+        self.raw_plotter.plot_catchment_boundaries()
+        self.raw_plotter.add_basin_overlay(self.basin_geometry)
+
+        self.raw_plotter.add_colorbar()
+        self.raw_plotter.add_gridlines()
+        self.raw_plotter.add_title(self.date)
+        # self.add_station_data()
+
+        if self.output_file_raw is not None:
+            self.raw_plotter.save_figure(self.output_file_raw)
+
+    def set_vmin_vmax(self, vmin: float, vmax: float):
+        """Set the global vmin and vmax using current data."""
+        self.vmin, self.vmax = self.get_minmax(
+            self.calc.fishnet_with_values["value"], vmin, vmax
+        )
+        self.raw_plotter.vmin = self.vmin
+        self.raw_plotter.vmax = self.vmax
+        self.lumped_plotter.vmin = self.vmin
+        self.lumped_plotter.vmax = self.vmax
+
+    @property
+    @lru_cache
+    def basin_gdf_with_data(self) -> gpd.GeoDataFrame:
+        """Get the basin GeoDataFrame with computed catchment mean values."""
+        self.lumped_plotter.basin_gdf_with_data = self.calc.calculate_catchment_mean
+        self.raw_plotter.basin_gdf_with_data = self.calc.calculate_catchment_mean
+        return self.calc.calculate_catchment_mean
+
+    def process_lumped(self) -> None:
+        """Process and plot catchment-averaged data."""
+        self.lumped_plotter.plot_choropleth_map()
+        self.lumped_plotter.plot_catchment_boundaries()
+        self.lumped_plotter.add_basin_overlay(self.basin_geometry)
+        self.lumped_plotter.set_map_extent()
+        self.lumped_plotter.add_colorbar()
+        self.lumped_plotter.add_gridlines()
+        self.lumped_plotter.add_title(self.date)
+        # self.add_station_data()
+
+        if self.output_file_lumped is not None:
+            self.lumped_plotter.save_figure(self.output_file_lumped)
+
+
+class SWEObsProcessor(ObsProcessor):
+    """Processor for Observed SWE data mapping and visualization."""
+
+    def __init__(
+        self,
+        date=None,
+        gpkg_file=None,
+        output_file_raw=None,
+        output_file_lumped=None,
+        direct_s3=False,
+    ):
+        """Initialize the SWE Observed Processor."""
+        super().__init__(
+            date, gpkg_file, output_file_raw, output_file_lumped, direct_s3
+        )
+        self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
+        self.column = "mean_swe"
+
+        self.dl = SWEObsDataLoader()
+        self.calc = SWEObsCalculator(self.basin_gdf, self.obs_ds)
+        self.raw_plotter = RawSWEObsPlotter(self.basin_gdf)
+        self.lumped_plotter = SWEObsPlotter(self.basin_gdf)
+
+    @property
+    @lru_cache
+    def snotel_data(self) -> pd.DataFrame | None:
+        """Get the SNOTEL SWE data for stations within the basin."""
+        if self.stations_in_basin is not None and not self.stations_in_basin.empty:
+            return self.dl.load_snotel_data(
                 self.stations_in_basin,
                 self.date,
                 self.snotel_filesystem,
@@ -486,90 +629,88 @@ class SNODASProcessor:
                 self.snotel_s3_path,
             )
 
-    def process_raw(self) -> None:
-        """Process and plot raw SNODAS data."""
-        t3 = time.time()
+    @property
+    @lru_cache
+    def stations_gdf(self) -> gpd.GeoDataFrame:
+        """Get the SNOTEL stations GeoDataFrame."""
+        return self.dl.parse_snotel_filenames(self.snotel_filenames)
 
-        # Create base plot
-        self.raw_fig, self.raw_ax, self.proj = self.plotter.create_base_plot()
-        self.ext = self.plotter.set_map_extent(self.raw_ax, self.bounds, self.proj)
-        self.raw_ax, self.raw_im = self.plotter.plot_raw_swe(
-            self.raw_ax,
-            self.snodas_ds,
-            self.basin_geometry,
-            self.basin_gdf,
-            self.proj,
-            self.vmin,
-            self.vmax,
-        )
+    @property
+    @lru_cache
+    def stations_in_basin(self) -> gpd.GeoDataFrame:
+        """Get the SNOTEL stations within the basin."""
+        return self.calc.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
 
-        self.raw_ax = self.plotter.add_basin_overlay(
-            self.raw_ax, self.basin_geometry, self.proj
-        )
-        self.plotter.add_colorbar(self.raw_im, self.raw_ax)
-        plt.title(f"Raw SNODAS Snow Water Equivalent\n {self.date} - 06z")
-        self.plotter.add_gridlines(self.raw_ax)
-
+    def add_station_data(self):
+        """Add SNOTEL station data overlay to the plot if available."""
         # Add SNOTEL data overlay if available
         if (
             self.stations_in_basin is not None
             and not self.stations_in_basin.empty
             and self.snotel_data is not None
         ):
-            self.raw_ax = Plotter.add_snotel_overlay(
-                self.raw_ax, self.snotel_data, self.proj
+            self.raw_plotter.add_snotel_overlay(self.snotel_data)
+            self.lumped_plotter.add_snotel_overlay(self.snotel_data)
+
+
+class SoilMoistureObsProcessor(ObsProcessor):
+    """Processor for Observed Soil Moisture data mapping and visualization."""
+
+    def __init__(
+        self,
+        date: str,
+        gpkg_file: str,
+        output_file_raw: str,
+        output_file_lumped: str,
+        direct_s3=False,
+    ):
+        """Initialize the Soil Moisture Observed Processor."""
+        super().__init__(
+            date, gpkg_file, output_file_raw, output_file_lumped, direct_s3
+        )
+        # self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
+        self.column = "mean_sm"
+
+        self.dl = SoilMoistureObsDataLoader()
+        self.calc = SoilMoistureObsCalculator(self.basin_gdf, self.obs_ds)
+        self.raw_plotter = SoilMoistureObsPlotter(self.basin_gdf)
+        self.lumped_plotter = SoilMoistureObsPlotter(self.basin_gdf)
+
+    @property
+    @lru_cache
+    def snotel_data(self) -> pd.DataFrame | None:
+        """Get the SNOTEL SWE data for stations within the basin."""
+        if self.stations_in_basin is not None and not self.stations_in_basin.empty:
+            return self.dl.load_snotel_data(
+                self.stations_in_basin,
+                self.date,
+                self.snotel_filesystem,
+                self.s3_mount_point,
+                self.snotel_s3_path,
             )
 
-        # Save figure if output file is specified
-        if self.output_file_raw:
-            t4 = time.time()
-            self.plotter.save_figure(self.raw_fig, self.output_file_raw)
-            logger.info(f"   Raw output time: {time.time() - t4:.2f}s")
+    @property
+    @lru_cache
+    def stations_gdf(self) -> gpd.GeoDataFrame:
+        """Get the SNOTEL stations GeoDataFrame."""
+        return self.dl.parse_snotel_filenames(self.snotel_filenames)
 
-        logger.info(f"   Raw plotting time: {time.time() - t3:.2f}s")
+    @property
+    @lru_cache
+    def stations_in_basin(self) -> gpd.GeoDataFrame:
+        """Get the SNOTEL stations within the basin."""
+        return self.calc.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
 
-    def process_catchment(self) -> None:
-        """Process and plot catchment-averaged SNODAS data."""
-        t5 = time.time()
-        basin_gdf_with_swe, ds_catchment = Calculator.calculate_catchment_mean(
-            self.snodas_ds, self.basin_geometry, self.basin_gdf
-        )
-
-        self.catchment_fig, self.catchment_ax, self.proj = (
-            self.plotter.create_base_plot()
-        )
-        self.ext = self.plotter.set_map_extent(
-            self.catchment_ax, self.bounds, self.proj
-        )
-        self.catchment_ax, self.catchment_im, self.vmin, self.vmax = (
-            self.plotter.plot_polygon_swe(
-                self.catchment_ax, basin_gdf_with_swe, self.proj, self.vmin, self.vmax
-            )
-        )
-        self.catchment_ax = self.plotter.add_basin_overlay(
-            self.catchment_ax, self.basin_geometry, self.proj
-        )
-        self.plotter.add_colorbar(self.catchment_im, self.catchment_ax)
-        plt.title(f"Lumped SNODAS Snow Water Equivalent\n {self.date} - 06z")
-        self.plotter.add_gridlines(self.catchment_ax)
-
+    def add_station_data(self):
+        """Add SNOTEL station data overlay to the plot if available."""
         # Add SNOTEL data overlay if available
         if (
             self.stations_in_basin is not None
             and not self.stations_in_basin.empty
             and self.snotel_data is not None
         ):
-            self.catchment_ax = Plotter.add_snotel_overlay(
-                self.catchment_ax, self.snotel_data, self.proj
-            )
-
-        # Save figure if output file is specified
-        if self.output_file_lumped:
-            t6 = time.time()
-            Plotter.save_figure(self.catchment_fig, self.output_file_lumped)
-            logger.info(f"   Lumped output time: {time.time() - t6:.2f}s")
-
-        logger.info(f"   Lumped plotting time: {time.time() - t5:.2f}s")
+            self.raw_plotter.add_snotel_overlay(self.snotel_data)
+            self.lumped_plotter.add_snotel_overlay(self.snotel_data)
 
 
 def get_options(args_list=None) -> argparse.Namespace:
@@ -619,7 +760,7 @@ def main(args_list=None) -> None:
     args = get_options(args_list)
 
     # Create, then run, a processor instance
-    processor = SNODASProcessor(
+    processor = SWEObsProcessor(
         date=args.date,
         gpkg_file=args.gpkg_file,
         output_file_raw=args.output_file_raw,
