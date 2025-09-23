@@ -103,7 +103,7 @@ class Converter:
 
         # Check if any files were missing SWE data
         if missing_data:
-            raise Exception("One or more files were missing SWE data.")
+            raise Exception("One or more files were missing simulated data.")
 
         return data
 
@@ -157,7 +157,6 @@ class SoilMoistureConverter(Converter):
         """Initialize the SoilMoistureConverter."""
         super().__init__(csv_directory, dates, output_file)
         self.variable_name = "sm"
-        self.column1 = "sm"
 
     def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
         """Convert Units."""
@@ -165,7 +164,7 @@ class SoilMoistureConverter(Converter):
 
     def check_columns(self, df: pd.DataFrame, file_path: str):
         """Check that columns exists."""
-        columns = [column for column in df.columns if "sm_profile" in column]
+        columns = [column for column in df.columns if "sm_frac" in column]
         if len(columns) == 0:
             logger.info(f"{self.variable_name} columns not found in {file_path}")
             return False
@@ -176,6 +175,7 @@ class SoilMoistureConverter(Converter):
             )
             return False
         else:
+            self.column1 = columns[0]
             return True
 
 
