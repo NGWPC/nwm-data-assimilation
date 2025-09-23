@@ -1,11 +1,11 @@
-"""Observed SWE Mapper."""
+"""Observed Soil Moisture Mapper."""
 
 import argparse
 import logging
 from functools import lru_cache
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import pandas as pd
 import xarray as xr
 
@@ -14,23 +14,19 @@ from utils.dataloaders import ObsDataLoader
 from utils.plotters import ObservedPlotter
 from utils.processors import ObsProcessor
 
-from ..utility.snotel_utils import SnotelDataLoader, SnotelPlotter
-
 logger = logging.getLogger(__name__)
 
 
-class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
-    """Data Loader for Observed SWE data."""
+class SoilMoistureObsDataLoader(ObsDataLoader):
+    """Data Loader for Observed Soil Moisture data."""
 
     def __init__(self):
-        """Initialize the SWEObsDataLoader."""
-        self.dataset_name = "Band1"  # Variable name in xarray Dataset
-        self.path_str = (
-            "ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATSdate05HP001.nc"
-        )
+        """Initialize the SoilMoistureObsDataLoader."""
+        self.dataset_name = "sm_rootzone"  # Variable name in xarray Dataset
+        self.path_str = "ngwpc-forcing/smap_nc/SMAP_L4_SM_gph_dateT013000_Vv8010_001.nc"
         self._chunk_size = 100  # Default chunk size
-        self.x_dim_name = "lon"  # X dimension name in xarray Dataset
-        self.y_dim_name = "lat"  # Y dimension name in xarray Dataset
+        self.x_dim_name = "x"  # X dimension name in xarray Dataset
+        self.y_dim_name = "y"  # Y dimension name in xarray Dataset
 
     @property
     def chunk_size(self):
@@ -43,125 +39,113 @@ class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
         self._chunk_size = value
 
 
-class SWEObsCalculator(ObsCalculator):
-    """Calculator for Observed SWE data processing."""
+class SoilMoistureObsCalculator(ObsCalculator):
+    """Calculator for Observed Soil Moisture data processing."""
 
-    def __init__(self, basin_gdf: gpd.GeoDataFrame, ds: xr.Dataset):
+    def __init__(self, basin_gdf: gpd.GeoDataFrame = None, ds: xr.Dataset = None):
         """Initialize the calculator."""
         super().__init__(basin_gdf, ds)
-        self.column = "mean_swe"  # Column to store computed values in GeoDataFrame
-        self.dataset_name = "Band1"  # Variable name in xarray Dataset
+        self.column = "mean_sm"  # Column to store computed values in GeoDataFrame
+        self.dataset_name = "sm_rootzone"  # Variable name in xarray Dataset
         self.x_dim_name = "x"  # X dimension name in xarray Dataset
         self.y_dim_name = "y"  # Y dimension name in xarray Dataset
-        self.crs = "EPSG:4326"  # Coordinate Reference System
+        self.crs = "EPSG:6933"  # Coordinate Reference System
 
     def convert_units(self, ds: xr.Dataset) -> xr.Dataset:
         """Convert units of the dataset if necessary."""
         # Default implementation does nothing
-        return ds[self.dataset_name] / 1000
+        return ds[self.dataset_name]
 
 
-class RawSWEObsPlotter(ObservedPlotter, SnotelPlotter):
-    """Class for creating plots of Raw SNODAS SWE data."""
-
-    def __init__(self, gdf: gpd.GeoDataFrame):
-        """Initialize the RawSWEObsPlotter."""
-        super().__init__(gdf)
-        self.basin_gdf_with_data = None  # To be set externally
-        self.title_str = "Raw SNODAS Snow Water Equivalent\n date - 06z"
-        self.column = "mean_swe"
-        self.color_bar_label = "Snow Water Equivalent (m)"
-        self.cmap = plt.cm.Blues
-
-
-class SWEObsPlotter(ObservedPlotter, SnotelPlotter):
-    """Class for creating plots of Observed SWE data."""
+class RawSoilMoistureObsPlotter(ObservedPlotter):
+    """Class for creating plots of Raw Soil Moisture data."""
 
     def __init__(self, gdf: gpd.GeoDataFrame):
-        """Initialize the SWEObsPlotter."""
+        """Initialize the RawSoilMoistureObsPlotter."""
+        super().__init__(gdf)
+        self.title_str = "Raw SMAP Soil Moisture\n date - 06z"
+        self.color_bar_label = "Soil Moisture (m³/m³)"
+
+    @property
+    def cmap(self):
+        """Create a custom colormap for soil moisture visualization."""
+        colors_for_gradient = [
+            "firebrick",
+            "darkred",
+            "navajowhite",
+            "yellow",
+            "lightgrey",
+            "skyblue",
+            "lightblue",
+            "cornflowerblue",
+            "darkblue",
+        ]
+
+        # Create the LinearSegmentedColormap
+        return mcolors.LinearSegmentedColormap.from_list(
+            name="my_gradient_cmap",
+            colors=colors_for_gradient,
+            N=256,  # Number of color levels (higher N for smoother gradient)
+        )
+
+
+class SoilMoistureObsPlotter(ObservedPlotter):
+    """Class for creating plots of Observed Soil Moisture data."""
+
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the SoilMoistureObsPlotter."""
         super().__init__(gdf)
         self.basin_gdf_with_data = None  # To be set externally
-        self.column = "mean_swe"  # Column with computed values
-        self.color_bar_label = "Snow Water Equivalent (m)"
-        self.title_str = "Lumped SNODAS Snow Water Equivalent\n date - 06z"
-        self.cmap = plt.cm.Blues
+        self.column = "mean_sm"  # Column with computed values
+        self.title_str = "Lumped SMAP Soil Moisture\n date - 06z"
+        self.color_bar_label = "Soil Moisture (m³/m³)"
 
-    def add_snotel_overlay(self, snotel_data: pd.DataFrame):
-        """Add SNOTEL SWE data as text overlays on a map.
+    @property
+    def cmap(self):
+        """Create a custom colormap for soil moisture visualization."""
+        colors_for_gradient = [
+            "darkred",
+            "red",
+            "darkorange",
+            "orange",
+            "yellow",
+            "lightgrey",
+            "skyblue",
+            "lightblue",
+            "blue",
+            "darkblue",
+        ]
 
-        Parameters
-        ----------
-        snotel_data : pandas.DataFrame
-            DataFrame with station information and SWE values
-
-        Returns
-        -------
-        matplotlib.axes.Axes
-            Updated axes with SNOTEL overlay
-
-        """
-        if snotel_data.empty:
-            return self.ax
-
-        color = "#990000"
-
-        if not snotel_data.empty:
-            # Plot all stations
-            self.ax.plot(
-                snotel_data["longitude"],
-                snotel_data["latitude"],
-                "o",
-                markersize=3,
-                transform=self.proj,
-                color=color,
-                label="SNOTEL Stations (SWE)",
-            )
-
-            # Add text labels iteratively
-            for _, station in snotel_data.iterrows():
-                swe_value = f"{station['swe']:.2f}"
-                self.ax.text(
-                    station["longitude"] + 0.0005,
-                    station["latitude"] - 0.0005,
-                    swe_value,
-                    fontsize=11,
-                    ha="left",
-                    va="top",
-                    transform=self.proj,
-                    fontweight="bold",
-                    color=color,
-                )
-            # Add the legend to the plot, using the specified label
-            self.ax.legend(
-                loc="upper right",
-                fontsize=10,
-                framealpha=0.5,
-                bbox_to_anchor=(1.25, 1.05),
-            )
+        # Create the LinearSegmentedColormap
+        return mcolors.LinearSegmentedColormap.from_list(
+            name="my_gradient_cmap",
+            colors=colors_for_gradient,
+            N=256,  # Number of color levels (higher N for smoother gradient)
+        )
 
 
-class SWEObsProcessor(ObsProcessor):
-    """Processor for Observed SWE data mapping and visualization."""
+class SoilMoistureObsProcessor(ObsProcessor):
+    """Processor for Observed Soil Moisture data mapping and visualization."""
 
     def __init__(
         self,
-        date=None,
-        gpkg_file=None,
-        output_file_raw=None,
-        output_file_lumped=None,
+        date: str,
+        gpkg_file: str,
+        output_file_raw: str,
+        output_file_lumped: str,
         direct_s3=False,
     ):
-        """Initialize the SWE Observed Processor."""
+        """Initialize the Soil Moisture Observed Processor."""
         super().__init__(
             date, gpkg_file, output_file_raw, output_file_lumped, direct_s3
         )
-        self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
-        self.column = "mean_swe"
+        # self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
+        self.column = "mean_sm"
 
-        self.dl = SWEObsDataLoader()
-        self.calc = SWEObsCalculator(self.basin_gdf, self.obs_ds)
-        self.raw_plotter = RawSWEObsPlotter(self.basin_gdf)
-        self.lumped_plotter = SWEObsPlotter(self.basin_gdf)
+        self.dl = SoilMoistureObsDataLoader()
+        self.calc = SoilMoistureObsCalculator(self.basin_gdf, self.obs_ds)
+        self.raw_plotter = SoilMoistureObsPlotter(self.basin_gdf)
+        self.lumped_plotter = SoilMoistureObsPlotter(self.basin_gdf)
 
     @property
     @lru_cache
@@ -236,7 +220,7 @@ def get_options(args_list=None) -> argparse.Namespace:
 
 
 def main(args_list=None) -> None:
-    """Run the Observed SWE processor.
+    """Run the Observed Soil Moisture processor.
 
     Args:
     ----
@@ -247,7 +231,7 @@ def main(args_list=None) -> None:
     args = get_options(args_list)
 
     # Create, then run, a processor instance
-    processor = SWEObsProcessor(
+    processor = SoilMoistureObsProcessor(
         date=args.date,
         gpkg_file=args.gpkg_file,
         output_file_raw=args.output_file_raw,
