@@ -8,10 +8,9 @@ from dotenv import load_dotenv
 
 from utils.utils import timing_block
 
-from ..mapping.simulated_data_mapper import SimSoilMoistureProcessor, SimSWEProcessor
-from ..mapping.snodas_mapper import SNODASProcessor
-from ..utility.convert_swe import SoilMoistureConverter, SWEConverter
-from ..utility.swe_minmax import reset_minmax
+from ..mapping.observed_data_mapper import SoilMoistureObsProcessor, SWEObsProcessor
+from ..mapping.simulated_data_mapper import SoilMoistureSimProcessor, SWESimProcessor
+from ..utility.converters import SoilMoistureConverter, SWEConverter
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -48,28 +47,28 @@ class Mapper:
     @lru_cache
     def vmin(self):
         """Get the vmin value from the sim_processor plotter."""
-        self.sim_processor.simulated_gdf  # Ensure simulated_gdf is computed
+        self.sim_processor.basin_gdf_with_data  # Ensure basin_gdf_with_data is computed
         return self.sim_processor.plotter.vmin
 
     @property
     @lru_cache
     def vmax(self):
         """Get the vmax value from the sim_processor plotter."""
-        self.sim_processor.simulated_gdf  # Ensure simulated_gdf is computed
+        self.sim_processor.basin_gdf_with_data  # Ensure basin_gdf_with_data is computed
         return self.sim_processor.plotter.vmax
 
     @property
-    def raw_snodas_args(self):
-        """Get the arguments for snodas_mapper raw."""
-        raw_snodas_args = [
+    def obs_args(self):
+        """Get the arguments for observed data processor."""
+        obs_args = [
             self.args.date,
             self.args.gpkg_file,
-            self.args.snodas_raw_output,
-            self.args.snodas_lumped_output,
+            self.args.raw_output,
+            self.args.lumped_output,
         ]
         if self.args.direct_s3:
-            raw_snodas_args.append("--direct_s3")
-        return raw_snodas_args
+            obs_args.append("--direct_s3")
+        return obs_args
 
     @property
     def sim_mapper_args(self):
@@ -106,8 +105,8 @@ class SWEMapper(Mapper):
         """Initialize the SWEMapper with command line arguments."""
         super().__init__(args)
         self.converter = SWEConverter(*self.conversion_args)
-        self.sim_processor = SimSWEProcessor(*self.sim_mapper_args)
-        self.obs_processor = SNODASProcessor(*self.raw_snodas_args)
+        self.sim_processor = SWESimProcessor(*self.sim_mapper_args)
+        self.obs_processor = SWEObsProcessor(*self.obs_args)
 
 
 class SoilMoistureMapper(Mapper):
@@ -117,7 +116,8 @@ class SoilMoistureMapper(Mapper):
         """Initialize the SoilMoistureMapper with command line arguments."""
         super().__init__(args)
         self.converter = SoilMoistureConverter(*self.conversion_args)
-        self.sim_processor = SimSoilMoistureProcessor(self.sim_mapper_args)
+        self.sim_processor = SoilMoistureSimProcessor(*self.sim_mapper_args)
+        self.obs_processor = SoilMoistureObsProcessor(*self.obs_args)
 
 
 def get_options(arg_list=None) -> argparse.Namespace:
@@ -145,15 +145,15 @@ def get_options(arg_list=None) -> argparse.Namespace:
                         Output will be a .png file.",
     )
     parser.add_argument(
-        "snodas_raw_output",
+        "raw_output",
         type=str,
-        help="Path where snodas raw data map output saved.\
+        help="Path where raw data map output saved.\
                         Output will be a .png file.",
     )
     parser.add_argument(
-        "snodas_lumped_output",
+        "lumped_output",
         type=str,
-        help="Path where snodas lumped data map output saved.\
+        help="Path where lumped data map output saved.\
                         Output will be a .png file.",
     )
     parser.add_argument(
@@ -189,5 +189,5 @@ def map_soil_moisture_data(arg_list=None):
 
 
 if __name__ == "__main__":
-    map_swe_data()
+    # map_swe_data()
     map_soil_moisture_data()
