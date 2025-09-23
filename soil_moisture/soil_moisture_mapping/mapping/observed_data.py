@@ -63,8 +63,10 @@ class RawSoilMoistureObsPlotter(ObservedPlotter):
     def __init__(self, gdf: gpd.GeoDataFrame):
         """Initialize the RawSoilMoistureObsPlotter."""
         super().__init__(gdf)
+        self.basin_gdf_with_data = None  # To be set externally
         self.title_str = "Raw SMAP Soil Moisture\n date - 06z"
         self.color_bar_label = "Soil Moisture (m³/m³)"
+        self.column = "mean_sm"  # Column with computed values
 
     @property
     def cmap(self):
@@ -104,15 +106,14 @@ class SoilMoistureObsPlotter(ObservedPlotter):
     def cmap(self):
         """Create a custom colormap for soil moisture visualization."""
         colors_for_gradient = [
+            "firebrick",
             "darkred",
-            "red",
-            "darkorange",
-            "orange",
+            "navajowhite",
             "yellow",
             "lightgrey",
             "skyblue",
             "lightblue",
-            "blue",
+            "cornflowerblue",
             "darkblue",
         ]
 
@@ -144,7 +145,7 @@ class SoilMoistureObsProcessor(ObsProcessor):
 
         self.dl = SoilMoistureObsDataLoader()
         self.calc = SoilMoistureObsCalculator(self.basin_gdf, self.obs_ds)
-        self.raw_plotter = SoilMoistureObsPlotter(self.basin_gdf)
+        self.raw_plotter = RawSoilMoistureObsPlotter(self.basin_gdf)
         self.lumped_plotter = SoilMoistureObsPlotter(self.basin_gdf)
 
     @property
