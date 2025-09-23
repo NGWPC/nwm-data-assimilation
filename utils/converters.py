@@ -1,6 +1,5 @@
-"""Convert SWE."""
+"""Base Data Converter."""
 
-import argparse
 import glob
 import logging
 import os
@@ -122,85 +121,3 @@ class Converter:
 
         # write to netcdf output file
         ds.to_netcdf(self.output_file)
-
-
-class SWEConverter(Converter):
-    """Convert SWE data from CSV to NetCDF format."""
-
-    def __init__(self, csv_directory: str, dates: list, output_file: str):
-        """Initialize the SWEConverter."""
-        super().__init__(csv_directory, dates, output_file)
-        self.variable_name = "swe"
-        self.column1 = "swe_m"
-        self.column2 = "swe_mm"
-
-    def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
-        """Convert Units."""
-        if self.column1 in df.columns:
-            return df.loc[mask, self.column1].values
-        elif self.column2 in df.columns:
-            return df.loc[mask, self.column2].values / 1000  # Convert mm to meters
-
-    def check_columns(self, df: pd.DataFrame, file_path: str):
-        """Check that columns exists."""
-        if self.column1 not in df.columns and self.column2 not in df.columns:
-            logger.info(f"{self.variable_name} columns not found in {file_path}")
-            return False
-        else:
-            return True
-
-
-class SoilMoistureConverter(Converter):
-    """Convert soil moisture data from CSV to NetCDF format."""
-
-    def __init__(self, csv_directory: str, dates: list, output_file: str):
-        """Initialize the SoilMoistureConverter."""
-        super().__init__(csv_directory, dates, output_file)
-        self.variable_name = "sm"
-
-    def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
-        """Convert Units."""
-        return df.loc[mask, self.column1].values
-
-    def check_columns(self, df: pd.DataFrame, file_path: str):
-        """Check that columns exists."""
-        columns = [column for column in df.columns if "sm_frac" in column]
-        if len(columns) == 0:
-            logger.info(f"{self.variable_name} columns not found in {file_path}")
-            return False
-
-        elif len(columns) > 1:
-            logger.info(
-                f"Too many ({len(columns)}) {self.variable_name} columns found in {file_path}"
-            )
-            return False
-        else:
-            self.column1 = columns[0]
-            return True
-
-
-def get_options(args_list=None) -> argparse.Namespace:
-    """Read and pass in command-line arguments."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "csv_directory", type=str, help="Path that contains csv ngen files."
-    )
-    parser.add_argument(
-        "dates", nargs="+", help="Dates to process ex: '2015-12-01' '2015-12-02'"
-    )
-    parser.add_argument("output_file", type=str, help="Desired path for output file.")
-    return parser.parse_args(args_list)
-
-
-def main(args_list=None) -> None:
-    """Convert data from CSV to NetCDF format."""
-    args = get_options(args_list)
-    converter = SWEConverter(args)
-    data = converter.read_values_from_dir()
-    logger.info(f"Converted {len(converter.catchment_ids)} catchments")
-
-    converter.write_to_netcdf(converter.catchment_ids, converter.times, data)
-
-
-if __name__ == "__main__":
-    main()

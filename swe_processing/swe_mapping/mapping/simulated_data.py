@@ -2,72 +2,25 @@
 
 import argparse
 import logging
-import time
 from functools import lru_cache
-from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
+import matplotlib.pyplot as plt
 import pandas as pd
-import xarray as xr
 
-from utils.utils import Calculator, DataLoader, Plotter, Processor
+from utils.calculators import SimCalculator
+from utils.converters import Converter
+from utils.dataloaders import SimDataLoader
+from utils.plotters import SimPlotter
+from utils.processors import SimProcessor
 
 from ..utility.snotel_utils import SnotelCalculator, SnotelDataLoader, SnotelPlotter
 
 logger = logging.getLogger(__name__)
 
 
-class SimDataLoader(DataLoader):
-    """Data Loader for simulated SWE data."""
-
-    @staticmethod
-    def load_netcdf(netcdf_file: str | Path) -> xr.Dataset:
-        """Load a NetCDF file and return the xarray Dataset."""
-        t0 = time.time()
-        sim_ds = xr.open_dataset(netcdf_file)
-        logger.info(f"   NetCDF load time: {time.time() - t0:.2f}s")
-
-        return sim_ds
-
-
-class SoilMoistureSimDataLoader(SimDataLoader):
-    """Data Loader for simulated soil moisture data."""
-
-
 class SWESimDataLoader(SimDataLoader, SnotelDataLoader):
     """Data Loader for simulated SWE data."""
-
-
-class SimCalculator(Calculator):
-    """Calculator for simulated data."""
-
-    def __init__(self, basin_gdf: gpd.GeoDataFrame = None):
-        """Initialize the calculator."""
-        super().__init__(basin_gdf)
-
-    def process_data(self, sim_ds: xr.Dataset, date_str: str) -> gpd.GeoDataFrame:
-        """Process simulated data from NetCDF and geopackage files.
-
-        Args:
-            sim_ds: xarray Dataset containing simulated data
-            date_str: Date string from NetCDF time dim (ex: '2015-12-01')
-
-        """
-        basin_gdf = self.basin_gdf.copy()
-        data = sim_ds[self.variable].sel(date=date_str).values
-
-        # Create a mapping dictionary from catchment IDs to data values
-        catchment_ids = sim_ds.catchment.values
-        data_dict = dict(zip(catchment_ids, data))
-
-        # Create catchment ID column and then lookup values from dict
-        basin_gdf["catchment_id"] = (
-            basin_gdf["divide_id"].str.split("-").str[1].astype(int)
-        )
-        basin_gdf[self.column] = basin_gdf["catchment_id"].map(data_dict).fillna(np.nan)
-
-        return basin_gdf
 
 
 class SWESimCalculator(SimCalculator, SnotelCalculator):
@@ -80,35 +33,6 @@ class SWESimCalculator(SimCalculator, SnotelCalculator):
         self.column = "mean_swe"
 
 
-class SoilMoistureSimCalculator(SimCalculator):
-    """Calculator for simulated soil moisture data."""
-
-    def __init__(self, basin_gdf: gpd.GeoDataFrame = None):
-        """Initialize the calculator."""
-        super().__init__(basin_gdf)
-        self.variable = "sm"
-        self.column = "mean_sm"
-
-
-class SimPlotter(Plotter):
-    """Plotter for simulated data."""
-
-    def __init__(self, gdf: gpd.GeoDataFrame):
-        """Initialize the plotter with a GeoDataFrame."""
-        super().__init__(gdf)
-
-
-class SoilMoistureSimPlotter(SimPlotter):
-    """Plotter for simulated soil moisture data."""
-
-    def __init__(self, gdf: gpd.GeoDataFrame):
-        """Initialize the plotter with a GeoDataFrame."""
-        super().__init__(gdf)
-        self.column = "mean_sm"
-        self.color_bar_label = "Soil Moisture"
-        self.title_str = "Simulated Soil Moisture (SM)\n date - 06z"
-
-
 class SWESimPlotter(SimPlotter, SnotelPlotter):
     """Plotter for simulated SWE data."""
 
@@ -118,61 +42,7 @@ class SWESimPlotter(SimPlotter, SnotelPlotter):
         self.column = "mean_swe"
         self.color_bar_label = "Snow Water Equivalent (m)"
         self.title_str = "Simulated Snow Water Equivalent (SWE)\n date - 06z"
-
-
-class SimProcessor(Processor):
-    """Processor for simulated data."""
-
-    def __init__(
-        self,
-        netcdf_file=None,
-        gpkg_file=None,
-        date=None,
-        output_file=None,
-        direct_s3=False,
-    ):
-        """Initialize the processor with input files and parameters."""
-        # Initialize input parameters
-        super().__init__(gpkg_file, date, output_file, direct_s3)
-
-        self.netcdf_file = netcdf_file
-
-    def run(self) -> None:
-        """Run the processing workflow."""
-        self.plot_simulated_data()
-
-    @property
-    @lru_cache
-    def sim_ds(self) -> xr.Dataset:
-        """Get the simulated xarray Dataset."""
-        return self.dl.load_netcdf(self.netcdf_file)
-
-    @property
-    @lru_cache
-    def basin_gdf_with_data(self) -> gpd.GeoDataFrame:
-        """Processed gdf of the simulated data for mapping."""
-        basin_gdf_with_data = self.calc.process_data(self.sim_ds, self.date)
-        self.plotter.basin_gdf_with_data = basin_gdf_with_data
-        return basin_gdf_with_data
-
-    def scan(self) -> tuple[float, float]:
-        """Scan the simulated data for min/max SWE values."""
-        return self.get_minmax(self.basin_gdf_with_data["mean_swe"])
-
-    def plot_simulated_data(self):
-        """Plot the simulated data."""
-        self.plotter.plot_choropleth_map()
-        self.plotter.plot_catchment_boundaries()
-
-        self.plotter.add_basin_overlay(self.basin_geometry)
-        self.plotter.set_map_extent()
-        self.plotter.add_colorbar()
-        self.plotter.add_gridlines()
-        self.plotter.add_title(self.date)
-        # self.add_station_data()
-
-        if self.output_file is not None:
-            self.plotter.save_figure(self.output_file)
+        self.cmap = plt.cm.Blues
 
 
 class SWESimProcessor(SimProcessor):
@@ -231,24 +101,30 @@ class SWESimProcessor(SimProcessor):
             self.plotter.add_snotel_overlay(self.snotel_data)
 
 
-class SoilMoistureSimProcessor(SimProcessor):
-    """Processor for simulated soil moisture data."""
+class SWEConverter(Converter):
+    """Convert SWE data from CSV to NetCDF format."""
 
-    def __init__(
-        self,
-        netcdf_file=None,
-        gpkg_file=None,
-        date=None,
-        output_file=None,
-        direct_s3=False,
-    ):
-        """Initialize the processor with input files and parameters."""
-        super().__init__(netcdf_file, gpkg_file, date, output_file, direct_s3)
-        self.dl = SoilMoistureSimDataLoader()
+    def __init__(self, csv_directory: str, dates: list, output_file: str):
+        """Initialize the SWEConverter."""
+        super().__init__(csv_directory, dates, output_file)
+        self.variable_name = "swe"
+        self.column1 = "swe_m"
+        self.column2 = "swe_mm"
 
-        self.dl = SoilMoistureSimDataLoader()
-        self.calc = SoilMoistureSimCalculator(self.basin_gdf)
-        self.plotter = SoilMoistureSimPlotter(self.basin_gdf)
+    def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
+        """Convert Units."""
+        if self.column1 in df.columns:
+            return df.loc[mask, self.column1].values
+        elif self.column2 in df.columns:
+            return df.loc[mask, self.column2].values / 1000  # Convert mm to meters
+
+    def check_columns(self, df: pd.DataFrame, file_path: str):
+        """Check that columns exists."""
+        if self.column1 not in df.columns and self.column2 not in df.columns:
+            logger.info(f"{self.variable_name} columns not found in {file_path}")
+            return False
+        else:
+            return True
 
 
 def get_options(args_list=None) -> argparse.Namespace:
@@ -269,7 +145,7 @@ def get_options(args_list=None) -> argparse.Namespace:
 
 
 def main(args_list=None) -> None:
-    """Run the SWE processing."""
+    """Run the Simulated SWE processing."""
     args = get_options(args_list)
     processor = SWESimProcessor(
         netcdf_file=args.netcdf_file,
