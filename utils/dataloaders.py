@@ -2,7 +2,8 @@
 
 import logging
 import os
-import time
+from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import fsspec
@@ -17,6 +18,10 @@ logger = logging.getLogger(__name__)
 class DataLoader:
     """Base Data Loader."""
 
+    def __init__(self, gpkg_file: str):
+        """Initialize the DataLoader with a geopackage file path."""
+        self.gpkg_file = gpkg_file
+
     @staticmethod
     def load_netcdf(netcdf_file: str | Path) -> xr.Dataset:
         """Load a NetCDF file and return the xarray Dataset."""
@@ -25,14 +30,10 @@ class DataLoader:
 
         return sim_ds
 
-    @staticmethod
-    def read_geo(gpkg_file: str | Path) -> gpd.GeoDataFrame:
+    @property
+    @lru_cache
+    def basin_gdf(self) -> gpd.GeoDataFrame:
         """Read the 'divides' layer from a geopackage file and ensure geographic CRS.
-
-        Parameters
-        ----------
-        gpkg_file : str
-            Path to the geopackage file
 
         Returns
         -------
@@ -40,12 +41,12 @@ class DataLoader:
             GeoDataFrame containing the basin divides with geographic CRS
 
         """
-        if not os.path.exists(gpkg_file):
+        if not os.path.exists(self.gpkg_file):
             raise FileNotFoundError(
-                f"Geopackage file '{gpkg_file}' not found. Please check the file path."
+                f"Geopackage file '{self.gpkg_file}' not found. Please check the file path."
             )
 
-        basin_gdf = gpd.read_file(gpkg_file, layer="divides")
+        basin_gdf = gpd.read_file(self.gpkg_file, layer="divides")
 
         if basin_gdf.crs is None or not basin_gdf.crs.is_geographic:
             basin_gdf = basin_gdf.to_crs("EPSG:4326")
@@ -59,11 +60,8 @@ class SimDataLoader(DataLoader):
     @staticmethod
     def load_netcdf(netcdf_file: str | Path) -> xr.Dataset:
         """Load a NetCDF file and return the xarray Dataset."""
-        t0 = time.time()
-        sim_ds = xr.open_dataset(netcdf_file)
-        logger.info(f"   NetCDF load time: {time.time() - t0:.2f}s")
-
-        return sim_ds
+        with timing_block(f"Loading NetCDF file {netcdf_file}"):
+            return xr.open_dataset(netcdf_file)
 
 
 class ObsDataLoader(DataLoader):
@@ -87,16 +85,21 @@ class ObsDataLoader(DataLoader):
             S3 path to the NetCDF file
 
         """
-        file_date = date.replace("-", "")
+        file_date = self.datetime(date).strftime("%Y%m%d")
+        hour = self.datetime(date).hour
 
         if not direct_s3:
-            netcdf_file = f"{s3_mount_point}/{self.path_str}".replace("date", file_date)
+            netcdf_file = f"{s3_mount_point}/{self.path_str}".replace(
+                "date", file_date
+            ).replace("hour", f"{hour:02d}")
             if os.path.exists(netcdf_file):
                 return netcdf_file
             else:
                 raise FileNotFoundError(f"File not found in local mount: {netcdf_file}")
         else:
-            netcdf_file = f"s3://{self.path_str}".replace("date", file_date)
+            netcdf_file = f"s3://{self.path_str}".replace("date", file_date).replace(
+                "hour", f"{hour:02d}"
+            )
             fs = fsspec.filesystem("s3")
             if fs.exists(netcdf_file):
                 return netcdf_file
