@@ -9,7 +9,7 @@ import numpy as np
 import shapely
 import xarray as xr
 
-from utils.utils import get_minmax
+from data_assimilation_engine.utils.utils import get_minmax
 
 logger = logging.getLogger(__name__)
 

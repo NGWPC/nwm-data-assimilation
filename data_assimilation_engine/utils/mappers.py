@@ -4,7 +4,7 @@ import argparse
 import logging
 from functools import lru_cache
 
-from utils.utils import timing_block
+from data_assimilation_engine.utils.utils import timing_block
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

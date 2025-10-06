@@ -10,11 +10,11 @@ import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
 
-from utils.calculators import SimCalculator
-from utils.converters import Converter
-from utils.dataloaders import SimDataLoader
-from utils.plotters import SimPlotter
-from utils.processors import SimProcessor
+from data_assimilation_engine.utils.calculators import SimCalculator
+from data_assimilation_engine.utils.converters import Converter
+from data_assimilation_engine.utils.dataloaders import SimDataLoader
+from data_assimilation_engine.utils.plotters import SimPlotter
+from data_assimilation_engine.utils.processors import SimProcessor
 
 logger = logging.getLogger(__name__)
 

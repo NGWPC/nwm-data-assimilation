@@ -10,12 +10,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from swe.snotel import SnotelCalculator, SnotelDataLoader, SnotelPlotter
-from utils.calculators import SimCalculator
-from utils.converters import Converter
-from utils.dataloaders import SimDataLoader
-from utils.plotters import SimPlotter
-from utils.processors import SimProcessor
+from data_assimilation_engine.swe.snotel import (
+    SnotelCalculator,
+    SnotelDataLoader,
+    SnotelPlotter,
+)
+from data_assimilation_engine.utils.calculators import SimCalculator
+from data_assimilation_engine.utils.converters import Converter
+from data_assimilation_engine.utils.dataloaders import SimDataLoader
+from data_assimilation_engine.utils.plotters import SimPlotter
+from data_assimilation_engine.utils.processors import SimProcessor
 
 logger = logging.getLogger(__name__)
 

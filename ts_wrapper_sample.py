@@ -1,15 +1,17 @@
 """Wrapper script to demonstrate the functionality of swe_timeseries.swe_ts."""
 
-from soil_moisture.timeseries.timeseries import soil_moisture_ts
-from swe.timeseries.timeseries import swe_ts
+from data_assimilation_engine.soil_moisture.timeseries.timeseries import (
+    soil_moisture_ts,
+)
+from data_assimilation_engine.swe.timeseries.timeseries import swe_ts
 
 inputs = [
     "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gauge_09359500.gpkg",
     "--plot_output",
-    "comb_plot_swe.png",
+    "sample_data/comb_plot_swe.png",
     "--csv_output",
-    "comb_table_swe.csv",
+    "sample_data/comb_table_swe.csv",
     "--direct_s3",
 ]
 
@@ -19,9 +21,9 @@ inputs = [
     "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gauge_09359500.gpkg",
     "--plot_output",
-    "comb_plot_soil_moisture.png",
+    "sample_data/comb_plot_soil_moisture.png",
     "--csv_output",
-    "comb_table_soil_moisture.csv",
+    "sample_data/comb_table_soil_moisture.csv",
     "--direct_s3",
 ]
 soil_moisture_ts(inputs)

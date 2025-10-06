@@ -11,8 +11,8 @@ import xarray as xr
 from shapely import MultiPoint, Polygon, voronoi_polygons
 from shapely.geometry import Point
 
-from swe.snotel import SnotelCalculator
-from utils.utils import timing_block
+from data_assimilation_engine.swe.snotel import SnotelCalculator
+from data_assimilation_engine.utils.utils import timing_block
 
 logger = logging.getLogger(__name__)
 

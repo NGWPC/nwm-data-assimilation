@@ -16,8 +16,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.dates import DateFormatter, DayLocator
 
-from utils.dataloaders import DataLoader
-from utils.utils import time_function, timing_block
+from data_assimilation_engine.utils.dataloaders import DataLoader
+from data_assimilation_engine.utils.utils import time_function, timing_block
 
 logger = logging.getLogger(__name__)
 

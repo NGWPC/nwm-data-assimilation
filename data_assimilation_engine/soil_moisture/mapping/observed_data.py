@@ -10,10 +10,10 @@ import matplotlib.colors as mcolors
 import pandas as pd
 import xarray as xr
 
-from utils.calculators import ObsCalculator
-from utils.dataloaders import ObsDataLoader
-from utils.plotters import ObservedPlotter
-from utils.processors import ObsProcessor
+from data_assimilation_engine.utils.calculators import ObsCalculator
+from data_assimilation_engine.utils.dataloaders import ObsDataLoader
+from data_assimilation_engine.utils.plotters import ObservedPlotter
+from data_assimilation_engine.utils.processors import ObsProcessor
 
 logger = logging.getLogger(__name__)
 

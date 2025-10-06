@@ -1,9 +1,9 @@
 """Example script to run the SWE and soil moisture mapping process with sample data."""
 
-from soil_moisture.mapping.mapper import (
+from data_assimilation_engine.soil_moisture.mapping.mapper import (
     map_soil_moisture_data,
 )
-from swe.mapping.mapper import map_swe_data
+from data_assimilation_engine.swe.mapping.mapper import map_swe_data
 
 swe_input = [
     "2016-12-01",
