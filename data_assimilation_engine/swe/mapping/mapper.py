@@ -1,12 +1,16 @@
+"""SWE Mapper module to handle SWE mapping operations."""
+
 import argparse
 import logging
 
 from dotenv import load_dotenv
 
-from utils.mappers import Mapper
-
-from ..mapping.observed_data import SoilMoistureObsProcessor
-from .simulated_data import SoilMoistureConverter, SoilMoistureSimProcessor
+from data_assimilation_engine.swe.mapping.observed_data import SWEObsProcessor
+from data_assimilation_engine.swe.mapping.simulated_data import (
+    SWEConverter,
+    SWESimProcessor,
+)
+from data_assimilation_engine.utils.mappers import Mapper
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -15,15 +19,15 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
-class SoilMoistureMapper(Mapper):
-    """Soil Moisture Mapper class to handle soil moisture mapping operations."""
+class SWEMapper(Mapper):
+    """SWE Mapper class to handle SWE mapping operations."""
 
     def __init__(self, args):
-        """Initialize the SoilMoistureMapper with command line arguments."""
+        """Initialize the SWEMapper with command line arguments."""
         super().__init__(args)
-        self.converter = SoilMoistureConverter(*self.conversion_args)
-        self.sim_processor = SoilMoistureSimProcessor(*self.sim_mapper_args)
-        self.obs_processor = SoilMoistureObsProcessor(*self.obs_args)
+        self.converter = SWEConverter(*self.conversion_args)
+        self.sim_processor = SWESimProcessor(*self.sim_mapper_args)
+        self.obs_processor = SWEObsProcessor(*self.obs_args)
 
 
 def get_options(arg_list=None) -> argparse.Namespace:
@@ -80,12 +84,12 @@ def get_options(arg_list=None) -> argparse.Namespace:
         raise
 
 
-def map_soil_moisture_data(arg_list=None):
-    """Map the soil moisture data."""
+def map_swe_data(arg_list=None):
+    """Map the SWE data."""
     args = get_options(arg_list)
-    mapper = SoilMoistureMapper(args)
+    mapper = SWEMapper(args)
     mapper.execute_mapping()
 
 
 if __name__ == "__main__":
-    map_soil_moisture_data()
+    map_swe_data()

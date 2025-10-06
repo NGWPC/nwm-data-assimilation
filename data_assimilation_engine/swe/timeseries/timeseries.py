@@ -7,11 +7,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from swe.snotel import (
+from data_assimilation_engine.swe.snotel import (
     SnotelCalculator,
     SnotelDataLoader,
 )
-from utils.time_series import (
+from data_assimilation_engine.utils.timeseries import (
     DataParser,
     FileLoader,
     Plotter,
@@ -19,7 +19,7 @@ from utils.time_series import (
     S3Loader,
     get_options,
 )
-from utils.utils import time_function
+from data_assimilation_engine.utils.utils import time_function
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ import fsspec
 import geopandas as gpd
 import xarray as xr
 
-from utils.utils import timing_block
+from data_assimilation_engine.utils.utils import timing_block
 
 logger = logging.getLogger(__name__)
 

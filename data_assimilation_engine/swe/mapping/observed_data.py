@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import xarray as xr
 
-from swe.snotel import SnotelDataLoader, SnotelPlotter
-from utils.calculators import ObsCalculator
-from utils.dataloaders import ObsDataLoader
-from utils.plotters import ObservedPlotter
-from utils.processors import ObsProcessor
+from data_assimilation_engine.swe.snotel import SnotelDataLoader, SnotelPlotter
+from data_assimilation_engine.utils.calculators import ObsCalculator
+from data_assimilation_engine.utils.dataloaders import ObsDataLoader
+from data_assimilation_engine.utils.plotters import ObservedPlotter
+from data_assimilation_engine.utils.processors import ObsProcessor
 
 logger = logging.getLogger(__name__)
 

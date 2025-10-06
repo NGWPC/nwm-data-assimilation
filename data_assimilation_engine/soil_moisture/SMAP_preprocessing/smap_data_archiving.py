@@ -358,3 +358,168 @@ def list_keys(bucket_name: str, prefix: str):
 
 if __name__ == "__main__":
     main(start_year=2015, end_year=2025)
+
+    #     archiver = SMAPArchiver(
+    #         download_dir="./smap_data/raw",
+    #         start_date="",
+    #         end_date="",
+    #     )
+
+    #     times = list(
+    #         np.arange(
+    #             np.datetime64("2015-03-31T01:28:55.816000000", "s"),
+    #             np.datetime64("2025-03-31T01:28:55.816000000", "s"),
+    #             np.timedelta64(3, "h"),
+    #         )
+    #     )
+    #     archiver.times = times
+
+    #     all_s3_keys = list_keys("ngwpc-forcing", "smap_nc/")
+    #     print(len(all_s3_keys))
+
+    #     with timing_block("Creating individual Zarr JSON"):
+    #         archiver.create_zarr_json("./smap_data/json", all_s3_keys)
+
+    #     with timing_block("Combining Zarr JSONs into single JSON"):
+    #         archiver.combine_jsons(
+    #             json_dir="./smap_data/json", outfile="./smap_data/smap_combined.json"
+    #         )
+
+    # local_ref_file = (
+    #     "/home/matthew.deshotel/repos/data-assimilation-engine/smap_data/smap_combined.json"
+    # )
+
+    # ds = xr.open_dataset(
+    #     "reference://",
+    #     engine="zarr",
+    #     backend_kwargs={
+    #         "consolidated": False,
+    #         "storage_options": {
+    #             "fo": local_ref_file,
+    #             "remote_protocol": "s3",
+    #             "asynchronous": False,
+    #         },
+    #     },
+    # )
+
+    # import matplotlib.pyplot as plt
+
+    # gdf = gh.get_us_states("LA").to_crs(epsg=6933)
+    # bounds = gdf.total_bounds + np.array([-10000, -10000, 10000, 10000])
+    # centroid = gdf.centroid.iloc[0]
+
+    # ds.rio.set_crs("EPSG:6933", inplace=True)
+
+    # data = ds.sel(
+    #     time=slice("2017-03-31T01:28:55", "2017-04-15T01:28:55"),
+    #     # x=slice(bounds[0], bounds[2]),
+    #     # y=slice(bounds[3], bounds[1]),
+    # )  # ["sm_rootzone"]
+
+    # data.compute()
+    # data.rio.write_crs("EPSG:6933", inplace=True)
+    # data_cliped = data.rio.clip(
+    #     gdf.buffer(10000).geometry, data.rio.crs, all_touched=True, drop=True
+    # )
+
+    # fig = data_cliped.mean("time").plot(cmap="jet_r", vmin=0, vmax=0.5)
+
+    # gdf.plot(ax=fig.axes, facecolor="none", edgecolor="black")
+    # plt.show()
+
+    # ts_data = ds.sel(x=centroid.x, y=centroid.y, method="nearest").sel(
+    #     time=slice("2017-03-31T01:28:55", "2018-05-15T01:28:55")
+    # )
+
+    # ts_df = ts_data.to_pandas()
+    # ts_df["sm_rootzone"].plot()
+
+    # data.rio.write_crs("EPSG:6933", inplace=True)
+    # data=data.rio.reproject("EPSG:4326")
+
+    # d=data.sel(time=slice("2017-04-01T01:28:55", "2017-04-02T01:28:55"))
+
+    # d.time.attrs={}
+
+    # d.to_netcdf(
+    #     "smapf_20170401_no_spatial_ref.nc", engine="h5netcdf"
+    # )
+
+    # ds.rio.write_crs("EPSG:6933", inplace=True)
+    # ds.rio.reproject("EPSG:4326")
+
+    # summed=ds["sm_rootzone"].sum("time")
+    # summed.rio.set_crs("EPSG:6933", inplace=True)
+
+    # summed.rio.to_raster("sm_rootzone_sum.tif")
+
+    # ds["sm_surface"].plot()
+
+    # fs = fsspec.filesystem("s3")
+    # s3_key = "s3://ngwpc-forcing/smap_nc/SMAP_L4_SM_gph_20150331T013000_Vv8010_001.nc"
+    # with fs.open(s3_key, "rb") as f:
+    #     ds = xr.open_dataset(f)
+
+    #     encoding = {
+    #         "sm_rootzone": {
+    #             "chunksizes": (1, 100, 100),
+    #         },}
+    #     # ds.compute()
+    #     # ds.rio.write_crs("EPSG:6933", inplace=True)
+    #     # ds = ds.rio.reproject("EPSG:4326")
+    #     ds.to_netcdf("snodas_test1.nc", engine="h5netcdf", encoding=encoding)
+
+    # ds.time
+
+    # ds.sel(x=-9309368, y=3772633, method="nearest").to_pandas()[
+    #     ["sm_rootzone", "sm_surface"]
+    # ].plot()
+
+    # ds.sel(x=-9309368, y=3772633,method="nearest")["sm_surface"].plot()
+
+    """"""
+
+    # import glob
+    # from tempfile import TemporaryDirectory
+
+    # import fsspec.implementations.reference
+    # import xarray as xr
+    # from fsspec.implementations.reference import LazyReferenceMapper
+    # from kerchunk import combine, df, hdf
+
+    # json_list = glob.glob(
+    #     f"/home/matthew.deshotel/repos/data-assimilation-engine/smap_data/json/*.json"
+    # )
+
+    # times = list(
+    #     np.arange(
+    #         np.datetime64("2015-03-31T01:28:55.816000000", "s"),
+    #         np.datetime64("2025-03-31T01:28:55.816000000", "s"),
+    #         np.timedelta64(3, "h"),
+    #     )
+    # )
+
+    # # Create LazyReferenceMapper to pass to MultiZarrToZarr
+    # fs = fsspec.filesystem("file")
+
+    # # os.makedirs("combined.parq")
+    # out = LazyReferenceMapper.create(root="combined.parquet", record_size=1000, fs=fs)
+
+    # out_dict = MultiZarrToZarr(
+    #     json_list[:2],
+    #     concat_dims=["time"],
+    #     coo_map={"time": times[:2]},
+    #     identical_dims=["x", "y"],
+    #     out=out,
+    #     inline_threshold=500,
+    # ).translate()
+
+    # out.flush()
+
+    # df.refs_to_dataframe(out_dict, "combined.parquet")
+    """"""
+    # fs = fsspec.implementations.reference.ReferenceFileSystem(
+    #     "combined.parq", remote_protocol="s3", target_protocol="file", lazy=True)
+    # ds = xr.open_dataset(
+    #     fs.get_mapper(), engine="zarr",
+    #     backend_kwargs={"consolidated": False}
