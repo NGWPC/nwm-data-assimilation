@@ -64,7 +64,7 @@ class Processor:
     @lru_cache
     def basin_gdf(self) -> gpd.GeoDataFrame:
         """Get the basin GeoDataFrame."""
-        return self.dl.read_geo(self.gpkg_file)
+        return self.dl.basin_gdf
 
     @property
     @lru_cache

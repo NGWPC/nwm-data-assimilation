@@ -1,3 +1,5 @@
+"""Utility functions for timing and min/max calculations."""
+
 import logging
 from contextlib import contextmanager
 from time import time
@@ -8,6 +10,17 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def time_function(func):
+    """Measure the execution time of a function."""
+
+    def wrapper(*args, **kwargs):
+        with timing_block(f"Executing {func.__name__}"):
+            result = func(*args, **kwargs)
+            return result
+
+    return wrapper
 
 
 @contextmanager
@@ -21,7 +34,7 @@ def timing_block(step_str: str):
     start = time()
     yield
     end = time()
-    logger.info(f"  Execution time for {step_str}: {end - start} seconds")
+    logger.info(f"  Execution time for {step_str}: {round(end - start, 2)} seconds")
 
 
 def get_minmax(current_data: np.ndarray, vmin, vmax) -> tuple:

@@ -11,7 +11,7 @@ import xarray as xr
 from shapely import MultiPoint, Polygon, voronoi_polygons
 from shapely.geometry import Point
 
-from swe_processing.swe_mapping.utility.snotel_utils import SnotelCalculator
+from swe.snotel import SnotelCalculator
 from utils.utils import timing_block
 
 logger = logging.getLogger(__name__)
@@ -24,28 +24,28 @@ class Calculator:
         """Initialize the calculator."""
         self.basin_gdf = basin_gdf
 
-    def process_data(self, sim_ds: xr.Dataset, date_str: str) -> gpd.GeoDataFrame:
-        """Process simulated data from NetCDF and geopackage files.
+    # def process_data(self, sim_ds: xr.Dataset, date_str: str) -> gpd.GeoDataFrame:
+    #     """Process simulated data from NetCDF and geopackage files.
 
-        Args:
-            sim_ds: xarray Dataset containing simulated data
-            date_str: Date string from NetCDF time dim (ex: '2015-12-01')
+    #     Args:
+    #         sim_ds: xarray Dataset containing simulated data
+    #         date_str: Date string from NetCDF time dim (ex: '2015-12-01')
 
-        """
-        basin_gdf = self.basin_gdf.copy()
-        data = sim_ds[self.variable].sel(date=date_str).values
+    #     """
+    #     basin_gdf = self.basin_gdf.copy()
+    #     data = sim_ds[self.variable].sel(date=date_str).values
 
-        # Create a mapping dictionary from catchment IDs to data values
-        catchment_ids = sim_ds.catchment.values
-        data_dict = dict(zip(catchment_ids, data))
+    #     # Create a mapping dictionary from catchment IDs to data values
+    #     catchment_ids = sim_ds.catchment.values
+    #     data_dict = dict(zip(catchment_ids, data))
 
-        # Create catchment ID column and then lookup values from dict
-        basin_gdf["catchment_id"] = (
-            basin_gdf["divide_id"].str.split("-").str[1].astype(int)
-        )
-        basin_gdf[self.column] = basin_gdf["catchment_id"].map(data_dict).fillna(np.nan)
+    #     # Create catchment ID column and then lookup values from dict
+    #     basin_gdf["catchment_id"] = (
+    #         basin_gdf["divide_id"].str.split("-").str[1].astype(int)
+    #     )
+    #     basin_gdf[self.column] = basin_gdf["catchment_id"].map(data_dict).fillna(np.nan)
 
-        return basin_gdf
+    #     return basin_gdf
 
     @property
     @lru_cache
@@ -94,7 +94,7 @@ class SimCalculator(Calculator):
 
         """
         basin_gdf = self.basin_gdf.copy()
-        data = sim_ds[self.variable].sel(date=date_str).values
+        data = sim_ds[self.variable].sel(date=date_str.split(" ")[0]).values
 
         # Create a mapping dictionary from catchment IDs to data values
         catchment_ids = sim_ds.catchment.values
@@ -112,14 +112,28 @@ class SimCalculator(Calculator):
 class ObsCalculator(Calculator, SnotelCalculator):
     """Calculator for Observed data processing."""
 
-    def __init__(self, basin_gdf: gpd.GeoDataFrame, ds: xr.Dataset):
+    def __init__(
+        self, basin_gdf: gpd.GeoDataFrame, ds: xr.Dataset, group_id: str = "divide_id"
+    ):
         """Initialize the calculator."""
         super().__init__(basin_gdf)
         self.ds = ds
+        self._group_id = group_id
 
     @property
     @lru_cache
-    def ds_basin_subset(self) -> xr.Dataset:
+    def group_id(self) -> str:
+        """Get the group ID column name."""
+        return self._group_id
+
+    @group_id.setter
+    def group_id(self, value: str):
+        """Set the group ID column name."""
+        self._group_id = value
+
+    @property
+    @lru_cache
+    def _ds_basin_subset(self) -> xr.Dataset:
         """Subset a dataset to the basin extent and prepare for analysis.
 
         Returns
@@ -138,6 +152,15 @@ class ObsCalculator(Calculator, SnotelCalculator):
         ds_subset = ds_subset.rio.write_crs("EPSG:4326")
 
         return ds_subset
+
+    @property
+    def ds_basin_subset(self) -> xr.Dataset:
+        """Get the subsetted xarray Dataset for the basin."""
+        return self._ds_basin_subset
+
+    @ds_basin_subset.setter
+    def ds_basin_subset(self, value: xr.Dataset):
+        self._ds_basin_subset = value
 
     @lru_cache
     def get_lons_lats(self) -> tuple[np.ndarray, np.ndarray]:
@@ -210,16 +233,23 @@ class ObsCalculator(Calculator, SnotelCalculator):
     @lru_cache
     def mean_values(self):
         """Calculate mean value for each catchment using area-weighted averaging."""
-        return self.fishnet_with_values.groupby("divide_id").apply(
+        return self.fishnet_with_values.groupby(self.group_id).apply(
             lambda x: np.average(x["value"], weights=x["area"])
         )
 
     @property
     @lru_cache
-    def fishnet_with_values(self):
-        """Compute Fishnet with sampled values."""
+    def fishnet_overlay(self):
+        """Compute Fishnet overlay with basin GeoDataFrame."""
         gdf = gpd.overlay(self.fishnet, self.basin_gdf, how="intersection")
         gdf["area"] = gdf.to_crs(5070).geometry.area
+        return gdf
+
+    @property
+    @lru_cache
+    def fishnet_with_values(self):
+        """Compute Fishnet with sampled values."""
+        gdf = self.fishnet_overlay.copy()
         gdf["value"] = gdf.apply(self.sample_value, axis=1)
         return gdf
 
@@ -260,9 +290,11 @@ class ObsCalculator(Calculator, SnotelCalculator):
     def calculate_catchment_mean(self):
         """Calculate and return a GeoDataFrame with catchment mean values."""
         with timing_block("Calculating catchment mean values"):
-            gdf_with_swe = self.basin_gdf.copy()
-            gdf_with_swe[self.column] = gdf_with_swe["divide_id"].map(self.mean_values)
-        return gdf_with_swe
+            gdf_with_data = self.basin_gdf.copy()
+            gdf_with_data[self.column] = gdf_with_data[self.group_id].map(
+                self.mean_values
+            )
+        return gdf_with_data
 
     @property
     @lru_cache

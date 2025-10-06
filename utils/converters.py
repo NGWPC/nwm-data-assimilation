@@ -25,17 +25,6 @@ class Converter:
 
     @property
     @lru_cache
-    def times(self):
-        """Get times as datetime objects and add 06z timestamp."""
-        return np.array(
-            [
-                datetime.strptime(f"{date} 06:00:00", "%Y-%m-%d %H:%M:%S")
-                for date in self.dates
-            ]
-        )
-
-    @property
-    @lru_cache
     def csv_files(self):
         """Get all CSV files in the specified directory."""
         pattern = os.path.join(self.directory, "cat-*.csv")
