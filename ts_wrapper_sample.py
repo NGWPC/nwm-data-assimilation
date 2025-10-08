@@ -5,7 +5,7 @@ from data_assimilation_engine.soil_moisture.timeseries.timeseries import (
 )
 from data_assimilation_engine.swe.timeseries.timeseries import swe_ts
 
-inputs = [
+swe_inputs = [
     "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gauge_09359500.gpkg",
     "--plot_output",
@@ -15,9 +15,9 @@ inputs = [
     "--direct_s3",
 ]
 
-swe_ts(inputs)
+swe_ts(swe_inputs)
 
-inputs = [
+soil_moisture_inputs = [
     "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gauge_09359500.gpkg",
     "--plot_output",
@@ -26,4 +26,4 @@ inputs = [
     "sample_data/comb_table_soil_moisture.csv",
     "--direct_s3",
 ]
-soil_moisture_ts(inputs)
+soil_moisture_ts(soil_moisture_inputs)
