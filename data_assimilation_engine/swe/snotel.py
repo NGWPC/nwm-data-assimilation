@@ -19,7 +19,17 @@ class SnotelDataLoader:
     """Class to load and process SNOTEL data."""
 
     @staticmethod
-    def list_snotel_filenames(s3_mount_point, snotel_s3_path, direct_s3):
+    def get_s3_filesystem(direct_s3: bool) -> fsspec.AbstractFileSystem:
+        """Get the SNOTEL filesystem for S3 access."""
+        if direct_s3:
+            return fsspec.filesystem("s3")
+        else:
+            return fsspec.filesystem("local")
+
+    @staticmethod
+    def list_snotel_filenames(
+        s3_mount_point: str, snotel_s3_path: str, direct_s3: bool
+    ) -> tuple:
         """List SNOTEL CSV files available in the S3 bucket.
 
         Returns
@@ -47,7 +57,7 @@ class SnotelDataLoader:
         # Filter out empty strings
         snotel_filenames = [f for f in filenames if f]
 
-        return snotel_filenames, fs
+        return snotel_filenames
 
     @staticmethod
     def parse_snotel_filenames(filenames: list) -> gpd.GeoDataFrame:
@@ -345,6 +355,10 @@ class SnotelDataLoader:
 class SnotelCalculator:
     """Class for SNOTEL-related calculations."""
 
+    def __init__(self, basin_gdf: gpd.GeoDataFrame = None):
+        """Initialize the calculator."""
+        self.basin_gdf = basin_gdf
+
     @staticmethod
     def find_stations_in_basin(
         stations_gdf: gpd.GeoDataFrame, basin_geometry: shapely.geometry
@@ -385,20 +399,17 @@ class SnotelCalculator:
 class SnotelPlotter:
     """Class for plotting SNOTEL data."""
 
-    @staticmethod
-    def add_snotel_overlay(
-        ax: matplotlib.axes.Axes, snotel_data: pd.DataFrame, proj: cartopy.crs
-    ) -> matplotlib.axes.Axes:
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the SnotelPlotter with a matplotlib Axes and cartopy Projection."""
+        self.gdf = gdf
+
+    def add_snotel_overlay(self, snotel_data: pd.DataFrame):
         """Add SNOTEL SWE data as text overlays on a map.
 
         Parameters
         ----------
-        ax : matplotlib.axes.Axes
-            Axes object to add overlay to
         snotel_data : pandas.DataFrame
             DataFrame with station information and SWE values
-        proj : cartopy.crs
-            Projection to use
 
         Returns
         -------
@@ -407,18 +418,18 @@ class SnotelPlotter:
 
         """
         if snotel_data.empty:
-            return ax
+            return self.ax
 
         color = "#990000"
 
         if not snotel_data.empty:
             # Plot all stations
-            ax.plot(
+            self.ax.plot(
                 snotel_data["longitude"],
                 snotel_data["latitude"],
                 "o",
                 markersize=3,
-                transform=proj,
+                transform=self.proj,
                 color=color,
                 label="SNOTEL Stations (SWE)",
             )
@@ -426,23 +437,21 @@ class SnotelPlotter:
             # Add text labels iteratively
             for _, station in snotel_data.iterrows():
                 swe_value = f"{station['swe']:.2f}"
-                ax.text(
+                self.ax.text(
                     station["longitude"] + 0.0005,
                     station["latitude"] - 0.0005,
                     swe_value,
                     fontsize=11,
                     ha="left",
                     va="top",
-                    transform=proj,
+                    transform=self.proj,
                     fontweight="bold",
                     color=color,
                 )
             # Add the legend to the plot, using the specified label
-            ax.legend(
+            self.ax.legend(
                 loc="upper right",
                 fontsize=10,
                 framealpha=0.5,
                 bbox_to_anchor=(1.25, 1.05),
             )
-
-        return ax

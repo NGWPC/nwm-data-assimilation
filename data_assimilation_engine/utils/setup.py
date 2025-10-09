@@ -1,9 +1,9 @@
-"""Setup script for the swe_processing package."""
+"""Setup script for the swe package."""
 
 from setuptools import find_packages, setup
 
 setup(
-    name="swe_processing",
+    name="utils",
     packages=find_packages(),
     install_requires=[
         "xarray",
