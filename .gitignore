@@ -6,3 +6,5 @@
 *.nc
 *.png
 */launch.json
+build
+.idea/
