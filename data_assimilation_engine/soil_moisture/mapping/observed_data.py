@@ -81,7 +81,7 @@ class RawSoilMoistureObsPlotter(ObservedPlotter):
         """Initialize the RawSoilMoistureObsPlotter."""
         super().__init__(gdf)
         self.basin_gdf_with_data = None  # To be set externally
-        self.title_str = "Raw SMAP Soil Moisture\n date - 06z"
+        self.title_str = "Raw SMAP Soil Moisture\n date"
         self.color_bar_label = "Soil Moisture (m³/m³)"
         self.column = "mean_sm"  # Column with computed values
 
@@ -116,7 +116,7 @@ class SoilMoistureObsPlotter(ObservedPlotter):
         super().__init__(gdf)
         self.basin_gdf_with_data = None  # To be set externally
         self.column = "mean_sm"  # Column with computed values
-        self.title_str = "Lumped SMAP Soil Moisture\n date - 06z"
+        self.title_str = "Lumped SMAP Soil Moisture\n date"
         self.color_bar_label = "Soil Moisture (m³/m³)"
 
     @property
