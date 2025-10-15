@@ -24,29 +24,6 @@ class Calculator:
         """Initialize the calculator."""
         self.basin_gdf = basin_gdf
 
-    # def process_data(self, sim_ds: xr.Dataset, date_str: str) -> gpd.GeoDataFrame:
-    #     """Process simulated data from NetCDF and geopackage files.
-
-    #     Args:
-    #         sim_ds: xarray Dataset containing simulated data
-    #         date_str: Date string from NetCDF time dim (ex: '2015-12-01')
-
-    #     """
-    #     basin_gdf = self.basin_gdf.copy()
-    #     data = sim_ds[self.variable].sel(date=date_str).values
-
-    #     # Create a mapping dictionary from catchment IDs to data values
-    #     catchment_ids = sim_ds.catchment.values
-    #     data_dict = dict(zip(catchment_ids, data))
-
-    #     # Create catchment ID column and then lookup values from dict
-    #     basin_gdf["catchment_id"] = (
-    #         basin_gdf["divide_id"].str.split("-").str[1].astype(int)
-    #     )
-    #     basin_gdf[self.column] = basin_gdf["catchment_id"].map(data_dict).fillna(np.nan)
-
-    #     return basin_gdf
-
     @property
     @lru_cache
     def basin_geometry(self) -> shapely.geometry:
