@@ -2,7 +2,7 @@
 
 import argparse
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 
 import geopandas as gpd
@@ -78,10 +78,71 @@ class SoilMoistureSimProcessor(SimProcessor):
         direct_s3=False,
     ):
         """Initialize the processor with input files and parameters."""
-        super().__init__(netcdf_file, gpkg_file, date, output_file, direct_s3)
+        self._date = date
+        super().__init__(netcdf_file, gpkg_file, output_file, direct_s3)
         self.dl = SoilMoistureSimDataLoader(self.gpkg_file)
         self.calc = SoilMoistureSimCalculator(self.basin_gdf)
         self.plotter = SoilMoistureSimPlotter(self.basin_gdf)
+
+    @property
+    def date(self):  # -> datetime:
+        """Get the date for processing."""
+        try:
+            datetime_obj = datetime.strptime(self._date, "%Y-%m-%d %H:%M:%S")
+            hour = 1 + (
+                round(datetime_obj.hour / 3) * 3
+            )  # Round to nearest 3-hour interval
+            datetime_obj = datetime_obj.replace(
+                hour=hour, minute=0, second=0, microsecond=0
+            )
+        except ValueError:
+            try:
+                datetime_obj = datetime.strptime(self._date, "%Y-%m-%d") + timedelta(
+                    hours=1
+                )
+            except ValueError:
+                raise ValueError(
+                    f"time data '{self._date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
+                )
+        return datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
+
+    # @property
+    # @lru_cache
+    # def snotel_data(self) -> pd.DataFrame | None:
+    #     """Get the SNOTEL SWE data for stations within the basin."""
+    #     if self.stations_in_basin is not None and not self.stations_in_basin.empty:
+    #         return self.dl.load_snotel_data(
+    #             self.stations_in_basin,
+    #             self.date,
+    #             self.snotel_filesystem,
+    #             self.s3_mount_point,
+    #             self.snotel_s3_path,
+    #         )
+
+    # @property
+    # @lru_cache
+    # def stations_gdf(self) -> gpd.GeoDataFrame:
+    #     """Get the  stations GeoDataFrame."""
+    #     return self.dl.parse_snotel_filenames(self.snotel_filenames)
+
+    # @property
+    # @lru_cache
+    # def stations_in_basin(self) -> gpd.GeoDataFrame:
+    #     """Get the stations within the basin."""
+    #     return self.calc.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
+
+    def add_station_data(self):
+        """Add  station data overlay to the plot if available."""
+        pass
+        # Add  data overlay if available
+
+        # if (
+        #     self.stations_in_basin is not None
+        #     and not self.stations_in_basin.empty
+        #     and self.snotel_data is not None
+        # ):
+        #     self.raw_plotter.add_snotel_overlay(self.snotel_data)
+        #     self.lumped_plotter.add_snotel_overlay(self.snotel_data)
 
 
 class SoilMoistureConverter(Converter):
@@ -128,7 +189,6 @@ class SoilMoistureConverter(Converter):
 
 
 def get_options(args_list=None) -> argparse.Namespace:
-    """Get command line options for the script."""
     parser = argparse.ArgumentParser()
     parser.add_argument("netcdf_file", type=str, help="Path to NetCDF file")
     parser.add_argument("gpkg_file", type=str, help="Path to geopackage file")

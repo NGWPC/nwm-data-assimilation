@@ -20,14 +20,12 @@ class Processor:
     def __init__(
         self,
         gpkg_file=None,
-        date=None,
         output_file=None,
         direct_s3=False,
     ):
         """Initialize the processor with input files and parameters."""
         # Initialize input parameters
         self.gpkg_file = gpkg_file
-        self.date = date
         self.output_file = output_file
         self.direct_s3 = direct_s3
 
@@ -109,13 +107,12 @@ class SimProcessor(Processor):
         self,
         netcdf_file=None,
         gpkg_file=None,
-        date=None,
         output_file=None,
         direct_s3=False,
     ):
         """Initialize the processor with input files and parameters."""
         # Initialize input parameters
-        super().__init__(gpkg_file, date, output_file, direct_s3)
+        super().__init__(gpkg_file, output_file, direct_s3)
 
         self.netcdf_file = netcdf_file
 
@@ -151,7 +148,7 @@ class SimProcessor(Processor):
         self.plotter.add_colorbar()
         self.plotter.add_gridlines()
         self.plotter.add_title(self.date)
-        # self.add_station_data()
+        self.add_station_data()
 
         if self.output_file is not None:
             self.plotter.save_figure(self.output_file)
@@ -162,7 +159,6 @@ class ObsProcessor(Processor):
 
     def __init__(
         self,
-        date=None,
         gpkg_file=None,
         output_file_raw=None,
         output_file_lumped=None,
@@ -172,8 +168,6 @@ class ObsProcessor(Processor):
 
         Args:
         ----
-        date : str, optional
-            Date string in format 'YYYY-MM-DD'
         gpkg_file : str, optional
             Path to geopackage file with basin/catchment boundaries
         output_file_raw : str, optional
@@ -184,7 +178,7 @@ class ObsProcessor(Processor):
             Whether to access S3 directly or via mounted filesystem
 
         """
-        super().__init__(gpkg_file=gpkg_file, date=date, direct_s3=direct_s3)
+        super().__init__(gpkg_file=gpkg_file, direct_s3=direct_s3)
 
         self.output_file_raw = output_file_raw
         self.output_file_lumped = output_file_lumped
@@ -227,7 +221,7 @@ class ObsProcessor(Processor):
         self.raw_plotter.add_colorbar()
         self.raw_plotter.add_gridlines()
         self.raw_plotter.add_title(self.date)
-        # self.add_station_data()
+        self.add_station_data()
 
         if self.output_file_raw is not None:
             self.raw_plotter.save_figure(self.output_file_raw)
