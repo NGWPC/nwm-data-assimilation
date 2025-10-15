@@ -2,7 +2,7 @@
 
 import argparse
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 
 import geopandas as gpd
@@ -54,6 +54,24 @@ class SoilMoistureObsDataLoader(ObsDataLoader):
                     f"time data '{date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
                 )
 
+        if dt < self.obs_start_date:
+            raise ValueError(
+                f"Date {dt} is before available observations. Available from {self.obs_start_date} to {self.obs_end_date()}."
+            )
+        elif dt > self.obs_end_date():
+            raise ValueError(
+                f"Date {dt} is after available observations. Available from {self.obs_start_date} to {self.obs_end_date()}."
+            )
+        return dt
+
+    @property
+    def obs_start_date(self):
+        """Get the start date of available observations."""
+        return datetime(2015, 3, 31)
+
+    def obs_end_date(self):
+        """Get the end date of available observations."""
+        return datetime(2025, 9, 30)
 
 
 class SoilMoistureObsCalculator(ObsCalculator):
@@ -154,9 +172,8 @@ class SoilMoistureObsProcessor(ObsProcessor):
         direct_s3=False,
     ):
         """Initialize the Soil Moisture Observed Processor."""
-        super().__init__(
-            date, gpkg_file, output_file_raw, output_file_lumped, direct_s3
-        )
+        self._date = date
+        super().__init__(gpkg_file, output_file_raw, output_file_lumped, direct_s3)
         # self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
         self.column = "mean_sm"
 
@@ -166,40 +183,64 @@ class SoilMoistureObsProcessor(ObsProcessor):
         self.lumped_plotter = SoilMoistureObsPlotter(self.basin_gdf)
 
     @property
-    @lru_cache
-    def snotel_data(self) -> pd.DataFrame | None:
-        """Get the SNOTEL SWE data for stations within the basin."""
-        if self.stations_in_basin is not None and not self.stations_in_basin.empty:
-            return self.dl.load_snotel_data(
-                self.stations_in_basin,
-                self.date,
-                self.snotel_filesystem,
-                self.s3_mount_point,
-                self.snotel_s3_path,
+    def date(self):  # -> datetime:
+        """Get the date for processing."""
+        try:
+            datetime_obj = datetime.strptime(self._date, "%Y-%m-%d %H:%M:%S")
+            hour = 1 + (
+                round(datetime_obj.hour / 3) * 3
+            )  # Round to nearest 3-hour interval
+            datetime_obj = datetime_obj.replace(
+                hour=hour, minute=0, second=0, microsecond=0
             )
+        except ValueError:
+            try:
+                datetime_obj = datetime.strptime(self._date, "%Y-%m-%d") + timedelta(
+                    hours=1
+                )
+            except ValueError:
+                raise ValueError(
+                    f"time data '{self._date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
+                )
+        return datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
 
-    @property
-    @lru_cache
-    def stations_gdf(self) -> gpd.GeoDataFrame:
-        """Get the SNOTEL stations GeoDataFrame."""
-        return self.dl.parse_snotel_filenames(self.snotel_filenames)
+    # @property
+    # @lru_cache
+    # def snotel_data(self) -> pd.DataFrame | None:
+    #     """Get the SNOTEL SWE data for stations within the basin."""
+    #     if self.stations_in_basin is not None and not self.stations_in_basin.empty:
+    #         return self.dl.load_snotel_data(
+    #             self.stations_in_basin,
+    #             self.date,
+    #             self.snotel_filesystem,
+    #             self.s3_mount_point,
+    #             self.snotel_s3_path,
+    #         )
 
-    @property
-    @lru_cache
-    def stations_in_basin(self) -> gpd.GeoDataFrame:
-        """Get the SNOTEL stations within the basin."""
-        return self.calc.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
+    # @property
+    # @lru_cache
+    # def stations_gdf(self) -> gpd.GeoDataFrame:
+    #     """Get the  stations GeoDataFrame."""
+    #     return self.dl.parse_snotel_filenames(self.snotel_filenames)
+
+    # @property
+    # @lru_cache
+    # def stations_in_basin(self) -> gpd.GeoDataFrame:
+    #     """Get the stations within the basin."""
+    #     return self.calc.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
 
     def add_station_data(self):
-        """Add SNOTEL station data overlay to the plot if available."""
-        # Add SNOTEL data overlay if available
-        if (
-            self.stations_in_basin is not None
-            and not self.stations_in_basin.empty
-            and self.snotel_data is not None
-        ):
-            self.raw_plotter.add_snotel_overlay(self.snotel_data)
-            self.lumped_plotter.add_snotel_overlay(self.snotel_data)
+        """Add  station data overlay to the plot if available."""
+        pass
+        # Add  data overlay if available
+
+        # if (
+        #     self.stations_in_basin is not None
+        #     and not self.stations_in_basin.empty
+        #     and self.snotel_data is not None
+        # ):
+        #     self.raw_plotter.add_snotel_overlay(self.snotel_data)
+        #     self.lumped_plotter.add_snotel_overlay(self.snotel_data)
 
 
 def get_options(args_list=None) -> argparse.Namespace:

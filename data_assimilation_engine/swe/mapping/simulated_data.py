@@ -62,11 +62,17 @@ class SWESimProcessor(SimProcessor):
         direct_s3=False,
     ):
         """Initialize the processor with input files and parameters."""
-        super().__init__(netcdf_file, gpkg_file, date, output_file, direct_s3)
+        self._date = date
+        super().__init__(netcdf_file, gpkg_file, output_file, direct_s3)
         self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
         self.dl = SWESimDataLoader(self.gpkg_file)
         self.calc = SWESimCalculator(self.basin_gdf)
         self.plotter = SWESimPlotter(self.basin_gdf)
+
+    @property
+    def date(self) -> str:
+        """Get the date string."""
+        return self._date
 
     @property
     @lru_cache

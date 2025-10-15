@@ -157,9 +157,8 @@ class SWEObsProcessor(ObsProcessor):
         direct_s3=False,
     ):
         """Initialize the SWE Observed Processor."""
-        super().__init__(
-            date, gpkg_file, output_file_raw, output_file_lumped, direct_s3
-        )
+        self._date = date
+        super().__init__(gpkg_file, output_file_raw, output_file_lumped, direct_s3)
         self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
         self.column = "mean_swe"
 
@@ -167,6 +166,11 @@ class SWEObsProcessor(ObsProcessor):
         self.calc = SWEObsCalculator(self.basin_gdf, self.obs_ds)
         self.raw_plotter = RawSWEObsPlotter(self.basin_gdf)
         self.lumped_plotter = SWEObsPlotter(self.basin_gdf)
+
+    @property
+    def date(self) -> str:
+        """Get the date string."""
+        return self._date
 
     @property
     @lru_cache
