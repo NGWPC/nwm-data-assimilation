@@ -109,4 +109,4 @@ class Converter:
         )
 
         # write to netcdf output file
-        ds.to_netcdf(self.output_file)
+        ds.to_netcdf(self.output_file, engine="h5netcdf")

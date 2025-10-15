@@ -61,14 +61,14 @@ class SimDataLoader(DataLoader):
     def load_netcdf(netcdf_file: str | Path) -> xr.Dataset:
         """Load a NetCDF file and return the xarray Dataset."""
         with timing_block(f"Loading NetCDF file {netcdf_file}"):
-            return xr.open_dataset(netcdf_file)
+            return xr.open_dataset(netcdf_file, engine="h5netcdf")
 
 
 class ObsDataLoader(DataLoader):
     """Data Loader for Observed data."""
 
     def path_constructor(self, date: str, s3_mount_point: str, direct_s3: bool) -> str:
-        """Construct the S3 path to SMAP NetCDF file.
+        """Construct the S3 path to observed NetCDF file.
 
         Parameters
         ----------
