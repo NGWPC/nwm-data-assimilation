@@ -41,7 +41,7 @@ class SoilMoistureSimPlotter(SimPlotter):
         super().__init__(gdf)
         self.column = "mean_sm"
         self.color_bar_label = "Soil Moisture (m³/m³)"
-        self.title_str = "Simulated Soil Moisture (SM)\n date - 06z"
+        self.title_str = "Simulated Soil Moisture (SM)\n date"
 
     @property
     def cmap(self):
