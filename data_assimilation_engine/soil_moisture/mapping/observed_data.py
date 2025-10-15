@@ -44,7 +44,16 @@ class SoilMoistureObsDataLoader(ObsDataLoader):
 
     def datetime(self, date: str):
         """Get the datetime object for the specified date."""
-        return datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                dt = datetime.strptime(date, "%Y-%m-%d") + timedelta(hours=1)
+            except ValueError:
+                raise ValueError(
+                    f"time data '{date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
+                )
+
 
 
 class SoilMoistureObsCalculator(ObsCalculator):

@@ -116,9 +116,14 @@ class SoilMoistureConverter(Converter):
     @lru_cache
     def times(self):
         """Get times as datetime objects and add timestamp."""
-        times = np.array(
-            [datetime.strptime(date, "%Y-%m-%d %H:%M:%S") for date in self.dates]
-        )
+        try:
+            times = np.array(
+                [datetime.strptime(date, "%Y-%m-%d %H:%M:%S") for date in self.dates]
+            )
+        except ValueError:
+            times = np.array(
+                [datetime.strptime(date, "%Y-%m-%d") for date in self.dates]
+            )
         return times
 
 
