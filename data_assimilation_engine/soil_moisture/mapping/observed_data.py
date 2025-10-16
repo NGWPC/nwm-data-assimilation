@@ -188,8 +188,9 @@ class SoilMoistureObsProcessor(ObsProcessor):
         try:
             datetime_obj = datetime.strptime(self._date, "%Y-%m-%d %H:%M:%S")
             hour = 1 + (
-                round(datetime_obj.hour / 3) * 3
+                round((datetime_obj.hour - 1) / 3) * 3
             )  # Round to nearest 3-hour interval
+
             datetime_obj = datetime_obj.replace(
                 hour=hour, minute=0, second=0, microsecond=0
             )
