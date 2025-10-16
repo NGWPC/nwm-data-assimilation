@@ -158,8 +158,8 @@ class SoilMoistureFileLoader(FileLoader):
 
         """
         # Populate with 3-hourly timesteps from within the start and end
-        start_hour = 1 + (3 * round(self.start_date.hour / 3))  # 01, 04, 07, ...
-        end_hour = 1 + (3 * round(self.end_date.hour / 3))
+        start_hour = 1 + (3 * round((self.start_date.hour - 1) / 3))  # 01, 04, 07, ...
+        end_hour = 1 + (3 * round((self.end_date.hour - 1) / 3))
 
         if end_hour == 25:
             end_hour = 22
