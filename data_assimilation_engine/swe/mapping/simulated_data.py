@@ -63,6 +63,7 @@ class SWESimProcessor(SimProcessor):
     ):
         """Initialize the processor with input files and parameters."""
         self._date = date
+        self.column = "mean_swe"
         super().__init__(netcdf_file, gpkg_file, output_file, direct_s3)
         self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
         self.dl = SWESimDataLoader(self.gpkg_file)

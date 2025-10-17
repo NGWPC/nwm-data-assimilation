@@ -79,6 +79,7 @@ class SoilMoistureSimProcessor(SimProcessor):
     ):
         """Initialize the processor with input files and parameters."""
         self._date = date
+        self.column = "mean_sm"
         super().__init__(netcdf_file, gpkg_file, output_file, direct_s3)
         self.dl = SoilMoistureSimDataLoader(self.gpkg_file)
         self.calc = SoilMoistureSimCalculator(self.basin_gdf)
