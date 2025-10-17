@@ -56,11 +56,11 @@ class SoilMoistureObsDataLoader(ObsDataLoader):
 
         if dt < self.obs_start_date:
             raise ValueError(
-                f"Date {dt} is before available observations. Available from {self.obs_start_date} to {self.obs_end_date()}."
+                f"Date {dt} is before available observations. Available from {self.obs_start_date} to {self.obs_end_date}."
             )
-        elif dt > self.obs_end_date():
+        elif dt > self.obs_end_date:
             raise ValueError(
-                f"Date {dt} is after available observations. Available from {self.obs_start_date} to {self.obs_end_date()}."
+                f"Date {dt} is after available observations. Available from {self.obs_start_date} to {self.obs_end_date}."
             )
         return dt
 
@@ -69,6 +69,7 @@ class SoilMoistureObsDataLoader(ObsDataLoader):
         """Get the start date of available observations."""
         return datetime(2015, 3, 31)
 
+    @property
     def obs_end_date(self):
         """Get the end date of available observations."""
         return datetime(2025, 9, 30)
@@ -204,6 +205,24 @@ class SoilMoistureObsProcessor(ObsProcessor):
                     f"time data '{self._date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
                 )
         return datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
+
+    def check_datetime(self, date: str) -> bool:
+        """Check if the specified date is within available observation range."""
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                dt = datetime.strptime(date, "%Y-%m-%d") + timedelta(hours=1)
+            except ValueError:
+                raise ValueError(
+                    f"time data '{date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
+                )
+
+        if dt < self.dl.obs_start_date:
+            return False
+        elif dt > self.dl.obs_end_date:
+            return False
+        return True
 
     # @property
     # @lru_cache

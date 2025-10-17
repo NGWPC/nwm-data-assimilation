@@ -33,7 +33,7 @@ class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
         self.y_dim_name = "lat"  # Y dimension name in xarray Dataset
         super().__init__(gpkg_file)
 
-    def datetime(self, date: str):
+    def datetime(self, date: str) -> datetime:
         """Get the datetime object for the specified date."""
         return datetime.strptime(date, "%Y-%m-%d")
 
@@ -46,6 +46,16 @@ class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
     def chunk_size(self, value):
         """Set the chunk size used for loading data."""
         self._chunk_size = value
+
+    @property
+    def obs_start_date(self):
+        """Get the start date of available observations."""
+        return datetime(2009, 12, 9)
+
+    @property
+    def obs_end_date(self):
+        """Get the end date of available observations."""
+        return datetime(2025, 1, 30)
 
 
 class SWEObsCalculator(ObsCalculator):
@@ -171,6 +181,24 @@ class SWEObsProcessor(ObsProcessor):
     def date(self) -> str:
         """Get the date string."""
         return self._date
+
+    def check_datetime(self, date: str) -> bool:
+        """Check if the specified date is within available observation range."""
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                dt = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError(
+                    f"time data '{date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
+                )
+
+        if dt < self.dl.obs_start_date:
+            return False
+        elif dt > self.dl.obs_end_date:
+            return False
+        return True
 
     @property
     @lru_cache
