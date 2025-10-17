@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import xarray as xr
 
+from data_assimilation_engine.swe.consts import SWE_END_DATE, SWE_START_DATE
 from data_assimilation_engine.swe.snotel import SnotelDataLoader, SnotelPlotter
 from data_assimilation_engine.utils.calculators import ObsCalculator
 from data_assimilation_engine.utils.dataloaders import ObsDataLoader
@@ -33,7 +34,7 @@ class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
         self.y_dim_name = "lat"  # Y dimension name in xarray Dataset
         super().__init__(gpkg_file)
 
-    def datetime(self, date: str):
+    def datetime(self, date: str) -> datetime:
         """Get the datetime object for the specified date."""
         return datetime.strptime(date, "%Y-%m-%d")
 
@@ -46,6 +47,16 @@ class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
     def chunk_size(self, value):
         """Set the chunk size used for loading data."""
         self._chunk_size = value
+
+    @property
+    def obs_start_date(self):
+        """Get the start date of available observations."""
+        return datetime.strptime(SWE_START_DATE, "%Y-%m-%d")
+
+    @property
+    def obs_end_date(self):
+        """Get the end date of available observations."""
+        return datetime.strptime(SWE_END_DATE, "%Y-%m-%d")
 
 
 class SWEObsCalculator(ObsCalculator):
@@ -157,9 +168,8 @@ class SWEObsProcessor(ObsProcessor):
         direct_s3=False,
     ):
         """Initialize the SWE Observed Processor."""
-        super().__init__(
-            date, gpkg_file, output_file_raw, output_file_lumped, direct_s3
-        )
+        self._date = date
+        super().__init__(gpkg_file, output_file_raw, output_file_lumped, direct_s3)
         self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
         self.column = "mean_swe"
 
@@ -167,6 +177,29 @@ class SWEObsProcessor(ObsProcessor):
         self.calc = SWEObsCalculator(self.basin_gdf, self.obs_ds)
         self.raw_plotter = RawSWEObsPlotter(self.basin_gdf)
         self.lumped_plotter = SWEObsPlotter(self.basin_gdf)
+
+    @property
+    def date(self) -> str:
+        """Get the date string."""
+        return self._date
+
+    def check_datetime(self, date: str) -> bool:
+        """Check if the specified date is within available observation range."""
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                dt = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError(
+                    f"time data '{date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
+                )
+
+        if dt < self.dl.obs_start_date:
+            return False
+        elif dt > self.dl.obs_end_date:
+            return False
+        return True
 
     @property
     @lru_cache

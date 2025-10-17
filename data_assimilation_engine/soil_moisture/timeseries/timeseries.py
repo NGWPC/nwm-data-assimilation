@@ -158,15 +158,19 @@ class SoilMoistureFileLoader(FileLoader):
 
         """
         # Populate with 3-hourly timesteps from within the start and end
+        start_hour = 1 + (3 * round((self.start_date.hour - 1) / 3))  # 01, 04, 07, ...
+        end_hour = 1 + (3 * round((self.end_date.hour - 1) / 3))
+
+        if end_hour == 25:
+            end_hour = 22
+        if start_hour == 25:
+            start_hour = 22
+
         times = np.arange(
-            # self.start_date,
-            # self.end_date,
             np.datetime64(
-                f"{self.start_date.strftime('%Y-%m-%d')} {1 + (3 * round(self.start_date.hour / 3)):02d}:00:00"
+                f"{self.start_date.strftime('%Y-%m-%d')} {start_hour:02d}:00:00"
             ),
-            np.datetime64(
-                f"{self.end_date.strftime('%Y-%m-%d')} {1 + (3 * round(self.end_date.hour / 3)):02d}:00:00"
-            ),
+            np.datetime64(f"{self.end_date.strftime('%Y-%m-%d')} {end_hour:02d}:00:00"),
             # + np.timedelta64(1, "D"),
             np.timedelta64(3, "h"),
         ).astype("datetime64[ns]")

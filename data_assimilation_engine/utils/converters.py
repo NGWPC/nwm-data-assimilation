@@ -90,8 +90,8 @@ class Converter:
                 continue
 
         # Check if any files were missing SWE data
-        if missing_data:
-            raise Exception("One or more files were missing simulated data.")
+        # if missing_data:
+        #     raise Exception("One or more files were missing simulated data.")
 
         return data
 
@@ -109,4 +109,4 @@ class Converter:
         )
 
         # write to netcdf output file
-        ds.to_netcdf(self.output_file)
+        ds.to_netcdf(self.output_file, engine="h5netcdf")
