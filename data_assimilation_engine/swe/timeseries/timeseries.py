@@ -57,7 +57,9 @@ class SWEDataParser(DataParser):
     def check_columns(self, df: pd.DataFrame, file_path: str):
         """Check that columns exists."""
         if self.column1 not in df.columns and self.column2 not in df.columns:
-            logger.info(f"{self.variable_name} columns not found in {file_path}")
+            logger.info(
+                f"Could not find {self.column1} nor {self.column2} columns in {file_path}"
+            )
             return False
         else:
             return True
