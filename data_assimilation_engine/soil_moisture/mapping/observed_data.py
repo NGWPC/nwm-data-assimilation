@@ -10,6 +10,7 @@ import matplotlib.colors as mcolors
 import pandas as pd
 import xarray as xr
 
+from data_assimilation_engine.soil_moisture.consts import SM_END_DATE, SM_START_DATE
 from data_assimilation_engine.utils.calculators import ObsCalculator
 from data_assimilation_engine.utils.dataloaders import ObsDataLoader
 from data_assimilation_engine.utils.plotters import ObservedPlotter
@@ -67,12 +68,12 @@ class SoilMoistureObsDataLoader(ObsDataLoader):
     @property
     def obs_start_date(self):
         """Get the start date of available observations."""
-        return datetime(2015, 3, 31)
+        return datetime.strptime(SM_START_DATE, "%Y-%m-%d")
 
     @property
     def obs_end_date(self):
         """Get the end date of available observations."""
-        return datetime(2025, 9, 30)
+        return datetime.strptime(SM_END_DATE, "%Y-%m-%d")
 
 
 class SoilMoistureObsCalculator(ObsCalculator):
