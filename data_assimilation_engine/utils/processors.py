@@ -62,7 +62,9 @@ class Processor:
     @lru_cache
     def basin_gdf(self) -> gpd.GeoDataFrame:
         """Get the basin GeoDataFrame."""
-        return self.dl.basin_gdf
+        basin_gdf = self.dl.basin_gdf.copy()
+        basin_gdf[self.column] = np.nan
+        return basin_gdf
 
     @property
     @lru_cache
@@ -135,8 +137,8 @@ class SimProcessor(Processor):
         return basin_gdf_with_data
 
     def scan(self) -> tuple[float, float]:
-        """Scan the simulated data for min/max SWE values."""
-        return self.get_minmax(self.basin_gdf_with_data["mean_swe"])
+        """Scan the simulated data for min/max values."""
+        return self.get_minmax(self.basin_gdf_with_data[self.column])
 
     def plot_simulated_data(self):
         """Plot the simulated data."""
@@ -193,7 +195,8 @@ class ObsProcessor(Processor):
     @lru_cache
     def obs_ds(self) -> xr.Dataset | None:
         """Get the observed dataset."""
-        return self.dl.load_obs_netcdf(self.obs_file)
+        if self.check_datetime(self.date):
+            return self.dl.load_obs_netcdf(self.obs_file)
 
     def run(self, vmin: float, vmax: float) -> None:
         """Run the complete observed data processing pipeline."""
@@ -210,11 +213,11 @@ class ObsProcessor(Processor):
         # scalar_mappable = self.raw_plotter.plot_raw_data_raster(
         #     self.calc.ds_basin_subset[self.calc.dataset_name]
         # )
-
-        self.raw_plotter.plot_raw_data_polygon(
-            self.calc.fishnet_with_values,
-            self.calc.ds_basin_subset[self.calc.dataset_name],
-        )
+        if self.check_datetime(self.date):
+            self.raw_plotter.plot_raw_data_polygon(
+                self.calc.fishnet_with_values,
+                self.calc.ds_basin_subset[self.calc.dataset_name],
+            )
         self.raw_plotter.plot_catchment_boundaries()
         self.raw_plotter.add_basin_overlay(self.basin_geometry)
 
@@ -228,9 +231,14 @@ class ObsProcessor(Processor):
 
     def set_vmin_vmax(self, vmin: float, vmax: float):
         """Set the global vmin and vmax using current data."""
-        self.vmin, self.vmax = self.get_minmax(
-            self.calc.fishnet_with_values["value"], vmin, vmax
-        )
+        if self.check_datetime(self.date):
+            self.vmin, self.vmax = self.get_minmax(
+                self.calc.fishnet_with_values["value"], vmin, vmax
+            )
+        else:
+            self.vmin = vmin
+            self.vmax = vmax
+
         self.raw_plotter.vmin = self.vmin
         self.raw_plotter.vmax = self.vmax
         self.lumped_plotter.vmin = self.vmin
@@ -240,9 +248,14 @@ class ObsProcessor(Processor):
     @lru_cache
     def basin_gdf_with_data(self) -> gpd.GeoDataFrame:
         """Get the basin GeoDataFrame with computed catchment mean values."""
-        self.lumped_plotter.basin_gdf_with_data = self.calc.calculate_catchment_mean
-        self.raw_plotter.basin_gdf_with_data = self.calc.calculate_catchment_mean
-        return self.calc.calculate_catchment_mean
+        if self.check_datetime(self.date):
+            self.lumped_plotter.basin_gdf_with_data = self.calc.calculate_catchment_mean
+            self.raw_plotter.basin_gdf_with_data = self.calc.calculate_catchment_mean
+            return self.calc.calculate_catchment_mean
+        else:
+            self.lumped_plotter.basin_gdf_with_data = self.basin_gdf
+            self.raw_plotter.basin_gdf_with_data = self.basin_gdf
+            return self.basin_gdf
 
     def process_lumped(self) -> None:
         """Process and plot catchment-averaged data."""
