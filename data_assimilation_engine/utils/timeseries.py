@@ -470,7 +470,10 @@ class Plotter:
 
         """
         # Calculate y-axis range for dynamic intervals
-        sim_y_min, sim_y_max = np.nanmin(simulated_avg), np.nanmax(simulated_avg)
+        if np.isnan(simulated_avg).all():
+            sim_y_max, sim_y_min = np.nan, np.nan
+        else:
+            sim_y_min, sim_y_max = np.nanmin(simulated_avg), np.nanmax(simulated_avg)
         observed_y_min, observed_y_max = (
             np.nanmin(observed_avg),
             np.nanmax(observed_avg),
