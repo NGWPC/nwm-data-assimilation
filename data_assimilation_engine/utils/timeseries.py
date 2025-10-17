@@ -273,7 +273,7 @@ class DataParser:
             return np.full(len(self.times), np.nan)
 
     def parse_simulated_data(self, csv_files: list) -> np.ndarray:
-        """Extract 06Z SWE values for specified dates from all catchments.
+        """Extract values for specified dates from all catchments.
 
         Args:
         ----
@@ -283,7 +283,7 @@ class DataParser:
         Returns:
         -------
         numpy.ndarray
-            2D numpy array (time x catchment) of SWE values
+            2D numpy array (time x catchment) of values
 
         """
         # Initialize data array - 2d (times, ids)
@@ -319,15 +319,11 @@ class DataParser:
             except ValueError as ve:
                 # For ValueError, set flag and break loop
                 logger.info(f"Critical error with {file_path}: {ve}")
-                critical_error = True
                 break
 
             except Exception as e:
                 logger.info(f"Error processing {file_path}: {e}")
                 continue
-
-        if critical_error:
-            raise ValueError("Processing stopped due to critical error.")
 
         return data
 
@@ -480,22 +476,22 @@ class Plotter:
             np.nanmax(observed_avg),
         )
 
-        y_min = min(sim_y_min, observed_y_min)
-        y_max = max(sim_y_max, observed_y_max)
+        y_min = np.nanmin([sim_y_min, observed_y_min])
+        y_max = np.nanmax([sim_y_max, observed_y_max])
 
         # Include gage data in the y-axis range if available
         if gage_data:
             for station_id, data in gage_data.items():
                 gage_y_min = np.nanmin(data[self.variable_name.lower()])
                 gage_y_max = np.nanmax(data[self.variable_name.lower()])
-                y_min = min(y_min, gage_y_min)
-                y_max = max(y_max, gage_y_max)
+                y_min = np.nanmin([y_min, gage_y_min])
+                y_max = np.nanmax([y_max, gage_y_max])
 
         y_range = y_max - y_min
 
         # Add a small buffer to the y-axis limits
         y_buffer = y_range * 0.025
-        y_lim_min = max(0, y_min - y_buffer)
+        y_lim_min = np.nanmax([0, y_min - y_buffer])
         y_lim_max = y_max + y_buffer
 
         return y_lim_min, y_lim_max, y_range
