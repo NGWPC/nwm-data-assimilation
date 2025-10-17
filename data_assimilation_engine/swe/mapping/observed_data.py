@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import xarray as xr
 
+from data_assimilation_engine.swe.consts import SWE_END_DATE, SWE_START_DATE
 from data_assimilation_engine.swe.snotel import SnotelDataLoader, SnotelPlotter
 from data_assimilation_engine.utils.calculators import ObsCalculator
 from data_assimilation_engine.utils.dataloaders import ObsDataLoader
@@ -50,12 +51,12 @@ class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
     @property
     def obs_start_date(self):
         """Get the start date of available observations."""
-        return datetime(2009, 12, 9)
+        return datetime.strptime(SWE_START_DATE, "%Y-%m-%d")
 
     @property
     def obs_end_date(self):
         """Get the end date of available observations."""
-        return datetime(2025, 1, 30)
+        return datetime.strptime(SWE_END_DATE, "%Y-%m-%d")
 
 
 class SWEObsCalculator(ObsCalculator):
