@@ -26,9 +26,7 @@ class DataLoader:
     def load_netcdf(netcdf_file: str | Path) -> xr.Dataset:
         """Load a NetCDF file and return the xarray Dataset."""
         with timing_block(f"Loading NetCDF file {netcdf_file}"):
-            sim_ds = xr.open_dataset(netcdf_file)
-
-        return sim_ds
+            return xr.open_dataset(netcdf_file)
 
     @property
     @lru_cache
