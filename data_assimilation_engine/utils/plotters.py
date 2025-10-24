@@ -28,7 +28,8 @@ class Plotter:
     def _create_base_plot(self) -> tuple:
         """Create a base map plot with cartopy projection."""
         self.fig, self.ax = plt.subplots(
-            figsize=(15, 10), subplot_kw={"projection": self.proj}
+            figsize=(15, 10),
+            subplot_kw={"projection": self.proj},
         )
 
     def plot_choropleth_map(self):
@@ -178,8 +179,6 @@ class Plotter:
         """
         logging.debug(f"Saving figure to {output_file}")
         self.fig.savefig(output_file, dpi=300, bbox_inches="tight")
-        # self.fig.close()
-        # self.fig.clf()
 
     def add_colorbar(self, scalar_mappable: None | plt.cm.ScalarMappable = None):
         """Add a colorbar to a map plot.
