@@ -6,6 +6,7 @@ from functools import lru_cache
 
 import fsspec
 import geopandas as gpd
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
@@ -121,6 +122,7 @@ class SimProcessor(Processor):
     def run(self) -> None:
         """Run the processing workflow."""
         self.plot_simulated_data()
+        plt.close("all")
 
     @property
     @lru_cache
