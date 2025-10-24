@@ -109,4 +109,6 @@ class Converter:
         )
 
         # write to netcdf output file
+        if os.path.exists(self.output_file):
+            os.remove(self.output_file)
         ds.to_netcdf(self.output_file, engine="h5netcdf")
