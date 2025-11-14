@@ -23,11 +23,11 @@ dependencies = [
     "matplotlib~=3.10.6",
     "cartopy==0.25.0",
     # Use the same versions as mswm
-    "numpy < 2.0, >= 1.23",
+    "numpy~=1.26.4",                        # Match ngen-forcing
     "scipy==1.16.1",
-    "geopandas~=1.1.1",
-    "shapely~=2.1.2",
-    "pandas~=2.3.3",
+    "geopandas~=1.1.1",                     # Match ngen-forcing
+    "shapely~=2.1.2",                       # Match ngen-forcing
+    "pandas~=2.3.3",                        # Match ngen-forcing
     # fsspec and s3fs need to be locked together
     "fsspec==2025.3.0",
     "s3fs==2025.3.0",
