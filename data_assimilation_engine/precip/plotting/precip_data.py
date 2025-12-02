@@ -39,7 +39,7 @@ class PrecipDataParser(DataParser):
         data = self.parse_simulated_data(csv_files)
 
         # Sum precipitation across catchments, removing last timestep to align with streamflow
-        summed_precip = np.sum(data, axis=1)
+        summed_precip = np.mean(data, axis=1)
 
         logger.info(f"Summed precipitation across {len(self.catchment_ids)} catchments")
         return summed_precip
