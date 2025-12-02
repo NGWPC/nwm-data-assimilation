@@ -80,7 +80,6 @@ class PrecipProcessor:
     def basin_avg_precip(self) -> np.ndarray:
         """Array of basin averaged precipitation"""
         precip = self.parser.parse_simulated_data(self.lfl.csv_files)
-        print(precip)
         avg = np.nanmean(precip, axis=1)
         logger.info(f"Computed basin-averaged precipitation from {len(self.lfl.ids)} catchments")
         return avg
