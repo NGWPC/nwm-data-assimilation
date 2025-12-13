@@ -156,17 +156,37 @@ class SoilMoistureConverter(Converter):
 
     def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
         """Convert Units."""
-        return np.average(df.loc[mask, self.columns].values,axis=1,weights=self.depths)
-
+        return np.average(
+            df.loc[mask, self.columns].values, axis=1, weights=self.soil_thickness
+        )
 
     @property
     def depths(self):
         """Get depths from column names."""
-        depths=[]
+        depths = []
         for column in self.columns:
-            depths.append(float(column.replace("sm_profile_","").replace("_",".").replace("m","")))
+            depths.append(
+                float(
+                    column.replace("sm_profile_", "").replace("_", ".").replace("m", "")
+                )
+            )
         return depths
-    
+
+    @property
+    def soil_thickness(self):
+        """Get soil thickness from column names."""
+        sorted_depths = sorted(self.depths, reverse=True) + [0]
+        soil_thickness = [
+            sorted_depths[i] - sorted_depths[i + 1]
+            for i in range(len(sorted_depths) - 1)
+            if i + 1 < len(sorted_depths + [0])
+        ]
+        ordered_soil_thickness = []
+        for depth in self.depths:
+            idx = sorted_depths.index(depth)
+            ordered_soil_thickness.append(soil_thickness[idx])
+        return ordered_soil_thickness
+
     def check_columns(self, df: pd.DataFrame, file_path: str):
         """Check that columns exists."""
         columns = [column for column in df.columns if "sm_profile" in column]
