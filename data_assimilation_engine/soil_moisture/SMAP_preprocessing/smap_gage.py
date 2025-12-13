@@ -10,7 +10,6 @@ import pandas as pd
 import xarray as xr
 from dotenv import find_dotenv, load_dotenv
 from shapely import MultiPoint, Polygon, voronoi_polygons
-
 from utils.utils import time_function, timing_block
 
 load_dotenv(find_dotenv())
@@ -226,7 +225,6 @@ class BasinAverageProcessor:
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
         for col in df.columns:
-            print(col)
             file = os.path.join(output_directory, f"gages-{col}_soil_moisture.csv")
             df["basin_avg_soil_moisture"] = df[col]
             df.drop(columns=[col], inplace=True)
