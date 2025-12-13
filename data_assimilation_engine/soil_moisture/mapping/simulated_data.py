@@ -156,8 +156,17 @@ class SoilMoistureConverter(Converter):
 
     def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
         """Convert Units."""
-        return df.loc[mask, self.column1].values
+        return np.average(df.loc[mask, self.columns].values,axis=1,weights=self.depths)
 
+
+    @property
+    def depths(self):
+        """Get depths from column names."""
+        depths=[]
+        for column in self.columns:
+            depths.append(float(column.replace("sm_profile_","").replace("_",".").replace("m","")))
+        return depths
+    
     def check_columns(self, df: pd.DataFrame, file_path: str):
         """Check that columns exists."""
         columns = [column for column in df.columns if "sm_profile" in column]
@@ -165,13 +174,8 @@ class SoilMoistureConverter(Converter):
             logger.info(f"{self.variable_name} columns not found in {file_path}")
             return False
 
-        elif len(columns) > 1:
-            logger.info(
-                f"Too many ({len(columns)}) {self.variable_name} columns found in {file_path}"
-            )
-            return False
         else:
-            self.column1 = columns[0]
+            self.columns = columns
             return True
 
     @property
