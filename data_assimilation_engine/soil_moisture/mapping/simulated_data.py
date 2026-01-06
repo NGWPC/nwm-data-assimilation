@@ -156,7 +156,36 @@ class SoilMoistureConverter(Converter):
 
     def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
         """Convert Units."""
-        return df.loc[mask, self.column1].values
+        return np.average(
+            df.loc[mask, self.columns].values, axis=1, weights=self.soil_thickness
+        )
+
+    @property
+    def depths(self):
+        """Get depths from column names."""
+        depths = []
+        for column in self.columns:
+            depths.append(
+                float(
+                    column.replace("sm_profile_", "").replace("_", ".").replace("m", "")
+                )
+            )
+        return depths
+
+    @property
+    def soil_thickness(self):
+        """Get soil thickness from column names."""
+        sorted_depths = sorted(self.depths, reverse=True) + [0]
+        soil_thickness = [
+            sorted_depths[i] - sorted_depths[i + 1]
+            for i in range(len(sorted_depths) - 1)
+            if i + 1 < len(sorted_depths + [0])
+        ]
+        ordered_soil_thickness = []
+        for depth in self.depths:
+            idx = sorted_depths.index(depth)
+            ordered_soil_thickness.append(soil_thickness[idx])
+        return ordered_soil_thickness
 
     def check_columns(self, df: pd.DataFrame, file_path: str):
         """Check that columns exists."""
@@ -165,13 +194,8 @@ class SoilMoistureConverter(Converter):
             logger.info(f"{self.variable_name} columns not found in {file_path}")
             return False
 
-        elif len(columns) > 1:
-            logger.info(
-                f"Too many ({len(columns)}) {self.variable_name} columns found in {file_path}"
-            )
-            return False
         else:
-            self.column1 = columns[0]
+            self.columns = columns
             return True
 
     @property
