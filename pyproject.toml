@@ -40,7 +40,8 @@ dependencies = [
     "boto3==1.40.17",
     "earthaccess==0.15.1",
     "ujson==5.11.0",
-    "kerchunk==0.2.9"
+    "kerchunk==0.2.9",
+    "h5py==3.15.1"
     ]
 [project.urls]
 repository = "https://github.com/NGWPC/data-assimilation-engine"
