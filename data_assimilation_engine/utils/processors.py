@@ -151,7 +151,7 @@ class SimProcessor(Processor):
         self.plotter.set_map_extent()
         self.plotter.add_colorbar()
         self.plotter.add_gridlines()
-        self.plotter.add_title(self.date)
+        self.plotter.add_title(self._date)
         self.add_station_data()
 
         if self.output_file is not None:

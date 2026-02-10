@@ -1,6 +1,7 @@
 """Base Calculators."""
 
 import logging
+from datetime import datetime
 from functools import lru_cache
 
 import geopandas as gpd
@@ -58,30 +59,45 @@ class Calculator:
 class SimCalculator(Calculator):
     """Calculator for simulated data."""
 
-    def __init__(self, basin_gdf: gpd.GeoDataFrame = None):
+    def __init__(self, basin_gdf: gpd.GeoDataFrame = None, dates: list = None):
         """Initialize the calculator."""
         super().__init__(basin_gdf)
+        self.dates = dates
 
-    def process_data(self, sim_ds: xr.Dataset, date_str: str) -> gpd.GeoDataFrame:
+    def extract_data(self, ds: xr.Dataset, date) -> xr.Dataset:
+        """Extract values for specified dates from xarray Dataset."""
+        ds = ds.rename({val: val.lower() for val in list(ds.data_vars.keys())})
+        if not self.check_variable_nc(ds):
+            raise ValueError(f"{self.catchment_ids} column names not found")
+        if max(self.times) > pd.to_datetime(max(ds.Time.values)):
+            raise ValueError(
+                f"End date out of range...max: {pd.to_datetime(max(ds.Time.values))}."
+            )
+        elif min(self.times) < pd.to_datetime(min(ds.Time.values)):
+            raise ValueError(
+                f"Start date out of range...min: {pd.to_datetime(min(ds.Time.values))}."
+            )
+
+        # Use only selected date/times
+        mask = ds.Time.isin(self.times)
+
+        return self.convert_units_nc(ds, mask)
+
+    def process_data(self, sim_ds: xr.Dataset, date: str) -> gpd.GeoDataFrame:
         """Process simulated data from NetCDF and geopackage files.
 
         Args:
             sim_ds: xarray Dataset containing simulated data
-            date_str: Date string from NetCDF time dim (ex: '2015-12-01')
-
+            date: str representing the date for data extraction
         """
         basin_gdf = self.basin_gdf.copy()
-        data = sim_ds[self.variable].sel(date=date_str.split(" ")[0]).values
 
+        catchment_ids = sim_ds.catchments.values
+        data = self.extract_data(sim_ds, date)
         # Create a mapping dictionary from catchment IDs to data values
-        catchment_ids = sim_ds.catchment.values
-        data_dict = dict(zip(catchment_ids, data))
+        data_dict = dict(zip(catchment_ids, data.flatten()))
 
-        # Create catchment ID column and then lookup values from dict
-        basin_gdf["catchment_id"] = (
-            basin_gdf["divide_id"].str.split("-").str[1].astype(int)
-        )
-        basin_gdf[self.column] = basin_gdf["catchment_id"].map(data_dict).fillna(np.nan)
+        basin_gdf[self.column] = basin_gdf["divide_id"].map(data_dict).fillna(np.nan)
 
         return basin_gdf
 
@@ -180,32 +196,6 @@ class ObsCalculator(Calculator, SnotelCalculator):
             [Point(x, y) for x, y in zip(self.lons.ravel(), self.lats.ravel())]
         )
 
-    # @property
-    # @lru_cache
-    # def mean_values(
-    #     self,
-    # ) -> list[float]:
-    #     """Calculate mean value for each catchment.
-
-    #     Returns
-    #     -------
-    #     list[float]
-    #         List of mean values for each catchment
-
-    #     """
-    #     mean_values = []
-    #     for _, row in self.basin_gdf.iterrows():
-    #         # Mask for each catchment using Shapely `contains`
-    #         mask = np.array([row.geometry.contains(pt) for pt in self.points]).reshape(
-    #             self.lons.shape
-    #         )
-
-    #         # Extract SWE data for catchment and compute mean
-    #         catchment_data = self.ds_basin_subset[self.dataset_name].where(mask)
-    #         mean_swe = float(catchment_data.mean().compute())
-    #         mean_values.append(mean_swe)
-    #     return mean_values
-
     @property
     @lru_cache
     def mean_values(self):
@@ -280,16 +270,3 @@ class ObsCalculator(Calculator, SnotelCalculator):
         return np.array(
             [self.basin_geometry.contains(pt) for pt in self.points]
         ).reshape(self.lons.shape)
-
-    # @property
-    # @lru_cache
-    # def ds_to_plot(self) -> xr.Dataset:
-    #     """Get the dataset to plot for the specified date."""
-    #     # Mask invalid values & apply basin mask
-    #     # data = (
-    #     #     self.ds_basin_subset[self.dataset_name]
-    #     #     .where(self.ds_basin_subset[self.dataset_name] != -9999)
-    #     #     .where(self.basin_mask)
-    #     # )
-    #     # data = data.rio.write_crs(self.crs)
-    #     return self.ds_basin_subset[self.dataset_name]
