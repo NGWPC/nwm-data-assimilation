@@ -7,8 +7,8 @@ from functools import lru_cache
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
+import xarray as xr
 
 from data_assimilation_engine.swe.snotel import (
     SnotelCalculator,
@@ -16,7 +16,6 @@ from data_assimilation_engine.swe.snotel import (
     SnotelPlotter,
 )
 from data_assimilation_engine.utils.calculators import SimCalculator
-from data_assimilation_engine.utils.converters import Converter
 from data_assimilation_engine.utils.dataloaders import SimDataLoader
 from data_assimilation_engine.utils.plotters import SimPlotter
 from data_assimilation_engine.utils.processors import SimProcessor
@@ -31,11 +30,61 @@ class SWESimDataLoader(SimDataLoader, SnotelDataLoader):
 class SWESimCalculator(SimCalculator, SnotelCalculator):
     """Calculator for simulated SWE data."""
 
-    def __init__(self, basin_gdf: gpd.GeoDataFrame = None):
+    def __init__(self, basin_gdf: gpd.GeoDataFrame = None, dates: list = None):
         """Initialize the calculator."""
-        super().__init__(basin_gdf)
-        self.variable = "swe"
+        super().__init__(basin_gdf, dates)
+
+        self.variable = "SWE_mm"
         self.column = "mean_swe"
+        self.variable_name = "swe"
+        self.column1 = "swe_m"
+        self.column2 = "swe_mm"
+
+    def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
+        """Convert Units."""
+        if self.column1 in df.columns:
+            return df.loc[mask, self.column1].values
+        elif self.column2 in df.columns:
+            return df.loc[mask, self.column2].values / 1000  # Convert mm to meters
+
+    def check_columns(self, df: pd.DataFrame, file_path: str):
+        """Check that columns exists."""
+        if self.column1 not in df.columns and self.column2 not in df.columns:
+            logger.info(f"{self.variable_name} columns not found in {file_path}")
+            return False
+        else:
+            return True
+
+    def convert_units_nc(self, ds: xr.Dataset, mask: pd.DataFrame):
+        """Convert Units."""
+        if self.column1 in ds.data_vars.keys():
+            return ds[self.column1].where(Time=mask, drop=True).values
+        elif self.column2 in ds.data_vars.keys():
+            return ds[self.column2].where(mask, drop=True).values / 1000
+
+    def check_variable_nc(self, ds: xr.Dataset) -> bool:
+        """Check that variable exists."""
+        if (
+            self.column1 not in ds.data_vars.keys()
+            and self.column2 not in ds.data_vars.keys()
+        ):
+            logger.info(
+                f"Could not find {self.column1} nor {self.column2} variables in dataset"
+            )
+            return False
+        else:
+            return True
+
+    @property
+    @lru_cache
+    def times(self):
+        """Get times as datetime objects and add 06z timestamp."""
+        return pd.to_datetime(
+            [
+                datetime.strptime(f"{date} 06:00:00", "%Y-%m-%d %H:%M:%S")
+                for date in self.dates
+            ]
+        )
 
 
 class SWESimPlotter(SimPlotter, SnotelPlotter):
@@ -66,14 +115,17 @@ class SWESimProcessor(SimProcessor):
         self.column = "mean_swe"
         super().__init__(netcdf_file, gpkg_file, output_file, direct_s3)
         self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
-        self.dl = SWESimDataLoader(self.gpkg_file)
-        self.calc = SWESimCalculator(self.basin_gdf)
+        self.dl = SWESimDataLoader(self.gpkg_file, self.netcdf_file)
+        self.calc = SWESimCalculator(self.basin_gdf, self.date)
         self.plotter = SWESimPlotter(self.basin_gdf)
 
     @property
     def date(self) -> str:
         """Get the date string."""
-        return self._date
+        if isinstance(self._date, str):
+            return [self._date]
+        else:
+            return self._date
 
     @property
     @lru_cache
@@ -110,43 +162,6 @@ class SWESimProcessor(SimProcessor):
             and self.snotel_data is not None
         ):
             self.plotter.add_snotel_overlay(self.snotel_data)
-
-
-class SWEConverter(Converter):
-    """Convert SWE data from CSV to NetCDF format."""
-
-    def __init__(self, csv_directory: str, dates: list, output_file: str):
-        """Initialize the SWEConverter."""
-        super().__init__(csv_directory, dates, output_file)
-        self.variable_name = "swe"
-        self.column1 = "swe_m"
-        self.column2 = "swe_mm"
-
-    def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
-        """Convert Units."""
-        if self.column1 in df.columns:
-            return df.loc[mask, self.column1].values
-        elif self.column2 in df.columns:
-            return df.loc[mask, self.column2].values / 1000  # Convert mm to meters
-
-    def check_columns(self, df: pd.DataFrame, file_path: str):
-        """Check that columns exists."""
-        if self.column1 not in df.columns and self.column2 not in df.columns:
-            logger.info(f"{self.variable_name} columns not found in {file_path}")
-            return False
-        else:
-            return True
-
-    @property
-    @lru_cache
-    def times(self):
-        """Get times as datetime objects and add 06z timestamp."""
-        return np.array(
-            [
-                datetime.strptime(f"{date} 06:00:00", "%Y-%m-%d %H:%M:%S")
-                for date in self.dates
-            ]
-        )
 
 
 def get_options(args_list=None) -> argparse.Namespace:

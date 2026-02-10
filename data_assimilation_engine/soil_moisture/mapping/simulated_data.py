@@ -9,9 +9,9 @@ import geopandas as gpd
 import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 from data_assimilation_engine.utils.calculators import SimCalculator
-from data_assimilation_engine.utils.converters import Converter
 from data_assimilation_engine.utils.dataloaders import SimDataLoader
 from data_assimilation_engine.utils.plotters import SimPlotter
 from data_assimilation_engine.utils.processors import SimProcessor
@@ -26,132 +26,11 @@ class SoilMoistureSimDataLoader(SimDataLoader):
 class SoilMoistureSimCalculator(SimCalculator):
     """Calculator for simulated soil moisture data."""
 
-    def __init__(self, basin_gdf: gpd.GeoDataFrame = None):
+    def __init__(self, basin_gdf: gpd.GeoDataFrame = None, dates: list = None):
         """Initialize the calculator."""
-        super().__init__(basin_gdf)
+        super().__init__(basin_gdf, dates)
         self.variable = "sm"
         self.column = "mean_sm"
-
-
-class SoilMoistureSimPlotter(SimPlotter):
-    """Plotter for simulated soil moisture data."""
-
-    def __init__(self, gdf: gpd.GeoDataFrame):
-        """Initialize the plotter with a GeoDataFrame."""
-        super().__init__(gdf)
-        self.column = "mean_sm"
-        self.color_bar_label = "Soil Moisture (m³/m³)"
-        self.title_str = "Simulated Soil Moisture (SM)\n date"
-
-    @property
-    def cmap(self):
-        """Create a custom colormap for soil moisture visualization."""
-        colors_for_gradient = [
-            "firebrick",
-            "darkred",
-            "navajowhite",
-            "yellow",
-            "lightgrey",
-            "skyblue",
-            "lightblue",
-            "cornflowerblue",
-            "darkblue",
-        ]
-
-        # Create the LinearSegmentedColormap
-        return mcolors.LinearSegmentedColormap.from_list(
-            name="my_gradient_cmap",
-            colors=colors_for_gradient,
-            N=256,  # Number of color levels (higher N for smoother gradient)
-        )
-
-
-class SoilMoistureSimProcessor(SimProcessor):
-    """Processor for simulated soil moisture data."""
-
-    def __init__(
-        self,
-        netcdf_file=None,
-        gpkg_file=None,
-        date=None,
-        output_file=None,
-        direct_s3=False,
-    ):
-        """Initialize the processor with input files and parameters."""
-        self._date = date
-        self.column = "mean_sm"
-        super().__init__(netcdf_file, gpkg_file, output_file, direct_s3)
-        self.dl = SoilMoistureSimDataLoader(self.gpkg_file)
-        self.calc = SoilMoistureSimCalculator(self.basin_gdf)
-        self.plotter = SoilMoistureSimPlotter(self.basin_gdf)
-
-    @property
-    def date(self):  # -> datetime:
-        """Get the date for processing."""
-        try:
-            datetime_obj = datetime.strptime(self._date, "%Y-%m-%d %H:%M:%S")
-            hour = 1 + (
-                round(datetime_obj.hour / 3) * 3
-            )  # Round to nearest 3-hour interval
-            datetime_obj = datetime_obj.replace(
-                hour=hour, minute=0, second=0, microsecond=0
-            )
-        except ValueError:
-            try:
-                datetime_obj = datetime.strptime(self._date, "%Y-%m-%d") + timedelta(
-                    hours=1
-                )
-            except ValueError:
-                raise ValueError(
-                    f"time data '{self._date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
-                )
-        return datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
-
-    # @property
-    # @lru_cache
-    # def snotel_data(self) -> pd.DataFrame | None:
-    #     """Get the SNOTEL SWE data for stations within the basin."""
-    #     if self.stations_in_basin is not None and not self.stations_in_basin.empty:
-    #         return self.dl.load_snotel_data(
-    #             self.stations_in_basin,
-    #             self.date,
-    #             self.snotel_filesystem,
-    #             self.s3_mount_point,
-    #             self.snotel_s3_path,
-    #         )
-
-    # @property
-    # @lru_cache
-    # def stations_gdf(self) -> gpd.GeoDataFrame:
-    #     """Get the  stations GeoDataFrame."""
-    #     return self.dl.parse_snotel_filenames(self.snotel_filenames)
-
-    # @property
-    # @lru_cache
-    # def stations_in_basin(self) -> gpd.GeoDataFrame:
-    #     """Get the stations within the basin."""
-    #     return self.calc.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
-
-    def add_station_data(self):
-        """Add  station data overlay to the plot if available."""
-        pass
-        # Add  data overlay if available
-
-        # if (
-        #     self.stations_in_basin is not None
-        #     and not self.stations_in_basin.empty
-        #     and self.snotel_data is not None
-        # ):
-        #     self.raw_plotter.add_snotel_overlay(self.snotel_data)
-        #     self.lumped_plotter.add_snotel_overlay(self.snotel_data)
-
-
-class SoilMoistureConverter(Converter):
-    """Convert soil moisture data from CSV to NetCDF format."""
-
-    def __init__(self, csv_directory: str, dates: list, output_file: str):
-        """Initialize the SoilMoistureConverter."""
-        super().__init__(csv_directory, dates, output_file)
         self.variable_name = "sm"
 
     def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
@@ -203,17 +82,150 @@ class SoilMoistureConverter(Converter):
     def times(self):
         """Get times as datetime objects and add timestamp."""
         try:
-            times = np.array(
+            times = pd.to_datetime(
                 [datetime.strptime(date, "%Y-%m-%d %H:%M:%S") for date in self.dates]
             )
         except ValueError:
-            times = np.array(
+            times = pd.to_datetime(
                 [datetime.strptime(date, "%Y-%m-%d") for date in self.dates]
             )
         return times
 
+    def convert_units_nc(self, ds: xr.Dataset, mask: pd.DataFrame):
+        """Convert Units."""
+        return np.average(
+            ds[self.columns].where(mask, drop=True).to_array(),
+            axis=0,
+            weights=self.soil_thickness,
+        )
+
+    def check_variable_nc(self, ds: xr.Dataset) -> bool:
+        """Check that variable exists."""
+        columns = [column for column in ds.data_vars.keys() if "sm_profile" in column]
+        if len(columns) == 0:
+            logger.info(f"{self.variable_name} columns not found in dataset")
+            return False
+
+        else:
+            self.columns = columns
+            return True
+
+
+class SoilMoistureSimPlotter(SimPlotter):
+    """Plotter for simulated soil moisture data."""
+
+    def __init__(self, gdf: gpd.GeoDataFrame):
+        """Initialize the plotter with a GeoDataFrame."""
+        super().__init__(gdf)
+        self.column = "mean_sm"
+        self.color_bar_label = "Soil Moisture (m³/m³)"
+        self.title_str = "Simulated Soil Moisture (SM)\n date"
+
+    @property
+    def cmap(self):
+        """Create a custom colormap for soil moisture visualization."""
+        colors_for_gradient = [
+            "firebrick",
+            "darkred",
+            "navajowhite",
+            "yellow",
+            "lightgrey",
+            "skyblue",
+            "lightblue",
+            "cornflowerblue",
+            "darkblue",
+        ]
+
+        # Create the LinearSegmentedColormap
+        return mcolors.LinearSegmentedColormap.from_list(
+            name="my_gradient_cmap",
+            colors=colors_for_gradient,
+            N=256,  # Number of color levels (higher N for smoother gradient)
+        )
+
+
+class SoilMoistureSimProcessor(SimProcessor):
+    """Processor for simulated soil moisture data."""
+
+    def __init__(
+        self,
+        netcdf_file=None,
+        gpkg_file=None,
+        date=None,
+        output_file=None,
+        direct_s3=False,
+    ):
+        """Initialize the processor with input files and parameters."""
+        self._date = date
+        self.column = "mean_sm"
+        super().__init__(netcdf_file, gpkg_file, output_file, direct_s3)
+        self.dl = SoilMoistureSimDataLoader(self.gpkg_file, self.netcdf_file)
+        self.calc = SoilMoistureSimCalculator(self.basin_gdf, self.date)
+        self.plotter = SoilMoistureSimPlotter(self.basin_gdf)
+
+    @property
+    def date(self):  # -> datetime:
+        """Get the date for processing."""
+        try:
+            datetime_obj = datetime.strptime(self._date, "%Y-%m-%d %H:%M:%S")
+            hour = 1 + (
+                round(datetime_obj.hour / 3) * 3
+            )  # Round to nearest 3-hour interval
+            datetime_obj = datetime_obj.replace(
+                hour=hour, minute=0, second=0, microsecond=0
+            )
+        except ValueError:
+            try:
+                datetime_obj = datetime.strptime(self._date, "%Y-%m-%d") + timedelta(
+                    hours=1
+                )
+            except ValueError:
+                raise ValueError(
+                    f"time data '{self._date}' does not match format '%Y-%m-%d %H:%M:%S' nor '%Y-%m-%d'"
+                )
+        return [datetime_obj.strftime("%Y-%m-%d %H:%M:%S")]
+
+    # @property
+    # @lru_cache
+    # def snotel_data(self) -> pd.DataFrame | None:
+    #     """Get the SNOTEL SWE data for stations within the basin."""
+    #     if self.stations_in_basin is not None and not self.stations_in_basin.empty:
+    #         return self.dl.load_snotel_data(
+    #             self.stations_in_basin,
+    #             self.date,
+    #             self.snotel_filesystem,
+    #             self.s3_mount_point,
+    #             self.snotel_s3_path,
+    #         )
+
+    # @property
+    # @lru_cache
+    # def stations_gdf(self) -> gpd.GeoDataFrame:
+    #     """Get the  stations GeoDataFrame."""
+    #     return self.dl.parse_snotel_filenames(self.snotel_filenames)
+
+    # @property
+    # @lru_cache
+    # def stations_in_basin(self) -> gpd.GeoDataFrame:
+    #     """Get the stations within the basin."""
+    #     return self.calc.find_stations_in_basin(self.stations_gdf, self.basin_geometry)
+
+    def add_station_data(self):
+        """Add  station data overlay to the plot if available."""
+        pass
+        # Add  data overlay if available
+
+        # if (
+        #     self.stations_in_basin is not None
+        #     and not self.stations_in_basin.empty
+        #     and self.snotel_data is not None
+        # ):
+        #     self.raw_plotter.add_snotel_overlay(self.snotel_data)
+        #     self.lumped_plotter.add_snotel_overlay(self.snotel_data)
+
 
 def get_options(args_list=None) -> argparse.Namespace:
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("netcdf_file", type=str, help="Path to NetCDF file")
     parser.add_argument("gpkg_file", type=str, help="Path to geopackage file")
