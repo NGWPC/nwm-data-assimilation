@@ -2,12 +2,13 @@
 
 import logging
 import os
-from datetime import datetime
 from functools import lru_cache
+from glob import glob
 from pathlib import Path
 
 import fsspec
 import geopandas as gpd
+import pandas as pd
 import xarray as xr
 
 from data_assimilation_engine.utils.utils import timing_block
@@ -55,11 +56,48 @@ class DataLoader:
 class SimDataLoader(DataLoader):
     """Data Loader for simulated SWE data."""
 
+    def __init__(self, gpkg_file: str, csv_directory: str):
+        """Initialize the DataLoader with a directory containing CSV files."""
+        super().__init__(gpkg_file)
+        self.directory = csv_directory
+
     @staticmethod
     def load_netcdf(netcdf_file: str | Path) -> xr.Dataset:
         """Load a NetCDF file and return the xarray Dataset."""
         with timing_block(f"Loading NetCDF file {netcdf_file}"):
-            return xr.open_dataset(netcdf_file, engine="h5netcdf")
+            ds = xr.open_dataset(netcdf_file, engine="h5netcdf")
+            ds.load()
+            ds.close()
+            return ds
+
+    @property
+    def output_file(self) -> str:
+        """Get the output netcdf file path."""
+        return os.path.join(self.directory, "converted_output.nc")
+
+    @property
+    @lru_cache
+    def csv_files(self):
+        """Get all CSV files in the specified directory."""
+        pattern = os.path.join(self.directory, "cat-*.csv")
+        return glob(pattern)
+
+    def csv_to_netcdf(self) -> str:
+        """Convert CSV files in the directory to a NetCDF file."""
+        dfs = {}
+        for file in self.csv_files:
+            df = pd.read_csv(file)
+            cat = os.path.splitext(os.path.basename(file))[0]
+            df.index = pd.to_datetime(df.Time)
+            df.drop(columns=["Time Step", "Time"], inplace=True)
+
+            dfs[cat] = df
+
+        new_ds = xr.concat([df.to_xarray() for df in dfs.values()], dim="catchments")
+
+        new_ds.coords["catchments"] = list(dfs.keys())
+        new_ds.to_netcdf(self.output_file, engine="h5netcdf")
+        return self.output_file
 
 
 class ObsDataLoader(DataLoader):
