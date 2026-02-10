@@ -5,6 +5,7 @@ from functools import lru_cache
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 from data_assimilation_engine.utils.timeseries import (
     DataParser,
@@ -30,7 +31,7 @@ def soil_moisture_ts(args_list=None) -> None:
     """
     args = get_options(args_list)
     processor = SoilMoistureProcessor(
-        csv_directory=args.csv_directory,
+        csv_directory_or_netcdf_file=args.csv_directory_or_netcdf_file,
         gpkg_file=args.gpkg_file,
         plot_output=args.plot_output,
         csv_output=args.csv_output,
@@ -44,7 +45,7 @@ class SoilMoistureProcessor(Processor):
 
     def __init__(
         self,
-        csv_directory: str,
+        csv_directory_or_netcdf_file: str,
         gpkg_file: str,
         plot_output: str = None,
         csv_output: str = None,
@@ -54,7 +55,7 @@ class SoilMoistureProcessor(Processor):
 
         Args:
         ----
-        csv_directory : str
+        csv_directory_or_netcdf_file : str
             Path to directory containing csv files
         gpkg_file : str
             Path to geopackage file with catchment geometries
@@ -66,12 +67,16 @@ class SoilMoistureProcessor(Processor):
             Whether to use direct S3 access
 
         """
-        super().__init__(csv_directory, gpkg_file, plot_output, csv_output, direct_s3)
+        super().__init__(
+            csv_directory_or_netcdf_file, gpkg_file, plot_output, csv_output, direct_s3
+        )
         self.variable = "Soil_Moisture"
         self.sim_col_output = "Simulated_Soil_Moisture"
         self.obs_col_output = "SMAP_Soil_Moisture"
 
-        self.lfl = SoilMoistureFileLoader(csv_directory, self.gpkg_file)
+        self.lfl = SoilMoistureFileLoader(
+            self.csv_directory_or_netcdf_file, self.gpkg_file, self.netcdf_input
+        )
         self.s3l = SoilMoistureS3Loader(self.basin_id, self.direct_s3)
         self.parser = SoilMoistureDataParser(self.lfl.times, self.lfl.ids)
         self.plotter = SoilMoisturePlotter()
@@ -116,10 +121,30 @@ class SoilMoistureDataParser(DataParser):
         self.columns = columns
         return True
 
+    def check_variable_nc(self, ds: xr.Dataset) -> bool:
+        """Check that variable exists."""
+        vars = [var for var in ds.data_vars.keys() if "sm_profile" in var]
+        if len(vars) == 0:
+            logger.info(
+                f"{self.variable_name} columns not found in {self.csv_directory_or_netcdf_file}"
+            )
+            return False
+
+        self.columns = vars
+        return True
+
     def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
         """Convert Units."""
         return np.average(
             df.loc[mask, self.columns].values, axis=1, weights=self.soil_thickness
+        )
+
+    def convert_units_nc(self, ds: xr.Dataset, mask: pd.DataFrame) -> np.ndarray:
+        """Convert Units."""
+        return np.average(
+            ds[self.columns].where(mask, drop=True).to_array(),
+            axis=0,
+            weights=self.soil_thickness,
         )
 
     @property
@@ -164,9 +189,11 @@ class SoilMoistureS3Loader(S3Loader):
 class SoilMoistureFileLoader(FileLoader):
     """Handles loading and retrieving soil moisture files."""
 
-    def __init__(self, csv_directory: str, gpkg_file: str):
+    def __init__(
+        self, csv_directory_or_netcdf_file: str, gpkg_file: str, netcdf_input: bool
+    ):
         """Initialize the SoilMoistureFileLoader with the directory containing CSV files."""
-        super().__init__(csv_directory, gpkg_file)
+        super().__init__(csv_directory_or_netcdf_file, gpkg_file, netcdf_input)
 
     @property
     @lru_cache

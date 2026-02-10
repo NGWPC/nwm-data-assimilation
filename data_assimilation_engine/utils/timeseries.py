@@ -14,6 +14,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib.dates import DateFormatter, DayLocator
 
 from data_assimilation_engine.utils.dataloaders import DataLoader
@@ -25,10 +26,13 @@ logger = logging.getLogger(__name__)
 class FileLoader(DataLoader):
     """Handles loading and retrieving files."""
 
-    def __init__(self, csv_directory: str, gpkg_file: str):
+    def __init__(
+        self, csv_directory_or_netcdf_file: str, gpkg_file: str, netcdf_input: bool
+    ):
         """Initialize the FileLoader with the directory containing CSV files."""
         super().__init__(gpkg_file)
-        self.csv_directory = csv_directory
+        self.csv_directory_or_netcdf_file = csv_directory_or_netcdf_file
+        self.netcdf_input = netcdf_input
 
     @property
     def first_csv_path(self) -> str:
@@ -47,12 +51,18 @@ class FileLoader(DataLoader):
     @property
     def start_date(self) -> pd.Timestamp:
         """Get the start date from the first CSV file."""
-        return min(self.first_csv_df["time"])
+        if self.netcdf_input:
+            return pd.to_datetime(self.sim_ds.Time[0].values)
+        else:
+            return pd.to_datetime(min(self.first_csv_df["time"]))
 
     @property
     def end_date(self) -> pd.Timestamp:
         """Get the end date from the first CSV file."""
-        return max(self.first_csv_df["time"])
+        if self.netcdf_input:
+            return pd.to_datetime(self.sim_ds.Time[-1].values)
+        else:
+            return pd.to_datetime(max(self.first_csv_df["time"]))
 
     @property
     @lru_cache
@@ -66,13 +76,15 @@ class FileLoader(DataLoader):
             A list of csv filenames containing simulated datafound in the directory provided
 
         """
-        pattern = os.path.join(self.csv_directory, "cat-*.csv")
+        pattern = os.path.join(self.csv_directory_or_netcdf_file, "cat-*.csv")
         csv_files = glob.glob(pattern)
 
         if csv_files:
             return csv_files
         else:
-            raise Exception(f"No csv files found in {self.csv_directory}")
+            raise Exception(
+                f"No csv files found in {self.csv_directory_or_netcdf_file}"
+            )
 
     @property
     @lru_cache
@@ -85,28 +97,41 @@ class FileLoader(DataLoader):
             Array of catchment IDs
 
         """
-        # Stop if csv_files is empty
-        if not self.csv_files:
-            raise ValueError("No CSV files found in the directory. Processing halted.")
+        if self.netcdf_input:
+            return np.array(
+                [cat.replace("cat-", "") for cat in self.sim_ds.catchments.values]
+            )
+        else:
+            # Stop if csv_files is empty
+            if not self.csv_files:
+                raise ValueError(
+                    "No CSV files found in the directory. Processing halted."
+                )
 
-        # Same code as convert_swe
-        catchment_ids = np.array(
-            [
-                int(match.group(1))  # Extract the number safely
-                for f in self.csv_files
-                if (
-                    match := re.search(r"cat-(\d+)", os.path.basename(f))
-                )  # Store the match
-            ]
-        )
-
-        # Stop if csv_files was not empty, but no catchment_ids were parsed
-        if len(catchment_ids) == 0:
-            raise ValueError(
-                "No valid catchment CSV files found (files must match 'cat-{number}.csv' pattern)."
+            # Same code as convert_swe
+            catchment_ids = np.array(
+                [
+                    int(match.group(1))  # Extract the number safely
+                    for f in self.csv_files
+                    if (
+                        match := re.search(r"cat-(\d+)", os.path.basename(f))
+                    )  # Store the match
+                ]
             )
 
-        return catchment_ids
+            # Stop if csv_files was not empty, but no catchment_ids were parsed
+            if len(catchment_ids) == 0:
+                raise ValueError(
+                    "No valid catchment CSV files found (files must match 'cat-{number}.csv' pattern)."
+                )
+
+            return catchment_ids
+
+    @property
+    @lru_cache
+    def sim_ds(self):
+        """Simulated dataset."""
+        return xr.open_dataset(self.csv_directory_or_netcdf_file)
 
     @property
     @lru_cache
@@ -272,7 +297,7 @@ class DataParser:
             logger.info(traceback.format_exc())
             return np.full(len(self.times), np.nan)
 
-    def parse_simulated_data(self, csv_files: list) -> np.ndarray:
+    def parse_simulated_data_csv(self, csv_files: list) -> np.ndarray:
         """Extract values for specified dates from all catchments.
 
         Args:
@@ -327,6 +352,21 @@ class DataParser:
 
         return data
 
+    def parse_simulated_data_nc(self, ds: xr.Dataset) -> pd.DataFrame:
+        """Extract values for specified dates from xarray Dataset."""
+        ds = ds.rename({val: val.lower() for val in list(ds.data_vars.keys())})
+        if not self.check_variable_nc(ds):
+            raise ValueError(f"{self.catchment_ids} column names not found")
+        if max(self.times) > max(ds.Time):
+            raise ValueError(f"End date out of range...max: {max(ds.Time)}.")
+        elif min(self.times) < min(ds.Time):
+            raise ValueError(f"Start date out of range...min: {min(ds.Time)}.")
+
+        # Use only selected date/times
+        mask = ds.Time.isin(self.times)
+
+        return self.convert_units_nc(ds, mask)
+
 
 class Analyzer:
     """Analyzes simulated data across catchments."""
@@ -353,15 +393,7 @@ class Analyzer:
         try:
             # Create an array of area values for each catchment
             weights = np.array([areas[int(cid)] for cid in catchment_ids])
-
-            # Convert area values to percentages for weight calculations
-            weights = weights / np.sum(weights)
-
-            # Calculate weighted average across catchments for each timestep
-            # Weights is converted to 2d for np operations
-            basin_avg = np.sum(data * weights[np.newaxis, :], axis=1)
-
-            return basin_avg
+            return np.average(data, weights=weights, axis=0)
 
         except KeyError as e:
             logger.info(f"Error: Cannot find area for catchment {e}")
@@ -695,7 +727,7 @@ class Processor:
 
     def __init__(
         self,
-        csv_directory=None,
+        csv_directory_or_netcdf_file=None,
         gpkg_file=None,
         plot_output=None,
         csv_output=None,
@@ -705,8 +737,8 @@ class Processor:
 
         Args:
         ----
-        csv_directory : str, optional
-            Path to directory containing csv files
+        csv_directory_or_netcdf_file : str, optional
+            Path to directory containing csv files or a netcdf file
         gpkg_file : str, optional
             Path to geopackage file with catchment geometries
         plot_output : str, optional
@@ -717,13 +749,39 @@ class Processor:
             Whether to use direct S3 access
 
         """
-        self.csv_directory = csv_directory  # local
+        self.csv_directory_or_netcdf_file = csv_directory_or_netcdf_file  # local
         self.gpkg_file = gpkg_file  # local
         self.plot_output = plot_output
         self.csv_output = csv_output
         self.direct_s3 = direct_s3
 
         self.analyzer = Analyzer()
+
+    @property
+    def netcdf_input(self) -> bool:
+        """Determine if the input is a netCDF file based on the path."""
+        if os.path.isdir(self.csv_directory_or_netcdf_file):
+            return False
+        elif os.path.isfile(
+            self.csv_directory_or_netcdf_file
+        ) and self.csv_directory_or_netcdf_file.endswith(".nc"):
+            return True
+        else:
+            raise ValueError(
+                f"Unexpected input path: must be a directory or a .nc file. Received {self.csv_directory_or_netcdf_file}"
+            )
+
+    @property
+    @lru_cache
+    def times(self) -> np.ndarray:
+        """Array of timestamps."""
+        return self.lfl.times
+
+    @property
+    @lru_cache
+    def ids(self) -> np.ndarray:
+        """Catchment ids."""
+        return self.lfl.ids
 
     @property
     def gpkg_basename(self) -> str:
@@ -738,15 +796,19 @@ class Processor:
     @property
     def basin_id(self) -> str:
         """Extract the basin ID from the geopackage filename."""
-        return re.search(r"(\d+)", self.gpkg_filename).group(1)
+        # return re.search(r"(\d+)", self.gpkg_filename).group(1)
+        return os.path.basename(self.gpkg_file).split(".")[0].split("_")[-1]
 
     @property
     @lru_cache
     def simulated_data(self) -> np.ndarray:
         """2D array of simulated data (time x catchment)."""
-        return self.parser.parse_simulated_data(
-            self.lfl.csv_files,
-        )
+        if self.netcdf_input:
+            return self.parser.parse_simulated_data_nc(self.lfl.sim_ds)
+        else:
+            return self.parser.parse_simulated_data_csv(
+                self.lfl.csv_files,
+            )
 
     @property
     @lru_cache
@@ -779,7 +841,7 @@ class Processor:
     def simulated_avg(self) -> np.ndarray:
         """1D array of area-weighted basin-averaged simulated data."""
         return self.analyzer.calculate_basin_average(
-            self.simulated_data, self.lfl.ids, self.areas
+            self.simulated_data, self.ids, self.areas
         )
 
     @time_function
@@ -789,7 +851,7 @@ class Processor:
             self.simulated_avg, self.obs_avg, self.gage_ts
         )
         (self.x_major_interval, self.x_minor_interval, self.date_fmt) = (
-            self.plotter.get_x_intervals(self.lfl.times)
+            self.plotter.get_x_intervals(self.times)
         )
         (self.y_major_interval, self.y_minor_interval, self.y_format) = (
             self.plotter.get_y_intervals(self.y_range)
@@ -799,7 +861,7 @@ class Processor:
     def create_plot(self) -> None:
         """Create and save the plot."""
         fig, ax = self.plotter.plot_basin_average(
-            self.lfl.times, self.simulated_avg, self.obs_avg, self.gage_ts
+            self.times, self.simulated_avg, self.obs_avg, self.gage_ts
         )
         self.plotter.customize_x_axis(
             ax, self.x_major_interval, self.x_minor_interval, self.date_fmt
@@ -823,7 +885,7 @@ class Processor:
     def data_dict(self) -> dict:
         """Create a dictionary of the data for saving to CSV."""
         data_dict = {
-            "timestamp": self.lfl.times,
+            "timestamp": self.times,
             self.sim_col_output: self.simulated_avg,
             self.obs_col_output: self.obs_avg,
         }
@@ -840,11 +902,7 @@ class Processor:
     @time_function
     def save_basin_avg_to_csv(self) -> None:
         """Save basin average varaiable data to csv file."""
-        if (
-            self.csv_output is None
-            or self.simulated_avg is None
-            or self.lfl.times is None
-        ):
+        if self.csv_output is None or self.simulated_avg is None or self.times is None:
             return
         try:
             # Create DataFrame and save to CSV
@@ -886,7 +944,9 @@ def get_options(args_list=None) -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "csv_directory", type=str, help="Path that contains ngen csv files."
+        "csv_directory_or_netcdf_file",
+        type=str,
+        help="Path that contains ngen csv files or a netcdf file.",
     )
     parser.add_argument(
         "gpkg_file",
@@ -908,7 +968,7 @@ def get_options(args_list=None) -> argparse.Namespace:
     parser.add_argument(
         "--direct_s3",
         action="store_true",
-        help="Use direct S3 access instead of local mount",
+        help="Use direct S3 access incsv_directorystead of local mount",
     )
 
     if args_list is not None:

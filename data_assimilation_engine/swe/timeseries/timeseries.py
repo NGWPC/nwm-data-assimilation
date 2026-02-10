@@ -6,6 +6,7 @@ from functools import lru_cache
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 from data_assimilation_engine.swe.snotel import (
     SnotelCalculator,
@@ -54,11 +55,31 @@ class SWEDataParser(DataParser):
         elif self.column2 in df.columns:
             return df.loc[mask, self.column2].values / 1000  # Convert mm to meters
 
-    def check_columns(self, df: pd.DataFrame, file_path: str):
+    def convert_units_nc(self, ds: xr.Dataset, mask: pd.DataFrame) -> np.ndarray:
+        """Convert Units for netcdf."""
+        if self.column1 in ds.data_vars.keys():
+            return ds[self.column1].where(Time=mask, drop=True).values
+        elif self.column2 in ds.data_vars.keys():
+            return ds[self.column2].where(mask, drop=True).values / 1000
+
+    def check_columns(self, df: pd.DataFrame, file_path: str) -> bool:
         """Check that columns exists."""
         if self.column1 not in df.columns and self.column2 not in df.columns:
             logger.info(
                 f"Could not find {self.column1} nor {self.column2} columns in {file_path}"
+            )
+            return False
+        else:
+            return True
+
+    def check_variable_nc(self, ds: xr.Dataset) -> bool:
+        """Check that variable exists."""
+        if (
+            self.column1 not in ds.data_vars.keys()
+            and self.column2 not in ds.data_vars.keys()
+        ):
+            logger.info(
+                f"Could not find {self.column1} nor {self.column2} variables in dataset"
             )
             return False
         else:
@@ -79,9 +100,11 @@ class SWES3Loader(S3Loader):
 class SWEFileLoader(FileLoader):
     """Handles loading and retrieving SWE files."""
 
-    def __init__(self, csv_directory: str, gpkg_file: str):
+    def __init__(
+        self, csv_directory_or_netcdf_file: str, gpkg_file: str, netcdf_input: bool
+    ):
         """Initialize the SWEFileLoader with the directory containing CSV files."""
-        super().__init__(csv_directory, gpkg_file)
+        super().__init__(csv_directory_or_netcdf_file, gpkg_file, netcdf_input)
 
     @property
     @lru_cache
@@ -109,7 +132,7 @@ class SWEProcessor(Processor):
 
     def __init__(
         self,
-        csv_directory: str,
+        csv_directory_or_netcdf_file: str,
         gpkg_file: str,
         plot_output: str = None,
         csv_output: str = None,
@@ -119,8 +142,8 @@ class SWEProcessor(Processor):
 
         Args:
         ----
-        csv_directory : str
-            Path to directory containing csv files
+        csv_directory_or_netcdf_file : str
+            Path to directory containing csv files or a netcdf file
         gpkg_file : str
             Path to geopackage file with catchment geometries
         plot_output : str, optional
@@ -131,12 +154,18 @@ class SWEProcessor(Processor):
             Whether to use direct S3 access
 
         """
-        super().__init__(csv_directory, gpkg_file, plot_output, csv_output, direct_s3)
+        super().__init__(
+            csv_directory_or_netcdf_file, gpkg_file, plot_output, csv_output, direct_s3
+        )
         self.variable = "SWE"
         self.sim_col_output = "Simulated_SWE"
         self.obs_col_output = "SNODAS_SWE"
         self.gage_col_output = "SNOTEL_station_id_SWE"
-        self.lfl = SWEFileLoader(csv_directory, self.gpkg_file)
+
+        self.lfl = SWEFileLoader(
+            self.csv_directory_or_netcdf_file, self.gpkg_file, self.netcdf_input
+        )
+
         self.s3l = SWES3Loader(self.basin_id, self.direct_s3)
         self.parser = SWEDataParser(self.lfl.times, self.lfl.ids)
         self.plotter = SWEPlotter()
@@ -205,7 +234,7 @@ def swe_ts(args_list=None) -> None:
     """
     args = get_options(args_list)
     processor = SWEProcessor(
-        csv_directory=args.csv_directory,
+        csv_directory_or_netcdf_file=args.csv_directory_or_netcdf_file,
         gpkg_file=args.gpkg_file,
         plot_output=args.plot_output,
         csv_output=args.csv_output,
