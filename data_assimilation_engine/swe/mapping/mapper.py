@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 
 from data_assimilation_engine.swe.mapping.observed_data import SWEObsProcessor
 from data_assimilation_engine.swe.mapping.simulated_data import (
-    SWEConverter,
     SWESimProcessor,
 )
 from data_assimilation_engine.utils.mappers import Mapper
@@ -25,7 +24,6 @@ class SWEMapper(Mapper):
     def __init__(self, args):
         """Initialize the SWEMapper with command line arguments."""
         super().__init__(args)
-        self.converter = SWEConverter(*self.conversion_args)
         self.sim_processor = SWESimProcessor(*self.sim_mapper_args)
         self.obs_processor = SWEObsProcessor(*self.obs_args)
 
@@ -35,18 +33,11 @@ def get_options(arg_list=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("date", type=str, help="Date to use for all plots.")
     parser.add_argument(
-        "sim_csv_dir",
+        "sim_csv_dir_or_netcdf_file",
         type=str,
-        help="Path that contains ngen output csv files.\
-                        This is your ngen output directory.",
+        help="Path that contains ngen output csv files or a netcdf file.",
     )
-    parser.add_argument(
-        "sim_netcdf",
-        type=str,
-        help="Path for simulated output netcdf file.\
-                        convert_csv writes to this file, simulated_data_mapper\
-                        reads from this file.",
-    )
+
     parser.add_argument("gpkg_file", type=str, help="Path to geopackage file.")
     parser.add_argument(
         "sim_lumped_output",

@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 from functools import lru_cache
 
 from data_assimilation_engine.utils.utils import timing_block
@@ -20,20 +21,18 @@ class Mapper:
         self.args = args
 
     @property
-    def conversion_args(self):
-        """Get the arguments for to convert csv to netcdf."""
-        date = self.args.date
-        if isinstance(date, str):
-            date = [date]
-        return [self.args.sim_csv_dir, date, self.args.sim_netcdf]
-
-    def run_conversion(self) -> None:
-        """Convert_swe to convert ngen swe csv files to a single netcdf file."""
-        data = self.converter.read_values_from_dir()
-        logger.info(f"Converted {len(self.converter.catchment_ids)} catchments")
-        self.converter.write_to_netcdf(
-            self.converter.catchment_ids, self.converter.times, data
-        )
+    def netcdf_input(self) -> bool:
+        """Determine if the input is a netCDF file based on the path."""
+        if os.path.isdir(self.args.sim_csv_dir_or_netcdf_file):
+            return False
+        elif os.path.isfile(
+            self.args.sim_csv_dir_or_netcdf_file
+        ) and self.args.sim_csv_dir_or_netcdf_file.endswith(".nc"):
+            return True
+        else:
+            raise ValueError(
+                f"Unexpected input path: must be a directory or a .nc file. Received {self.args.sim_csv_dir_or_netcdf_file}"
+            )
 
     @property
     @lru_cache
@@ -66,7 +65,7 @@ class Mapper:
     def sim_mapper_args(self):
         """Get the arguments for simulated_swe_mapper."""
         sim_mapper_args = [
-            self.args.sim_netcdf,
+            self.args.sim_csv_dir_or_netcdf_file,
             self.args.gpkg_file,
             self.args.date,
             self.args.sim_lumped_output,
@@ -78,9 +77,12 @@ class Mapper:
     def execute_mapping(self) -> None:
         """Execute the full mapping process."""
         with timing_block("Full Mapping"):
-            with timing_block(self.run_conversion.__name__):
-                self.run_conversion()
-
+            if not self.netcdf_input:
+                with timing_block("CSV to NetCDF conversion"):
+                    self.sim_processor.netcdf_file = (
+                        self.sim_processor.dl.csv_to_netcdf()
+                    )
+                    self.obs_processor.netcdf_file = self.sim_processor.netcdf_file
             with timing_block("observed data mapping"):
                 self.obs_processor.run(self.vmin, self.vmax)
 

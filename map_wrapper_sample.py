@@ -9,8 +9,7 @@ from data_assimilation_engine.precip.plotting.plotter import plot_precip_streamf
 
 swe_input = [
     "2019-04-01",
-    "sample_data/sample_csv/09359500/",
-    "sample_data/09359500_SWE.nc",
+    "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gages-09359500.gpkg",
     "sample_data/simulated_swe_map.png",
     "sample_data/raw_swe_map.png",
@@ -20,8 +19,7 @@ swe_input = [
 
 soil_moisture_input = [
     "2019-04-01 03:00:00",
-    "sample_data/sample_csv/09359500/",
-    "sample_data/09359500_soil_moisture.nc",
+    "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gages-09359500.gpkg",
     "sample_data/simulated_soil_moisture_map.png",
     "sample_data/raw_soil_moisture_map.png",
