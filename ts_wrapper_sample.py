@@ -8,7 +8,7 @@ from data_assimilation_engine.swe.timeseries.timeseries import swe_ts
 from data_assimilation_engine.precip.timeseries.timeseries import precip_ts
 
 swe_inputs = [
-    "sample_data/sample_csv/09359500/catchment_output_new.nc",
+    "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gauge_09359500.gpkg",
     "--plot_output",
     "sample_data/comb_plot_swe.png",
@@ -20,7 +20,7 @@ swe_inputs = [
 swe_ts(swe_inputs)
 
 soil_moisture_inputs = [
-    "sample_data/sample_csv/09359500/catchment_output_new.nc",
+    "sample_data/sample_csv/09359500",
     "sample_data/sample_gpkg/gauge_09359500.gpkg",
     "--plot_output",
     "sample_data/comb_plot_soil_moisture.png",

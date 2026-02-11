@@ -393,7 +393,10 @@ class Analyzer:
         try:
             # Create an array of area values for each catchment
             weights = np.array([areas[int(cid)] for cid in catchment_ids])
-            return np.average(data, weights=weights, axis=0)
+            try:
+                return np.average(data, weights=weights, axis=0)
+            except Exception as e:
+                return np.average(data, weights=weights, axis=1)
 
         except KeyError as e:
             logger.info(f"Error: Cannot find area for catchment {e}")

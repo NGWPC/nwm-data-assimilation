@@ -222,15 +222,31 @@ class ObsCalculator(Calculator, SnotelCalculator):
 
     def sample_value(self, row: pd.Series) -> float:
         """Sample value from dataset at the centroid of a polygon."""
-        return float(
-            self.ds_basin_subset[self.dataset_name].sel(
+        val = (
+            self.ds_basin_subset[self.dataset_name]
+            .sel(
                 {
                     self.x_dim_name: row.geometry.centroid.x,
                     self.y_dim_name: row.geometry.centroid.y,
                 },
                 method="nearest",
             )
+            .values
         )
+        if isinstance(val, float):
+            return float(val)
+        elif isinstance(val, np.ndarray):
+            if val.size == 1:
+                try:
+                    return float(val[0])
+                except IndexError:
+                    return float(val)
+            else:
+                raise ValueError(
+                    "Sampled value is an array with more than one element."
+                )
+        else:
+            raise ValueError("Sampled value is not a float or single-element array.")
 
     @property
     @lru_cache
