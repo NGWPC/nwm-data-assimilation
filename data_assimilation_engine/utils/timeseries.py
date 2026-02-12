@@ -37,12 +37,16 @@ class FileLoader(DataLoader):
     @property
     def first_csv_path(self) -> str:
         """Get the path of the first CSV file in the directory."""
+        if self.netcdf_input:
+            return None
         return self.csv_files[0]
 
     @property
     @lru_cache
     def first_csv_df(self) -> pd.DataFrame:
         """Read the first CSV file to determine date range."""
+        if self.netcdf_input:
+            return None
         df = pd.read_csv(self.first_csv_path)
         df.columns = df.columns.str.lower()
         df["time"] = pd.to_datetime(df["time"])
@@ -76,6 +80,10 @@ class FileLoader(DataLoader):
             A list of csv filenames containing simulated datafound in the directory provided
 
         """
+        # Return empty list for Netcdf input
+        if self.netcdf_input:
+            return []
+
         pattern = os.path.join(self.csv_directory_or_netcdf_file, "cat-*.csv")
         csv_files = glob.glob(pattern)
 

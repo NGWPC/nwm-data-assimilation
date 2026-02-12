@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse
 import pandas as pd
 import numpy as np
+import xarray as xr
 
 from data_assimilation_engine.utils.timeseries import (
     DataParser,
@@ -33,24 +34,38 @@ class PrecipDataParser(DataParser):
             return False
         return True
 
+    def check_variable_nc(self, ds: xr.Dataset) -> bool:
+        """Check that variable exists in netcdf dataset"""
+        if self.variable_col not in ds.data_vars.keys():
+            logger.info(f"'{self.variable_col}' variable not found in dataset")
+            return False
+        return True
+
     def convert_units(self, df: pd.DataFrame, mask: pd.Series) -> np.ndarray:
         """Convert precipitation units from m/s to mm/hr"""
         return df.loc[mask, self.variable_col].values * 3600
 
+    def convert_units_nc(self, df: pd.DataFrame, mask: pd.Series) -> np.ndarray:
+        """Convert precipitation units from m/s to mm/hr for netcdf"""
+        return df[self.variable_col].where(mask, drop=True).values * 3600
+
 
 class PrecipFileLoader(FileLoader):
     """"Handles loading and retrieving precipitation output files"""
-    def __init__(self, csv_directory: str):
-        """Initialize the SWEFileLoader with the directory containing CSV files."""
-        super().__init__(csv_directory, gpkg_file=None)
+    def __init__(self, csv_directory_or_netcdf_file: str, netcdf_input: bool):
+        """Initialize the SWEFileLoader with the directory containing CSV or netcdf files."""
+        super().__init__(csv_directory_or_netcdf_file, gpkg_file=None, netcdf_input=netcdf_input)
 
     @property
     @lru_cache
     @time_function
     def times(self) -> np.ndarray:
-        """Create an array of timestamps from the first CSV file"""
-        times = pd.to_datetime(self.first_csv_df['time']).values
-        return times
+        """Create an array of timestamps from the first CSV file or netcdf"""
+        if self.netcdf_input:
+            return self.sim_ds['Time'].values
+        else:
+            times = pd.to_datetime(self.first_csv_df['time']).values
+            return times
 
 
 class PrecipProcessor:
@@ -58,20 +73,27 @@ class PrecipProcessor:
 
     def __init__(
         self,
-        csv_directory: str,
+        csv_directory_or_netcdf_file: str,
         csv_output: str,
     ):
         """Initialize precipitation processor
 
         Args:
         ----
-        csv_directory : str
-            Path to directory containing csv files
+        csv_directory_or_netcdf_file : str
+            Path to directory containing csv files or a netcdf file
         csv_output : str
             Path where csv data should be saved
+        netcdf_input: bool
+            Whether input is a netcdf file
         """
+        self.csv_directory_or_netcdf_file = csv_directory_or_netcdf_file
         self.csv_output = Path(csv_output)
-        self.lfl = PrecipFileLoader(csv_directory)
+
+        input_path = Path(self.csv_directory_or_netcdf_file)
+        self.netcdf_input = input_path.is_file() and input_path.suffix == '.nc'
+
+        self.lfl = PrecipFileLoader(csv_directory_or_netcdf_file, self.netcdf_input)
         self.parser = PrecipDataParser(self.lfl.times, self.lfl.ids)
 
     @property
@@ -79,7 +101,10 @@ class PrecipProcessor:
     @time_function
     def basin_avg_precip(self) -> np.ndarray:
         """Array of basin averaged precipitation"""
-        precip = self.parser.parse_simulated_data(self.lfl.csv_files)
+        if self.netcdf_input:
+            precip = self.parser.parse_simulated_data_nc(self.lfl.sim_ds)
+        else:
+            precip = self.parser.parse_simulated_data_csv(self.lfl.csv_files)
         avg = np.nanmean(precip, axis=1)
         logger.info(f"Computed basin-averaged precipitation from {len(self.lfl.ids)} catchments")
         return avg
@@ -109,12 +134,12 @@ def precip_ts(args_list=None):
 
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("csv_directory", type=str, help="Path to directory containing csv files")
+    parser.add_argument("csv_directory_or_netcdf_file", type=str, help="Path to directory containing csv files or netcdf_file")
     parser.add_argument("csv_output", type=str, help="Path output csv file")
     args = parser.parse_args(args_list)
 
     processor = PrecipProcessor(
-        csv_directory=args.csv_directory,
+        csv_directory_or_netcdf_file=args.csv_directory_or_netcdf_file,
         csv_output=args.csv_output,
     )
     processor.process()

@@ -31,9 +31,16 @@ soil_moisture_inputs = [
 
 soil_moisture_ts(soil_moisture_inputs)
 
-precip_inputs = [
+precip_csv_inputs = [
     "/home/jeff.wade/ngwpc/data-assimilation-engine/sample_data/sample_csv_precip/01123000",
     "/home/jeff.wade/ngwpc/data-assimilation-engine/sample_data/sample_csv_precip/01123000/precip_timeseries.csv",
 ]
 
-precip_ts(precip_inputs)
+precip_ts(precip_csv_inputs)
+
+precip_nc_inputs = [
+    "/home/jeff.wade/ngwpc/data-assimilation-engine/sample_data/sample_netcdf/01123000/catchment_output.nc",
+    "/home/jeff.wade/ngwpc/data-assimilation-engine/sample_data/sample_netcdf/01123000/precip_timeseries.csv",
+]
+
+precip_ts(precip_nc_inputs)

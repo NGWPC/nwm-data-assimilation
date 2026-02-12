@@ -121,19 +121,28 @@ class PrecipStreamflowProcessor:
         self,
         valid_best_file: Union[str, Path],
         valid_control_file: Union[str, Path],
-        precip_dir: Union[str, Path],
+        precip_dir_or_netcdf: Union[str, Path],
         output_plot: Union[str, Path],
         title: str
     ):
         self.valid_best_file = Path(valid_best_file)
         self.valid_control_file = Path(valid_control_file)
-        self.precip_dir = Path(precip_dir)
+        self.precip_dir_or_netcdf = Path(precip_dir_or_netcdf)
         self.output_plot = Path(output_plot)
         self.title = title
 
+        # Autodetect if input is NetCDF
+        self.netcdf_input = self.precip_dir_or_netcdf.is_file() and self.precip_dir_or_netcdf.suffix == '.nc'
+
         # Initialize data loaders
-        self.file_loader = FileLoader(precip_dir, None)
-        self.precip_parser = PrecipDataParser(self.file_loader.first_csv_df['time'].values, self.file_loader.ids)
+        self.file_loader = FileLoader(precip_dir_or_netcdf, None, self.netcdf_input)
+
+        if self.netcdf_input:
+            times = self.file_loader.sim_ds['Time'].values
+        else:
+            times = self.file_loader.first_csv_df['time'].values
+
+        self.precip_parser = PrecipDataParser(times, self.file_loader.ids)
         self.plotter = PrecipPlotter()
 
     def load_data(self) -> tuple:
@@ -157,8 +166,12 @@ class PrecipStreamflowProcessor:
         streamflow = pd.merge(df_best, df_control, left_index=True, right_index=True, how="outer")
 
         # Load precip data
-        precip = self.precip_parser.parse_precipitation_data(self.file_loader.csv_files)
-        times = pd.to_datetime(self.file_loader.first_csv_df['time'].values)
+        if self.netcdf_input:
+            precip = self.precip_parser.parse_precipitation_data_nc(self.file_loader.sim_ds)
+            times = pd.to_datetime(self.file_loader.sim_ds['Time'].values)
+        else:
+            precip = self.precip_parser.parse_precipitation_data_csv(self.file_loader.csv_files)
+            times = pd.to_datetime(self.file_loader.first_csv_df['time'].values)
 
         # Reindex streamflow to precipitation times, filling missing values with NaN
         streamflow = streamflow .reindex(times)
@@ -205,9 +218,9 @@ def get_options(arg_list=None) -> argparse.Namespace:
         help="Path to valid control streamflow CSV file (columns: Time, sim_flow)",
     )
     parser.add_argument(
-        "precip_dir",
+        "precip_dir_or_netcdf",
         type=str,
-        help="Directory containing cat-*.csv files from ngen output"
+        help="Directory containing cat-*.csv files or NetCDF file from ngen output"
     )
     parser.add_argument(
         "output_plot",
@@ -237,7 +250,7 @@ def plot_precip_streamflow(arg_list=None):
     processor = PrecipStreamflowProcessor(
         valid_best_file=args.valid_best_file,
         valid_control_file=args.valid_control_file,
-        precip_dir=args.precip_dir,
+        precip_dir_or_netcdf=args.precip_dir_or_netcdf,
         output_plot=args.output_plot,
         title=args.title,
     )

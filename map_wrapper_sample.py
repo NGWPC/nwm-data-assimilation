@@ -27,7 +27,7 @@ soil_moisture_input = [
     "--direct_s3",
 ]
 
-precip_streamflow_input = [
+precip_streamflow_csv_input = [
     "sample_data/sample_csv_precip/01123000/01123000_output_valid_best.csv",
     "sample_data/sample_csv_precip/01123000/01123000_output_valid_control.csv",
     "sample_data/sample_csv_precip/01123000/",
@@ -36,6 +36,16 @@ precip_streamflow_input = [
     "USGS 01123000 - Precipitation-Streamflow Comparison"
 ]
 
+precip_streamflow_nc_input = [
+    "sample_data/sample_csv_precip/01123000/01123000_output_valid_best.csv",
+    "sample_data/sample_csv_precip/01123000/01123000_output_valid_control.csv",
+    "sample_data/sample_netcdf/01123000/catchment_output.nc",
+    "sample_data/sample_csv_precip/01123000/01123000_precip_streamflow.png",
+    "--title",
+    "USGS 01123000 - Precipitation-Streamflow Comparison"
+]
+
 map_swe_data(swe_input)
 map_soil_moisture_data(soil_moisture_input)
-plot_precip_streamflow(precip_streamflow_input)
+plot_precip_streamflow(precip_streamflow_csv_input)
+plot_precip_streamflow(precip_streamflow_nc_input)
