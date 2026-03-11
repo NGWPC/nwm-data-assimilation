@@ -22,7 +22,7 @@ class PrecipDataParser(DataParser):
         """Initialize precipitation data loader"""
 
         self.timestamp_col = 'Time'
-        self.variable_col = "rainrate"
+        self.variable_col = "rainmelt"
         super().__init__(times, catchment_ids)
 
     def check_columns(self, df: pd.DataFrame, file_path: str) -> bool:
@@ -32,10 +32,10 @@ class PrecipDataParser(DataParser):
             logger.critical(f"'{self.variable_col}' column not found in {file_path}")
             return False
         return True
-
+    
     def convert_units(self, df: pd.DataFrame, mask: pd.Series) -> np.ndarray:
-        """Convert precipitation units from m/s to mm/hr"""
-        return df.loc[mask, self.variable_col].values * 3600
+        """Return precipitation + melt values in proper format (no conversion needed)"""
+        return df.loc[mask, self.variable_col].values
 
 
 class PrecipFileLoader(FileLoader):
@@ -88,7 +88,7 @@ class PrecipProcessor:
     def save_to_csv(self) -> None:
         """Save basin-averaged precipitation to CSV file"""
         try:
-            df = pd.DataFrame({'timestamp': self.lfl.times, 'precip_mm_hr': self.basin_avg_precip})
+            df = pd.DataFrame({'timestamp': self.lfl.times, 'rainmelt_mm_hr': self.basin_avg_precip})
             df.to_csv(self.csv_output, index=False)
             logger.info(f"Precipitation timeseries saved to {self.csv_output}")
         except Exception as e:
