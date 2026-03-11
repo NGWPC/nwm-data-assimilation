@@ -32,8 +32,8 @@ soil_moisture_inputs = [
 soil_moisture_ts(soil_moisture_inputs)
 
 precip_inputs = [
-    "/home/jeff.wade/ngwpc/data-assimilation-engine/sample_data/sample_csv_precip/01123000",
-    "/home/jeff.wade/ngwpc/data-assimilation-engine/sample_data/sample_csv_precip/01123000/precip_timeseries.csv",
+    "/sample_data/sample_csv_precip/01123000",
+    "/sample_data/sample_csv_precip/01123000/precip_timeseries.csv",
 ]
 
 precip_ts(precip_inputs)
