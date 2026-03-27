@@ -4,6 +4,7 @@ import numpy as np
 import xarray as xr
 import dask.array as da
 import time
+import fiona
 from shapely.geometry import Point
 from pyproj import CRS
 from typing import List, Optional
@@ -18,25 +19,36 @@ class DataProcessor(DataReader):
                  produce_template: bool, produce_output: bool, chunk_size: int = 100) -> None:
         super().__init__(netcdf_file, chunk_size)
 
-        self.dimensions: List[str] = []
-        self.output_variables: List[str] = []
-        self.catchments: np.ndarray
-        self.times: np.ndarray
-
         self.input_ds: xr.Dataset = self.dataset
-
         self.output_variables = list(self.input_ds.data_vars)
+        # Normalize catchment ids in netcdf with a cat- prefix for consistency.
+        self.nc_catchments = self._normalize_catchment_ids(self.input_ds[self.catchment_coord].values)
 
-        # Read geopackage "divides" layer
+        # Read geopackage, determine schema and "divides" layer
+        self.is_new_NHF_schema: bool = self._is_new_NHF_schema(gpkg_file, "reference_flowpaths")
+        print (self.is_new_NHF_schema)
         gpkg_gdf = gpd.read_file(gpkg_file, layer="divides")
-        self.catchment_field = "divide_id"
-
         if gpkg_gdf.empty:
             raise ValueError("No polygon geometries found in GeoPackage")
+
+        # Check schema and assign catchment ID field.
+        if self.is_new_NHF_schema:
+            self.catchment_field = "div_id"
+        else:
+            self.catchment_field = "divide_id"
+
+        # Normalize catchment ids in gpkg with a 'cat-' prefix for consistency.
+        gpkg_gdf[self.catchment_field] = self._normalize_catchment_ids(gpkg_gdf[self.catchment_field].values)
+        self.gpkg_catchment_list = gpkg_gdf[self.catchment_field].values.tolist()
+
+        # Check if catchments from netcdf and geopackage match
+        if set(self.nc_catchments) != set(self.gpkg_catchment_list):
+            raise ValueError("There is a mistmatch between catchment IDs in geopackage and netcdf")   
 
         if produce_template:
             self.create_template_grid_netcdf_from_geopackage(gpkg_gdf, template_grid_file)
         self.ds_grid = xr.open_dataset(template_grid_file)
+        
         # explicitly set CRS to CONUS. 
         # TO DO: Read an existing NWM grid file for CRS info 
         self.ds_grid = self.ds_grid.rio.write_crs("EPSG:5070") 
@@ -51,6 +63,27 @@ class DataProcessor(DataReader):
             duration_minutes = (end_time - start_time) / 60
             print(f"Function execution time: {duration_minutes:.4f} minutes")
             
+    def _is_new_NHF_schema(self, geopackage_path: str, layer_name: str) -> bool:
+        """
+        Check the data schema in the geopackage for the new NHF format
+        """
+        layers = gpd.list_layers(geopackage_path)
+        tabular_layers = layers[layers['geometry_type'].isna()]
+        return layer_name.lower() in tabular_layers['name'].tolist()
+    
+    def _normalize_catchment_ids(self, ids) -> np.ndarray:
+        """
+        Ensure all IDs are prefixed with 'cat-'. This is necessary when catchments are not prefixed
+        with 'cat-' in netcdf and geopackage for consistency. 
+        """
+        ids_str = ids.astype(str)
+
+        normalized = np.array([
+            id_ if id_.startswith("cat-") else f"cat-{id_}"
+            for id_ in ids_str
+        ])
+        return normalized
+    
     def create_template_grid_netcdf_from_geopackage(self, geopackage_gdf: gpd.GeoDataFrame, output_grid_netcdf: str,
                                                     resolution: int = 1000, epsg_code: int = 5070) -> None:
         """
@@ -116,8 +149,6 @@ class DataProcessor(DataReader):
         Build the grid-to-catchment mapping (vectorized index array).
         Must be called just once before generating grids for every timestep.
         """
-        self.catchment_list: List[str] = catchment_gdf[self.catchment_field].values.tolist()
-
         # Spatial join
         # TO DO: Have to determine if there are other methods that are less expensive computationally.
         joined = gpd.sjoin(
@@ -128,7 +159,7 @@ class DataProcessor(DataReader):
         )
 
         # Build index map to allow working with integer indices (potentially faster than catchment ID strings)
-        catchment_index = {c: i for i, c in enumerate(self.catchment_list)}
+        catchment_index = {c: i for i, c in enumerate(self.nc_catchments)} #use netcdf list to ensure order of gpkg catchments match with netcdf.
         mapped = joined[self.catchment_field].map(catchment_index)
         grid_to_catchment = mapped.fillna(-1).astype(int).to_numpy()
         self.grid_to_catchment = grid_to_catchment
@@ -184,9 +215,7 @@ class DataProcessor(DataReader):
         n_y = self.ds_grid.dims["y"]
         n_x = self.ds_grid.dims["x"]
         valid_mask = self.grid_to_catchment != -1
-        grid_index_2d = self.grid_to_catchment.reshape(n_y, n_x)
-        self.output_variables = list(self.input_ds.data_vars)
-
+        
         # may be a robust approach is not to consider "time". Instead use
         # np.issubdtype(coord.dtype, np.datetime64)?
         time_dim = next(dim for dim in self.input_ds.dims if "time" in dim.lower())
