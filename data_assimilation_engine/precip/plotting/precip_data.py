@@ -1,6 +1,5 @@
 """Precipitation data loader from Ngen output files"""
 import logging
-from functools import reduce
 
 import pandas as pd
 import numpy as np
@@ -18,7 +17,7 @@ class PrecipDataParser(DataParser):
 
         super().__init__(times, catchment_ids)
         self.timestamp_col = 'Time'
-        self.variable_col = "rainrate"
+        self.variable_col = "rainmelt"
 
     def check_columns(self, df: pd.DataFrame, file_path: str) -> bool:
         """Check that required columns exist in dataframe"""
@@ -27,10 +26,6 @@ class PrecipDataParser(DataParser):
             logger.critical(f"'{self.variable_col}' column not found in {file_path}")
             return False
         return True
-
-    def convert_units(self, df: pd.DataFrame, mask: pd.Series) -> np.ndarray:
-        """Convert precipitation units from m/s to mm/hr"""
-        return df.loc[mask, self.variable_col].values * 3600
 
     def parse_precipitation_data(self, csv_files: list) -> np.ndarray:
         """Extract and sum precipitation values across all catchments"""
@@ -41,5 +36,5 @@ class PrecipDataParser(DataParser):
         # Sum precipitation across catchments, removing last timestep to align with streamflow
         summed_precip = np.mean(data, axis=1)
 
-        logger.info(f"Summed precipitation across {len(self.catchment_ids)} catchments")
+        logger.info(f"Summed precipitation and melt across {len(self.catchment_ids)} catchments")
         return summed_precip
