@@ -83,9 +83,9 @@ class PrecipPlotter(Plotter):
             precip,
             "purple",
             linewidth=0.8,
-            label="Total Precipitation (mm/h)",
+            label="Total Precipitation + Melt (mm/h)",
         )
-        ax2.set_ylabel("Total Precipitation (mm/h)", color="black", fontsize=14)
+        ax2.set_ylabel("Total Precipitation + Melt (mm/h)", color="black", fontsize=14)
         ax2.set_ylim(ax2.get_ylim()[::-1])
         ax2.tick_params(axis="y")
         ax2.set_yticks(ytk2)
