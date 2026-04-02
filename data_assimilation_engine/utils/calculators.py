@@ -54,6 +54,7 @@ class Calculator:
         """
         return self.basin_gdf.total_bounds
 
+
 class SimCalculator(Calculator):
     """Calculator for simulated data."""
 
@@ -86,7 +87,7 @@ class SimCalculator(Calculator):
             raise ValueError("Field for catchment ID is missing int the basins geodataframe/geopackage")
         else:
             basin_gdf["catchment_id"] = (
-            basin_gdf[catchment_field].str.split("-").str[-1].astype(int)
+                basin_gdf[catchment_field].astype(str).str.split("-").str[-1].astype(int)
             )
         basin_gdf[self.column] = basin_gdf["catchment_id"].map(data_dict).fillna(np.nan)
 
