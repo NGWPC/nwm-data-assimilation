@@ -29,6 +29,10 @@ from data_assimilation_engine.soil_moisture.ISMN_preprocessing.ismn_basin_timese
     ISMNBasinTimeseriesBuilder,
 )
 
+from data_assimilation_engine.soil_moisture.ISMN_preprocessing.ismn_download import (
+    ISMNDownloader,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -126,8 +130,35 @@ def run_pipeline(
     target_depth_m: float = 1.0,
     limit_files: int | None = None,
     verbose: bool = False,
+    download_first: bool = False,
+    staged_raw_dir: str | None = None,
 ) -> None:
     configure_logging(verbose=verbose)
+
+    if download_first:
+        if not staged_raw_dir:
+            staged_raw_dir = f"{output_root.rstrip('/')}/raw_ismn_staging"
+
+        logger.info("Stage 0: Downloading/staging raw ISMN files")
+        downloader = ISMNDownloader(
+            remote_source=raw_ismn_source,
+            local_output_dir=staged_raw_dir,
+            overwrite=False,
+            limit_files=limit_files,
+        )
+        result = downloader.run()
+        logger.info(
+            "Download result: discovered=%d copied=%d skipped=%d",
+            result.discovered_files,
+            result.copied_files,
+            result.skipped_files,
+        )
+
+        # After staging, downstream preprocessing should read local staged files.
+        raw_ismn_source = staged_raw_dir
+
+
+
     fs = fsspec.filesystem("file")
 
     logger.info("Starting ISMN pipeline")
@@ -254,6 +285,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--download-first",
+        action="store_true",
+        help="Download/sync raw ISMN files to a local staging directory before preprocessing",
+    )
+    parser.add_argument(
+        "--staged-raw-dir",
+        default=None,
+        help="Local directory for staged raw ISMN files when --download-first is used",
+    )
+
     return parser
 
 
@@ -271,6 +313,8 @@ def main() -> None:
         target_depth_m=args.target_depth_m,
         limit_files=args.limit_files,
         verbose=args.verbose,
+        download_first=args.download_first,
+        staged_raw_dir=args.staged_raw_dir,
     )
 
 
