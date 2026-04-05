@@ -5,6 +5,7 @@ from functools import lru_cache
 
 import numpy as np
 import pandas as pd
+import fsspec
 
 from data_assimilation_engine.utils.timeseries import (
     DataParser,
@@ -20,14 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def soil_moisture_ts(args_list=None) -> None:
-    """Run soil moisture time series processing.
-
-    Args:
-    ----
-    args_list : list, optional
-        List of command line arguments for programmatic execution
-
-    """
+    """Run soil moisture time series processing."""
     args = get_options(args_list)
     processor = SoilMoistureProcessor(
         csv_directory=args.csv_directory,
@@ -50,26 +44,11 @@ class SoilMoistureProcessor(Processor):
         csv_output: str = None,
         direct_s3: bool = False,
     ):
-        """Initialize Soil Moisture processor with input and output parameters.
-
-        Args:
-        ----
-        csv_directory : str
-            Path to directory containing csv files
-        gpkg_file : str
-            Path to geopackage file with catchment geometries
-        plot_output : str, optional
-            Path where plot should be saved
-        csv_output : str, optional
-            Path where csv data should be saved
-        direct_s3 : bool, optional
-            Whether to use direct S3 access
-
-        """
         super().__init__(csv_directory, gpkg_file, plot_output, csv_output, direct_s3)
         self.variable = "Soil_Moisture"
         self.sim_col_output = "Simulated_Soil_Moisture"
         self.obs_col_output = "SMAP_Soil_Moisture"
+        self.gage_col_output = "ISMN_Soil_Moisture"
 
         self.lfl = SoilMoistureFileLoader(csv_directory, self.gpkg_file)
         self.s3l = SoilMoistureS3Loader(self.basin_id, self.direct_s3)
@@ -80,15 +59,27 @@ class SoilMoistureProcessor(Processor):
     @lru_cache
     @time_function
     def gage_ts(self) -> dict:
-        """Dictionary of SNOTEL timeseries data."""
-        return {}
+        """Dictionary of ISMN basin-average timeseries data.
+
+        Version 1 returns one pseudo-station entry named 'ISMN' backed by the
+        basin-level CSV archive.
+        """
+        gage_df = self.s3l.gage_df
+        if gage_df is None or gage_df.empty:
+            return {}
+
+        values = self.parser.parse_obs_dataframe(gage_df)
+        return {
+            "ISMN": {
+                "soil moisture": values
+            }
+        }
 
 
 class SoilMoisturePlotter(Plotter):
     """Handles visualization of soil moisture data."""
 
     def __init__(self):
-        """Initialize the SoilMoisturePlotter."""
         super().__init__()
         self.variable_name = "Soil Moisture"
         self.variable_units = "m³/m³"
@@ -100,31 +91,31 @@ class SoilMoistureDataParser(DataParser):
     """Parses soil moisture data from various sources."""
 
     def __init__(self, times: np.ndarray, catchment_ids: np.ndarray):
-        """Initialize the DataParser with column names."""
         self.timestamp_col = "timestamp"
         self.basin_avg_col = "basin_avg_soil_moisture"
         self.variable_name = "sm"
         super().__init__(times, catchment_ids)
 
     def check_columns(self, df: pd.DataFrame, file_path: str):
-        """Check that columns exists."""
+        """Check that sm_profile columns exist."""
         columns = [column for column in df.columns if "sm_profile" in column]
         if len(columns) == 0:
-            logger.info(f"{self.variable_name} columns not found in {file_path}")
+            logger.info("sm columns not found in %s", file_path)
             return False
 
         self.columns = columns
         return True
 
     def convert_units(self, df: pd.DataFrame, mask: pd.DataFrame):
-        """Convert Units."""
+        """Return thickness-weighted soil moisture profile average."""
         return np.average(
-            df.loc[mask, self.columns].values, axis=1, weights=self.soil_thickness
+            df.loc[mask, self.columns].values,
+            axis=1,
+            weights=self.soil_thickness,
         )
 
     @property
     def depths(self):
-        """Get depths from column names."""
         depths = []
         for column in self.columns:
             depths.append(
@@ -136,7 +127,6 @@ class SoilMoistureDataParser(DataParser):
 
     @property
     def soil_thickness(self):
-        """Get soil thickness from column names."""
         sorted_depths = sorted(self.depths, reverse=True) + [0]
         soil_thickness = [
             sorted_depths[i] - sorted_depths[i + 1]
@@ -153,35 +143,61 @@ class SoilMoistureDataParser(DataParser):
 class SoilMoistureS3Loader(S3Loader):
     """Handles loading and retrieving soil moisture data from S3."""
 
-    def __init__(self, basin_id: str, direct_s3: bool):
-        """Initialize the SoilMoistureS3Loader with basin ID and S3 options."""
+    def __init__(
+        self,
+        basin_id: str,
+        direct_s3: bool,
+        obs_prefix: str = "ngwpc-forcing/smap_csv",
+        gage_prefix: str = "ngwpc-forcing/ismn_csv",
+    ):
         super().__init__(basin_id, direct_s3)
         self.variable_name = "soil_moisture"
-        # self.gage_prefix = "ngwpc-forcing/snotel_csv"
-        self.obs_prefix = "ngwpc-forcing/smap_csv"
+        self.obs_prefix = obs_prefix
+        self.gage_prefix = gage_prefix
+
+    @property
+    @lru_cache
+    def gage_path(self) -> str:
+        """Construct the basin-level ISMN CSV path."""
+        filename = f"gages-{self.basin_id}_{self.variable_name}.csv"
+        if not self.direct_s3:
+            fs = fsspec.filesystem("local")
+            path = f"{self.s3_mount_point}/{self.gage_prefix}/{filename}"
+            if fs.exists(path):
+                return path
+            raise FileNotFoundError(f"Could not find local ISMN csv file: {path}")
+        else:
+            fs = fsspec.filesystem("s3")
+            uri = f"s3://{self.gage_prefix}/{filename}"
+            if fs.exists(uri):
+                return uri
+            raise FileNotFoundError(f"Could not find ISMN S3 csv file: {uri}")
+
+    @property
+    @lru_cache
+    @time_function
+    def gage_df(self) -> pd.DataFrame | None:
+        """Read basin-level ISMN CSV."""
+        try:
+            with fsspec.open(self.gage_path) as f:
+                return pd.read_csv(f)
+        except Exception as e:
+            logger.info("Error reading ISMN file %s: %s", getattr(self, "gage_path", "unknown"), e)
+            return None
 
 
 class SoilMoistureFileLoader(FileLoader):
     """Handles loading and retrieving soil moisture files."""
 
     def __init__(self, csv_directory: str, gpkg_file: str):
-        """Initialize the SoilMoistureFileLoader with the directory containing CSV files."""
         super().__init__(csv_directory, gpkg_file)
 
     @property
     @lru_cache
     @time_function
     def times(self) -> np.ndarray:
-        """Create an array of 01:28:55 timestamps given start and end date.
-
-        Returns:
-        -------
-        numpy.ndarray
-            Array of datetime objects for each 3-hour interval
-
-        """
-        # Populate with 3-hourly timesteps from within the start and end
-        start_hour = 1 + (3 * round((self.start_date.hour - 1) / 3))  # 01, 04, 07, ...
+        """Create 3-hour timestamps on the 01,04,07,... schedule."""
+        start_hour = 1 + (3 * round((self.start_date.hour - 1) / 3))
         end_hour = 1 + (3 * round((self.end_date.hour - 1) / 3))
 
         if end_hour == 25:
@@ -193,8 +209,9 @@ class SoilMoistureFileLoader(FileLoader):
             np.datetime64(
                 f"{self.start_date.strftime('%Y-%m-%d')} {start_hour:02d}:00:00"
             ),
-            np.datetime64(f"{self.end_date.strftime('%Y-%m-%d')} {end_hour:02d}:00:00"),
-            # + np.timedelta64(1, "D"),
+            np.datetime64(
+                f"{self.end_date.strftime('%Y-%m-%d')} {end_hour:02d}:00:00"
+            ),
             np.timedelta64(3, "h"),
         ).astype("datetime64[ns]")
         return times
