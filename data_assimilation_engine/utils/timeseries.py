@@ -657,16 +657,16 @@ class Plotter:
             for i, (station_id, data) in enumerate(gage_ts.items()):
                 color = cmap(i % 30)
                 gage_key = self.variable_name.lower()
-                    ax.plot(
-                        times,
-                        data[gage_key],
-                        "o-",
-                        markersize=3,
-                        linewidth=1,
-                        alpha=0.7,
-                        color=color,
-                        label=f"{self.gage_type} {station_id}",
-                    )
+                ax.plot(
+                    times,
+                    data[gage_key],
+                    "o-",
+                    markersize=3,
+                    linewidth=1,
+                    alpha=0.7,
+                    color=color,
+                    label=f"{self.gage_type} {station_id}",
+                )
 
         ax.legend()
 

@@ -72,7 +72,7 @@ def load_modeled_basin_ts(csv_directory: str, gpkg_file: str) -> pd.DataFrame:
     file_loader = SoilMoistureFileLoader(csv_directory, gpkg_file)
     parser = SoilMoistureDataParser(file_loader.times, file_loader.ids)
 
-    sim_df = parser.parse_sim_data(csv_directory)
+    sim_df = parser.parse_simulated_data(file_loader.csv_files)
     basin_avg = parser.calculate_basin_average(sim_df, file_loader.catchment_areas)
 
     out = pd.DataFrame(

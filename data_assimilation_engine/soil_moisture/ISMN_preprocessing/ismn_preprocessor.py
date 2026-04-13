@@ -81,6 +81,8 @@ class ISMNPreprocessor:
 
         Returns a station index DataFrame that includes the assigned gage_id.
         """
+        self.fs.makedirs(self.output_root, exist_ok=True)
+
         raw_files = self.discover_stm_files()
         if not raw_files:
             raise FileNotFoundError(f"No .stm files found under {self.raw_ismn_source}")
