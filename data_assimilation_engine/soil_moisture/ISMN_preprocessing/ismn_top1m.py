@@ -16,11 +16,13 @@ logger = logging.getLogger(__name__)
 class QCPolicy:
     """Simple QC policy for version 1.
 
-    Adjust accepted flags once the team confirms the exact ISMN/provider semantics.
+    For now, use only the global ISMN quality flag.
+    Provider/network flags vary by network and need a network-specific policy.
     """
-    accepted_ismn_flags: tuple[str, ...] = ("G", "C", "M", "")  # placeholder
-    accepted_provider_flags: tuple[str, ...] = ("G", "C", "M", "")  # placeholder
-    allow_null_provider_flag: bool = True
+    accepted_ismn_flags: tuple[str, ...] = ("G",)
+    use_provider_flag: bool = False
+
+    # allow_null_provider_flag: bool = True
 
 
 class ISMNTop1MCalculator:
@@ -108,7 +110,17 @@ class ISMNTop1MCalculator:
         return df
 
     def filter_qc(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply a simple, configurable QC policy."""
+        """Apply a simple, configurable QC policy.
+
+        Minimum-change policy for current sample data:
+        - keep only rows with global ISMN flag == 'G'
+        - ignore provider_flag for now
+
+        Reason:
+        - ISMN documentation defines G as good, while C* and D* are problematic,
+          and M is missing. Provider/network flags are network-specific and need a
+          separate interpretation layer.
+        """
         df = df.copy()
 
         def normalize_flag(series: pd.Series) -> pd.Series:
@@ -117,44 +129,76 @@ class ISMNTop1MCalculator:
                 .astype(str)
                 .str.strip()
                 .str.upper()
-            )
+           )
 
-        df["ismn_flag"] = normalize_flag(df.get("ismn_flag", pd.Series(index=df.index, dtype=object)))
-        df["provider_flag"] = normalize_flag(df.get("provider_flag", pd.Series(index=df.index, dtype=object)))
+        df["ismn_flag"] = normalize_flag(
+            df.get("ismn_flag", pd.Series(index=df.index, dtype=object))
+        )
+        df["provider_flag"] = normalize_flag(
+            df.get("provider_flag", pd.Series(index=df.index, dtype=object))
+        )
 
         ismn_ok = df["ismn_flag"].isin(self.qc_policy.accepted_ismn_flags)
 
-        if self.qc_policy.allow_null_provider_flag:
-            provider_ok = df["provider_flag"].isin(self.qc_policy.accepted_provider_flags) | (df["provider_flag"] == "")
-        else:
-            provider_ok = df["provider_flag"].isin(self.qc_policy.accepted_provider_flags)
+        if self.qc_policy.use_provider_flag:
+            # Placeholder for future network-specific provider-flag handling.
+            provider_ok = df["provider_flag"] == ""
+            return df[ismn_ok & provider_ok].copy()
 
-        return df[ismn_ok & provider_ok].copy()
+        return df[ismn_ok].copy()
 
     def compute_group(self, df_group: pd.DataFrame) -> dict | None:
-        """Compute one station timestamp top-1m weighted average."""
+        """Compute one station timestamp top-1m weighted average.
+
+        Supports:
+        - interval depths
+        - point-depth sensors (depth_from == depth_to)
+        """
         overlaps: list[float] = []
         weighted_values: list[float] = []
 
-        for _, row in df_group.iterrows():
-            z0 = max(0.0, float(row["depth_from_m"]))
-            z1 = min(self.target_depth_m, float(row["depth_to_m"]))
-            dz = z1 - z0
-            if dz <= 0.0:
-                continue
+        is_point_depth = bool(
+            (df_group["depth_from_m"].round(10) == df_group["depth_to_m"].round(10)).all()
+        )
 
-            overlaps.append(dz)
-            weighted_values.append(float(row["soil_moisture_m3m3"]) * dz)
+        if is_point_depth:
+            point_depths = df_group["depth_from_m"].to_numpy(dtype=float)
+            depth_weights = self._compute_point_depth_weights(
+                point_depths,
+                self.target_depth_m,
+            )
+
+            for _, row in df_group.iterrows():
+                depth = float(row["depth_from_m"])
+                dz = depth_weights.get(depth, 0.0)
+                if dz <= 0.0:
+                    continue
+
+                overlaps.append(dz)
+                weighted_values.append(float(row["soil_moisture_m3m3"]) * dz)
+
+        else:
+            for _, row in df_group.iterrows():
+                z0 = max(0.0, float(row["depth_from_m"]))
+                z1 = min(self.target_depth_m, float(row["depth_to_m"]))
+                dz = z1 - z0
+                if dz <= 0.0:
+                    continue
+
+                overlaps.append(dz)
+                weighted_values.append(float(row["soil_moisture_m3m3"]) * dz)
 
         if not overlaps:
             return None
 
         total_overlap = float(np.sum(overlaps))
         coverage_fraction = total_overlap / self.target_depth_m
+
         if coverage_fraction < self.min_coverage_fraction:
             return None
 
         first = df_group.iloc[0]
+
         return {
             "gage_id": first["gage_id"],
             "network": first["network"],
@@ -192,6 +236,27 @@ class ISMNTop1MCalculator:
             grouped = grouped.reset_index(drop=True)
 
         return grouped
+
+    @staticmethod
+    def _compute_point_depth_weights(depths: np.ndarray, target_depth_m: float) -> dict[float, float]:
+        """Build representative thickness weights for point-depth sensors."""
+        depths = np.array(sorted(set(float(d) for d in depths if pd.notna(d))), dtype=float)
+        if depths.size == 0:
+            return {}
+
+        midpoints = [(depths[i] + depths[i + 1]) / 2.0 for i in range(len(depths) - 1)]
+
+        lower_bounds = [0.0] + midpoints
+        upper_bounds = midpoints + [target_depth_m]
+
+        weights: dict[float, float] = {}
+        for depth, z0, z1 in zip(depths, lower_bounds, upper_bounds):
+            z0 = max(0.0, z0)
+            z1 = min(target_depth_m, z1)
+            dz = max(0.0, z1 - z0)
+            weights[depth] = dz
+
+        return weights
 
     @staticmethod
     def _merge_station_timestamp_rows(group: pd.DataFrame) -> pd.Series:
