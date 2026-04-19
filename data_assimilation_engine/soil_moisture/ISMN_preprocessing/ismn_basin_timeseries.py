@@ -120,7 +120,13 @@ class ISMNBasinTimeseriesBuilder:
                 self._discover_parquet_files(entry_path, found)
 
     def prepare_station_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize expected columns and apply basic filtering."""
+        """Normalize expected columns and apply basic filtering.
+
+        Important:
+        - true integrated rows still use coverage_fraction filtering
+        - single_depth_proxy rows are allowed through even when their
+          coverage_fraction is 0.0
+        """
         required_cols = {
             "gage_id",
             "network",
@@ -134,25 +140,49 @@ class ISMNBasinTimeseriesBuilder:
         }
         missing = required_cols.difference(df.columns)
         if missing:
-            raise ValueError(f"Station top-1m data missing required columns: {sorted(missing)}")
+            raise ValueError(
+                f"Station top-1m data missing required columns: {sorted(missing)}"
+            )
 
         df = df.copy()
+
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
         df["soil_moisture"] = pd.to_numeric(df["soil_moisture"], errors="coerce")
         df["valid_thickness_m"] = pd.to_numeric(df["valid_thickness_m"], errors="coerce")
         df["coverage_fraction"] = pd.to_numeric(df["coverage_fraction"], errors="coerce")
         df["n_layers_used"] = pd.to_numeric(df["n_layers_used"], errors="coerce")
 
+        if "method_used" not in df.columns:
+            df["method_used"] = "unknown"
+        else:
+            df["method_used"] = (
+                df["method_used"]
+                .fillna("unknown")
+                .astype(str)
+                .str.strip()
+            )
+
+        if "num_depths" not in df.columns:
+            df["num_depths"] = 1
+        else:
+            df["num_depths"] = pd.to_numeric(df["num_depths"], errors="coerce").fillna(1).astype(int)
+
         df = df.dropna(subset=["gage_id", "timestamp", "soil_moisture"])
         df = df[df["soil_moisture"].between(0.0, 1.0, inclusive="both")]
 
         if self.config.min_station_coverage_fraction > 0.0:
-            df = df[df["coverage_fraction"] >= self.config.min_station_coverage_fraction]
+            proxy_mask = df["method_used"] == "single_depth_proxy"
+            coverage_mask = df["coverage_fraction"] >= self.config.min_station_coverage_fraction
+            df = df[proxy_mask | coverage_mask].copy()
 
         return df
 
     def aggregate_to_basin(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Aggregate station-level rows to basin-level time series."""
+        """Aggregate station-level rows to basin-level time series.
+
+        Proxy rows are allowed to contribute to the basin average, but metadata
+        for coverage/thickness should only reflect truly integrated rows.
+        """
         basin_rows: list[dict] = []
         meta_rows: list[dict] = []
 
@@ -167,6 +197,21 @@ class ISMNBasinTimeseriesBuilder:
             if basin_value is None or np.isnan(basin_value):
                 continue
 
+            real_mask = group["method_used"] != "single_depth_proxy"
+            proxy_station_count = int((group["method_used"] == "single_depth_proxy").sum())
+            integrated_station_count = int(real_mask.sum())
+
+            if real_mask.any():
+                mean_station_coverage_fraction = float(group.loc[real_mask, "coverage_fraction"].mean())
+                min_station_coverage_fraction = float(group.loc[real_mask, "coverage_fraction"].min())
+                max_station_coverage_fraction = float(group.loc[real_mask, "coverage_fraction"].max())
+                mean_valid_thickness_m = float(group.loc[real_mask, "valid_thickness_m"].mean())
+            else:
+                mean_station_coverage_fraction = 0.0
+                min_station_coverage_fraction = 0.0
+                max_station_coverage_fraction = 0.0
+                mean_valid_thickness_m = 0.0
+
             basin_rows.append(
                 {
                     "gage_id": str(gage_id),
@@ -180,11 +225,14 @@ class ISMNBasinTimeseriesBuilder:
                     "gage_id": str(gage_id),
                     "timestamp": timestamp,
                     "station_count": station_count,
+                    "proxy_station_count": proxy_station_count,
+                    "integrated_station_count": integrated_station_count,
                     "stations_used": ";".join(sorted(group["station_key"].astype(str).unique())),
-                    "mean_station_coverage_fraction": float(group["coverage_fraction"].mean()),
-                    "min_station_coverage_fraction": float(group["coverage_fraction"].min()),
-                    "max_station_coverage_fraction": float(group["coverage_fraction"].max()),
-                    "mean_valid_thickness_m": float(group["valid_thickness_m"].mean()),
+                    "mean_station_coverage_fraction": mean_station_coverage_fraction,
+                    "min_station_coverage_fraction": min_station_coverage_fraction,
+                    "max_station_coverage_fraction": max_station_coverage_fraction,
+                    "mean_valid_thickness_m": mean_valid_thickness_m,
+                    "methods_used": ";".join(sorted(group["method_used"].astype(str).unique())),
                 }
             )
 
@@ -289,6 +337,8 @@ class ISMNBasinTimeseriesBuilder:
                 meta_df.groupby("gage_id", dropna=False)
                 .agg(
                     mean_station_count=("station_count", "mean"),
+                    mean_proxy_station_count=("proxy_station_count", "mean"),
+                    mean_integrated_station_count=("integrated_station_count", "mean"),
                     mean_station_coverage_fraction=("mean_station_coverage_fraction", "mean"),
                 )
                 .reset_index()
