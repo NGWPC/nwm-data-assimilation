@@ -56,13 +56,39 @@ class ISMNTop1MCalculator:
                     "valid_thickness_m",
                     "coverage_fraction",
                     "n_layers_used",
+                    "method_used",
+                    "num_depths",
                 ]
             )
 
         df = self._prepare(raw_df)
+
+        # Build nominal station depth inventory BEFORE QC filtering so that
+        # point-depth weighting knows the intended profile structure even when
+        # only a subset of depths survives QC at a given timestamp.
+        self._station_depth_inventory = (
+            df.groupby("station_key", dropna=False)["depth_from_m"]
+            .apply(lambda s: tuple(sorted(set(float(v) for v in s.dropna().tolist()))))
+            .to_dict()
+        )
+
         df = self.filter_qc(df)
         if df.empty:
-            return pd.DataFrame()
+            return pd.DataFrame(
+                columns=[
+                    "gage_id",
+                    "network",
+                    "station",
+                    "station_key",
+                    "timestamp",
+                    "soil_moisture",
+                    "valid_thickness_m",
+                    "coverage_fraction",
+                    "n_layers_used",
+                    "method_used",
+                    "num_depths",
+                ]
+            )
 
         grouped = df.groupby(
             ["gage_id", "network", "station", "station_key", "timestamp"],
@@ -81,7 +107,9 @@ class ISMNTop1MCalculator:
 
         out = self.align_to_soil_moisture_cycle(out)
         out = self._collapse_duplicate_station_timestamps(out)
-        return out.sort_values(["gage_id", "network", "station", "timestamp"]).reset_index(drop=True)
+        return out.sort_values(
+            ["gage_id", "network", "station", "timestamp"]
+        ).reset_index(drop=True)
 
     def _prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -150,21 +178,46 @@ class ISMNTop1MCalculator:
     def compute_group(self, df_group: pd.DataFrame) -> dict | None:
         """Compute one station timestamp top-1m weighted average.
 
-        Supports:
-        - interval depths
-        - point-depth sensors (depth_from == depth_to)
+        Strict physical version:
+        1. True depth intervals: depth_from_m < depth_to_m
+        2. Point-depth sensors with multiple nominal station depths:
+           use midpoint-derived representative weights
+        3. Single-depth cases are rejected because they do not support a
+           physically defensible top-1m estimate.
         """
         overlaps: list[float] = []
         weighted_values: list[float] = []
+
+        first = df_group.iloc[0]
+        station_key = first["station_key"]
+
+        available_depths = sorted(
+            set(
+                float(d)
+                for d in df_group["depth_from_m"].to_numpy(dtype=float)
+                if pd.notna(d)
+            )
+        )
+        num_available_depths = len(available_depths)
+
+        nominal_depths = self._get_station_depth_inventory(station_key, available_depths)
+        num_nominal_depths = len(nominal_depths)
 
         is_point_depth = bool(
             (df_group["depth_from_m"].round(10) == df_group["depth_to_m"].round(10)).all()
         )
 
+        method_used = "unknown"
+
+        # Case 1: point-depth sensors
         if is_point_depth:
-            point_depths = df_group["depth_from_m"].to_numpy(dtype=float)
+            # Reject single-depth profiles: not enough information for top-1m
+            if num_nominal_depths <= 1:
+                return None
+
+            # Build representative weights from the station's full nominal depth profile
             depth_weights = self._compute_point_depth_weights(
-                point_depths,
+                np.array(nominal_depths, dtype=float),
                 self.target_depth_m,
             )
 
@@ -177,6 +230,18 @@ class ISMNTop1MCalculator:
                 overlaps.append(dz)
                 weighted_values.append(float(row["soil_moisture_m3m3"]) * dz)
 
+            if not overlaps:
+                return None
+
+            total_overlap = float(np.sum(overlaps))
+            coverage_fraction = total_overlap / self.target_depth_m
+
+            if coverage_fraction < self.min_coverage_fraction:
+                return None
+
+            method_used = "point_depth_midpoint"
+
+        # Case 2: true intervals
         else:
             for _, row in df_group.iterrows():
                 z0 = max(0.0, float(row["depth_from_m"]))
@@ -188,16 +253,16 @@ class ISMNTop1MCalculator:
                 overlaps.append(dz)
                 weighted_values.append(float(row["soil_moisture_m3m3"]) * dz)
 
-        if not overlaps:
-            return None
+            if not overlaps:
+                return None
 
-        total_overlap = float(np.sum(overlaps))
-        coverage_fraction = total_overlap / self.target_depth_m
+            total_overlap = float(np.sum(overlaps))
+            coverage_fraction = total_overlap / self.target_depth_m
 
-        if coverage_fraction < self.min_coverage_fraction:
-            return None
+            if coverage_fraction < self.min_coverage_fraction:
+                return None
 
-        first = df_group.iloc[0]
+            method_used = "interval_overlap"
 
         return {
             "gage_id": first["gage_id"],
@@ -209,6 +274,8 @@ class ISMNTop1MCalculator:
             "valid_thickness_m": total_overlap,
             "coverage_fraction": coverage_fraction,
             "n_layers_used": len(overlaps),
+            "method_used": method_used,
+            "num_depths": num_nominal_depths,
         }
 
     def align_to_soil_moisture_cycle(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -258,15 +325,36 @@ class ISMNTop1MCalculator:
 
         return weights
 
+    def _get_station_depth_inventory(self, station_key: str, fallback_depths: list[float]) -> list[float]:
+        """Return nominal depth inventory for a station.
+
+        Uses the full station profile seen before QC filtering. Falls back to the
+        current group's depths if the station is not found in the inventory.
+        """
+        inventory = getattr(self, "_station_depth_inventory", {})
+        depths = inventory.get(station_key)
+        if depths is None or len(depths) == 0:
+            return sorted(set(float(d) for d in fallback_depths if pd.notna(d)))
+        return list(depths)
+
     @staticmethod
     def _merge_station_timestamp_rows(group: pd.DataFrame) -> pd.Series:
         """Merge duplicate snapped station timestamps using coverage-weighted averaging."""
         weights = group["valid_thickness_m"].to_numpy(dtype=float)
         vals = group["soil_moisture"].to_numpy(dtype=float)
 
-        soil_moisture = np.average(vals, weights=weights) if np.sum(weights) > 0 else np.nan
+        if np.sum(weights) > 0:
+            soil_moisture = np.average(vals, weights=weights)
+        else:
+            soil_moisture = np.mean(vals) if len(vals) > 0 else np.nan
 
         first = group.iloc[0]
+
+        # If any row used a true weighted method, keep the max thickness/coverage.
+        # If all rows are single-depth proxy, these remain 0.
+        method_used = ";".join(sorted(set(group.get("method_used", pd.Series(dtype=str)).astype(str))))
+        num_depths = int(np.max(group.get("num_depths", pd.Series([1] * len(group)))))
+
         return pd.Series(
             {
                 "gage_id": first["gage_id"],
@@ -278,5 +366,7 @@ class ISMNTop1MCalculator:
                 "valid_thickness_m": float(np.max(group["valid_thickness_m"])),
                 "coverage_fraction": float(np.max(group["coverage_fraction"])),
                 "n_layers_used": int(np.max(group["n_layers_used"])),
+                "method_used": method_used,
+                "num_depths": num_depths,
             }
         )
