@@ -1,11 +1,15 @@
 import os
+import json
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import xarray as xr
 import dask.array as da
 import time
 import fiona
 from shapely.geometry import Point
+from shapely.ops import unary_union
+from shapely import contains_xy
 from pyproj import CRS
 from typing import List, Optional
 from .DataReader import DataReader
@@ -15,14 +19,15 @@ class DataProcessor(DataReader):
     """
     Handles catchment-time NetCDF and grid generation.
     """
-    def __init__(self, netcdf_file: str, gpkg_file: str, template_grid_file: str,
+    def __init__(self, catchment_output_netcdf_file: str, gpkg_file: str, template_grid_file: str, 
+                  config_path: str, output_class: str, category: str, domain: str,
                  produce_template: bool, produce_output: bool, chunk_size: int = 100) -> None:
-        super().__init__(netcdf_file, chunk_size)
+        super().__init__(catchment_output_netcdf_file, chunk_size)
 
-        self.input_ds: xr.Dataset = self.dataset
-        self.output_variables = list(self.input_ds.data_vars)
+        self.catchment_ds: xr.Dataset = self.dataset
+        self.output_variables = list(self.catchment_ds.data_vars)
         # Normalize catchment ids in netcdf with a cat- prefix for consistency.
-        self.nc_catchments = self._normalize_catchment_ids(self.input_ds[self.catchment_coord].values)
+        self.nc_catchments = self._normalize_catchment_ids(self.catchment_ds[self.catchment_coord].values)
 
         # Read geopackage, determine schema and "divides" layer
         self.is_new_NHF_schema: bool = self._is_new_NHF_schema(gpkg_file, "reference_flowpaths")
@@ -46,19 +51,29 @@ class DataProcessor(DataReader):
             raise ValueError("There is a mistmatch between catchment IDs in geopackage and netcdf")   
 
         if produce_template:
-            self.create_template_grid_netcdf_from_geopackage(gpkg_gdf, template_grid_file)
-        self.ds_grid = xr.open_dataset(template_grid_file)
-        
-        # explicitly set CRS to CONUS. 
-        # TO DO: Read an existing NWM grid file for CRS info 
-        self.ds_grid = self.ds_grid.rio.write_crs("EPSG:5070") 
+            self.obsolete_create_template_grid_netcdf_from_geopackage(gpkg_gdf, template_grid_file)
+        self.ds_template_grid = xr.open_dataset(template_grid_file)
 
+        # if produce_output: # Old workflow
+        #     self.grid_points = self.obsolete_build_grid_centroids()
+        #     self.obsolete_build_grid_lookup(gpkg_gdf)
+        #     output_path = 'sample_data/sample_netcdf/sample_output/final_test' #Change this to command line argument later
+        #     start_time = time.perf_counter()
+        #     self.obsolete_create_grids_per_timestep_dask(output_path)
+        #     end_time = time.perf_counter()
+        #     duration_minutes = (end_time - start_time) / 60
+        #     print(f"Function execution time: {duration_minutes:.4f} minutes")
+        if produce_template:
+            self.create_template_grid_netcdf_using_config(gpkg_gdf, template_grid_file,
+                                                          config_path, output_class, category, domain)
+        self.ds_template_grid = xr.open_dataset(template_grid_file)
+        
         if produce_output:
-            self.grid_points = self.build_grid_centroids()
-            self.build_grid_lookup(gpkg_gdf)
-            output_path = 'sample_data/sample_netcdf/sample_output/final_test' #Change this to command line argument later
+            catchment_grid = self.build_catchment_id_grid(template_grid_file, gpkg_gdf, "x", "y") # Change hardcoded values later
+            mapped_grid = self.map_catchment_data_to_grid(catchment_grid,catchment_output_netcdf_file, "catchments","time") # Change hardcoded values later
+            output_dir = 'sample_data/sample_netcdf/sample_output/final_test' #Change this to command line argument later
             start_time = time.perf_counter()
-            self.create_grids_per_timestep_dask(output_path)
+            self.write_netcdf_per_timestep(mapped_grid, output_dir, "time")
             end_time = time.perf_counter()
             duration_minutes = (end_time - start_time) / 60
             print(f"Function execution time: {duration_minutes:.4f} minutes")
@@ -84,8 +99,15 @@ class DataProcessor(DataReader):
         ])
         return normalized
     
-    def create_template_grid_netcdf_from_geopackage(self, geopackage_gdf: gpd.GeoDataFrame, output_grid_netcdf: str,
-                                                    resolution: int = 1000, epsg_code: int = 5070) -> None:
+    def _snap_to_grid(value: float, origin: float, resolution: int, direction: np.ufunc):
+        if direction == np.floor:
+            return origin + np.floor((value - origin) / resolution) * resolution
+        elif direction == np.ceil:
+            return origin + np.ceil((value - origin) / resolution) * resolution
+    
+    def obsolete_create_template_grid_netcdf_from_geopackage(self, geopackage_gdf: gpd.GeoDataFrame, output_grid_netcdf: str,
+                                                    resolution: int, epsg_code: int, origin_x: float,
+                                                    origin_y: float) -> None:
         """
         Create a NetCDF grid with 1 km x 1 km resolution 
         covering the extent of catchment polygons.
@@ -99,12 +121,16 @@ class DataProcessor(DataReader):
 
             # Get bounding box
             minx, miny, maxx, maxy = gdf.total_bounds
-            
-            # Create grid coordinates and default to zero for the data
-            x_coords = np.arange(minx, maxx + resolution, resolution)
-            y_coords = np.arange(miny, maxy + resolution, resolution)
-            grid_data = np.zeros((len(y_coords), len(x_coords)))
 
+            snapped_minx = self._snap_to_grid(minx, origin_x, resolution, np.floor)
+            snapped_maxx = self._snap_to_grid(maxx, origin_x, resolution, np.ceil)
+            snapped_miny = self._snap_to_grid(miny, origin_y, resolution, np.floor)
+            snapped_maxy = self._snap_to_grid(maxy, origin_y, resolution, np.ceil)
+            
+            # Create grid coordinates 
+            x_coords = np.arange(snapped_minx, snapped_maxx + resolution, resolution)
+            y_coords = np.arange(snapped_miny, snapped_maxy + resolution, resolution)
+            
             ds = xr.Dataset(
                 coords={
                     "x": ("x", x_coords),
@@ -129,28 +155,128 @@ class DataProcessor(DataReader):
             ds.to_netcdf(output_grid_netcdf)
             print(f"NetCDF template grid written to {output_grid_netcdf}")
     
-    def build_grid_centroids(self) -> gpd.GeoDataFrame:
+    def create_template_grid_netcdf_using_config(self, geopackage_gdf: gpd.GeoDataFrame, template_grid_netcdf_path: str,
+        config_path: str,
+        output_class: str,
+        category: str,
+        domain: str
+    ) -> None:
+        """
+        Create a template grid aligned to a reference grid defined in config.json.
+        """
+        # Read config file
+        with open(config_path, "r") as f:
+            config = json.load(f)
+
+        # Find matching entry
+        entry = next((c_item for c_item in config if 
+              c_item["class"] == output_class and 
+              c_item["category"] == category and 
+              c_item["domain"] == domain), None)
+        if entry is None:
+            raise ValueError(f"Cannot find a config file entry that matches {output_class}, {category} and {domain}")
+
+        origin_x = entry["origin"]["x"]
+        origin_y = entry["origin"]["y"]
+        res_x = entry["resolution"]["x"]
+        res_y = entry["resolution"]["y"]
+        wkt = entry["crs_wkt"]
+        file_name = entry["file_path"]
+        x_name = entry["location_name"]["x"]
+        y_name = entry["location_name"]["y"]
+
+        ds = xr.open_dataset(file_name)
+        target_crs = None
+        if not ds.rio.crs:
+            # Try CF convention (grid_mapping)
+            for var in ds.variables:
+                if "grid_mapping" in ds[var].attrs:
+                    grid_map_var = ds[var].attrs["grid_mapping"]
+                    target_crs = ds[grid_map_var].attrs.get("crs_wkt", None)
+                    break
+            if target_crs is None:
+                raise ValueError("CRS not found in NetCDF file.")
+            ds = ds.rio.write_crs(target_crs)
+        else:
+            target_crs = ds.rio.crs
+
+        # Alternate for CRS. Commented for now.
+        # TO DO: Add a check when wkt is not available. 
+        # target_crs = CRS.from_user_input(wkt)
+        
+        gdf = geopackage_gdf.to_crs(target_crs)
+        geom = unary_union(gdf.geometry) 
+        
+        # Get bounding box and snap to origin in config
+        minx, miny, maxx, maxy = gdf.total_bounds
+
+        snapped_minx = self._snap_to_grid(minx, origin_x, res_x, np.floor)
+        snapped_maxx = self._snap_to_grid(maxx, origin_x, res_x, np.ceil)
+        snapped_miny = self._snap_to_grid(miny, origin_y, res_y, np.floor)
+        snapped_maxy = self._snap_to_grid(maxy, origin_y, res_y, np.ceil)
+
+        ds_subset = ds.sel(
+            {
+                x_name: slice(snapped_minx, snapped_maxx),
+                y_name: slice(snapped_miny, snapped_maxy),
+            }
+        )
+        x_subset = self.ds_grid[x_name].values
+        y_subset = self.ds_grid[y_name].values
+        xx, yy = np.meshgrid(x_subset, y_subset)
+
+        mask = contains_xy(geom, xx, yy)
+        ds_masked = ds_subset.where(mask)
+        # Drop empty rows/cols that are outside of the polygon boundary
+        ds_clipped = ds_masked.dropna(dim=y_name, how="all")
+        ds_clipped = ds_clipped.dropna(dim=x_name, how="all")
+        ds_clipped = ds_clipped.rio.write_crs(target_crs)
+        ds_clipped["crs"] = ([], 0)
+        ds_clipped["crs"].attrs["spatial_ref"] = wkt
+        ds_clipped["crs"].attrs["esri_pe_string"] = wkt
+
+        # Save
+        ds.to_netcdf(template_grid_netcdf_path)
+        print(f"NetCDF template grid written to {template_grid_netcdf_path}")
+
+    def obsolete_build_grid_centroids(self) -> gpd.GeoDataFrame:
         """
         Create GeoDataFrame of grid cell centroids.
         """
-        x = self.ds_grid["x"].values
-        y = self.ds_grid["y"].values
+        # To do: Replace x, y with the actual x and y names in the netcdf
+        x = self.ds_template_grid["x"].values
+        y = self.ds_template_grid["y"].values
         xx, yy = np.meshgrid(x, y)
         points = [Point(px, py) for px, py in zip(xx.ravel(), yy.ravel())]
         
         return gpd.GeoDataFrame(
             {"cell_index": np.arange(len(points))},
             geometry=points,
-            crs=self.ds_grid.rio.crs
+            crs=self.ds_template_grid.rio.crs
         )
 
-    def build_grid_lookup(self, catchment_gdf: gpd.GeoDataFrame) -> None:
+    def obsolete_build_grid_lookup(self, catchment_gdf: gpd.GeoDataFrame) -> None:
         """
         Build the grid-to-catchment mapping (vectorized index array).
         Must be called just once before generating grids for every timestep.
         """
         # Spatial join
         # TO DO: Have to determine if there are other methods that are less expensive computationally.
+
+        target_crs = None
+        if not ds.rio.crs:
+            # Try CF convention (grid_mapping)
+            for var in ds.variables:
+                if "grid_mapping" in ds[var].attrs:
+                    grid_map_var = ds[var].attrs["grid_mapping"]
+                    target_crs = ds[grid_map_var].attrs.get("crs_wkt", None)
+                    break
+            if target_crs is None:
+                raise ValueError("CRS not found in NetCDF file.")
+            ds = ds.rio.write_crs(target_crs)
+        else:
+            target_crs = ds.rio.crs
+
         joined = gpd.sjoin(
             self.grid_points,
             catchment_gdf[[self.catchment_field, "geometry"]],
@@ -165,32 +291,32 @@ class DataProcessor(DataReader):
         self.grid_to_catchment = grid_to_catchment
         print("Grid-to-catchment mapping built!")
 
-    def _build_crs_variable(self, ds_out: xr.Dataset) -> xr.Dataset:
+    def _obsolete_build_crs_variable(self, ds: xr.Dataset, crs_wkt: str | None = None) -> xr.Dataset:
         """
         Build CF-compliant CRS variable from a template NWM grid.
         Currently, this is not using the template NWM grid. It uses catchment grid instead.
         """
 
         # Get CRS from template
-        crs_obj = CRS.from_user_input(self.ds_grid.rio.crs)
+        crs_obj = CRS.from_user_input(ds.rio.crs)
 
         # Convert to CF dict
         cf_attrs = crs_obj.to_cf()
 
         # Create CRS variable
-        ds_out["crs"] = xr.DataArray(0)
+        ds["crs"] = xr.DataArray(0)
 
         # Assign CF attributes
-        ds_out["crs"].attrs.update(cf_attrs)
+        ds["crs"].attrs.update(cf_attrs)
 
         # Add WKT (for QGIS)
         wkt = crs_obj.to_wkt()
-        ds_out["crs"].attrs["spatial_ref"] = wkt
-        ds_out["crs"].attrs["esri_pe_string"] = wkt
+        ds["crs"].attrs["spatial_ref"] = wkt
+        ds["crs"].attrs["esri_pe_string"] = wkt
 
         # Add GeoTransform
-        x = ds_out["x"].values
-        y = ds_out["y"].values
+        x = ds["x"].values
+        y = ds["y"].values
 
         dx = float(x[1] - x[0])
         dy = float(y[1] - y[0])
@@ -198,16 +324,37 @@ class DataProcessor(DataReader):
         xmin = float(x[0] - dx / 2)
         ymax = float(y[-1] + dy / 2)
 
-        ds_out["crs"].attrs["GeoTransform"] = f"{xmin} {dx} 0 {ymax} 0 {-dy}"
+        ds["crs"].attrs["GeoTransform"] = f"{xmin} {dx} 0 {ymax} 0 {-dy}"
 
         # Optional (additional metadata)
-        ds_out["crs"].attrs["_CoordinateAxes"] = "y x"
-        ds_out["crs"].attrs["_CoordinateTransformType"] = "Projection"
-        ds_out["crs"].attrs["long_name"] = "CRS definition"
+        ds["crs"].attrs["_CoordinateAxes"] = "y x"
+        ds["crs"].attrs["_CoordinateTransformType"] = "Projection"
+        ds["crs"].attrs["long_name"] = "CRS definition"
 
-        return ds_out
+        return ds
+    
+    def _build_crs_variable(self, ds: xr.Dataset, crs: str) -> xr.Dataset:
+        """
+        Ensures dataset is fully CF + GDAL compliant with CRS.
+        """
 
-    def create_grids_per_timestep(self, output_dir: str) -> None:
+        # Write CRS using rioxarray
+        ds = ds.rio.write_crs(crs)
+
+        # Build CF-compliant grid_mapping variable
+        wkt = crs.to_wkt()
+
+        ds["crs"] = ([], 0)
+        ds["crs"].attrs["spatial_ref"] = wkt
+        ds["crs"].attrs["esri_pe_string"] = wkt
+
+        # Link all variables to CRS
+        for var in ds.data_vars:
+            ds[var].attrs["grid_mapping"] = "crs"
+
+        return ds
+
+    def obsolete_create_grids_per_timestep(self, output_dir: str) -> None:
         """
         Generates netcdf grids per timestep for all the variables in the catchments netcdf.
         """
@@ -218,12 +365,12 @@ class DataProcessor(DataReader):
         
         # may be a robust approach is not to consider "time". Instead use
         # np.issubdtype(coord.dtype, np.datetime64)?
-        time_dim = next(dim for dim in self.input_ds.dims if "time" in dim.lower())
+        time_dim = next(dim for dim in self.catchment_ds.dims if "time" in dim.lower())
         reference_time = np.datetime64('1970-01-01T00:00:00')
         
-        for t in self.input_ds[time_dim].values:
+        for t in self.catchment_ds[time_dim].values:
             print(f"Processing timestep: {t}")
-            ds_t = self.input_ds.sel({time_dim: t})
+            ds_t = self.catchment_ds.sel({time_dim: t})
             ds_out = self.ds_grid.copy(deep=True)
             
             time_value_min = (t - reference_time) / np.timedelta64(1, 'm')
@@ -253,7 +400,7 @@ class DataProcessor(DataReader):
             output_file = os.path.join(output_dir, f"grid_{formatted_t}.nc")
             ds_out.to_netcdf(output_file)
 
-    def create_grids_per_timestep_dask(self, output_dir: str, chunk_size: int = 1000) -> None:
+    def obsolete_create_grids_per_timestep_dask(self, output_dir: str, chunk_size: int = 1000) -> None:
         """
         Generates netcdf grids per timestep for all the variables in the catchments netcdf.
         """
@@ -273,9 +420,9 @@ class DataProcessor(DataReader):
         valid_mask_da = da.from_array(valid_mask, chunks=chunk_size)
 
         # Rechunk by time dimension as we are processing one timestep at a time
-        time_dim = next(dim for dim in self.input_ds.dims if np.issubdtype(self.input_ds[dim].dtype, np.datetime64))
+        time_dim = next(dim for dim in self.catchment_ds.dims if np.issubdtype(self.catchment_ds[dim].dtype, np.datetime64))
         reference_time = np.datetime64('1970-01-01T00:00:00')
-        ds_in = self.input_ds.chunk({time_dim: 1})
+        ds_in = self.catchment_ds.chunk({time_dim: 1})
 
         for t in ds_in[time_dim].values:
             print(f"Processing timestep: {t}")
@@ -321,3 +468,163 @@ class DataProcessor(DataReader):
             formatted_t = t_str.replace('-', '_').replace(':', '_')
             output_file = os.path.join(output_dir, f"grid_{formatted_t}.nc")
             ds_out.to_netcdf(output_file)
+
+    def build_catchment_id_grid(self, template_nc_path: str, gpkg_gdf: gpd.GeoDataFrame, 
+        x_dim: str = "x",
+        y_dim: str = "y",
+    ) -> xr.DataArray:
+        """
+        Returns a DataArray (y, x) where each cell contains a catchment ID.
+        """
+        ds = xr.open_dataset(template_nc_path) #alternatively, we can use self.ds_template_grid?
+        x = ds[x_dim].values
+        y = ds[y_dim].values
+
+        # Origin point is assumed to be bottom-left. It may be others too.
+        # So, sort the values for consistency
+        if x[0] > x[-1]:
+            ds = ds.sortby(x_dim)
+            x = ds[x_dim].values
+        if y[0] > y[-1]:
+            ds = ds.sortby(y_dim)
+            y = ds[y_dim].values
+
+        # Build centroid points and create geodataframe
+        xx, yy = np.meshgrid(x, y)
+        df_points = pd.DataFrame({
+            "x": xx.ravel(),
+            "y": yy.ravel()
+        })
+        gdf_ncgrid_points = gpd.GeoDataFrame(
+            df_points,
+            geometry=gpd.points_from_xy(df_points["x"], df_points["y"]),
+            crs=ds.rio.crs
+        )
+
+        # Spatial join with catchments for grid point to catchment association
+        gdf_poly = gpkg_gdf.to_crs(ds.rio.crs)
+        joined = gpd.sjoin(
+            gdf_ncgrid_points,
+            gdf_poly[[self.catchment_field, "geometry"]],
+            how="left",
+            predicate="within"
+        )
+        catchment_ids = joined[self.catchment_field].to_numpy()
+        catchment_grid = catchment_ids.reshape(len(y), len(x))
+
+        return xr.DataArray(
+            catchment_grid,
+            dims=(y_dim, x_dim),
+            coords={y_dim: y, x_dim: x},
+            name="catchment_id"
+        )
+    
+    def map_catchment_data_to_grid(self, catchment_grid: xr.DataArray,
+                                   catchment_dim: str = "catchments", time_dim: str = "time"
+    ) -> xr.Dataset:
+        """
+        Broadcast catchment-based variables onto grid using catchment_id grid.
+        """
+
+        ds_data = self.catchment_ds
+
+        # Convert catchment IDs to index positions
+        catchment_ids = ds_data[catchment_dim].values
+
+        # Build mapping: catchment_id -> index
+        id_to_index = {cid: i for i, cid in enumerate(catchment_ids)}
+
+        # Convert grid IDs to indices
+        grid_index = xr.apply_ufunc(
+            np.vectorize(lambda x: id_to_index.get(x, -1)),
+            catchment_grid,
+            vectorize=True,
+            dask="parallelized",
+            output_dtypes=[int]
+        )
+
+        # Mask invalid cells
+        valid_mask = grid_index >= 0
+
+        out_vars = {}
+
+        for var in ds_data.data_vars:
+            if catchment_dim not in ds_data[var].dims:
+                continue
+            data = ds_data[var]
+            mapped = data.isel({catchment_dim: grid_index})
+            mapped = mapped.where(valid_mask)
+            out_vars[var] = mapped
+
+        ds_out = xr.Dataset(out_vars)
+
+        # Attach coordinates from template
+        ds_out = ds_out.assign_coords({
+            "x": self.ds_template_grid["x"],
+            "y": self.ds_template_grid["y"]
+        })
+
+        # Add CRS
+        ds_out = self._build_crs_variable(ds_out, self.ds_template_grid.rio.crs)
+
+        return ds_out
+
+    def write_netcdf_per_timestep(mapped_grid: xr.Dataset, output_dir: str, time_dim: str = "time") -> None:
+        """
+        Writes one NetCDF per timestep.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        reference_time = np.datetime64("1970-01-01T00:00:00")
+
+        for t in mapped_grid[time_dim].values:
+            ds_t = mapped_grid.sel({time_dim: t}).copy()
+            time_value_min = (t - reference_time) / np.timedelta64(1, "m") # time to CF format
+            ds_t = ds_t.expand_dims({time_dim: [time_value_min]})
+            ds_t[time_dim].attrs["units"] = "minutes since 1970-01-01 00:00:00 UTC"
+            ds_t[time_dim].attrs["standard_name"] = "time"
+
+            # Output filename and save
+            t_str = np.datetime_as_string(t, unit='s') 
+            formatted_t = t_str.replace('-', '_').replace(':', '_')
+            output_file = os.path.join(output_dir, f"grid_{formatted_t}.nc")
+            ds_t.to_netcdf(output_file)
+
+    def merge_basin_netcdfs(nc_files: list[str], fill_value: float | None = None, check_crs: bool = True
+    ) -> xr.Dataset:
+        """
+        Merge multiple NetCDF subsets.
+
+        Assumes:
+        - Same grid resolution
+        - Same coordinate system
+        - Non-overlapping or safely overlapping regions
+        """
+
+        datasets = [xr.open_dataset(f) for f in nc_files]
+
+        # Check CRS and confirm that they are the same for all the netcdf files
+        if check_crs:
+            crs_list = []
+            for ds in datasets:
+                if ds.rio.crs:
+                    crs_list.append(ds.rio.crs.to_string())
+                else:
+                    raise ValueError("One dataset missing CRS")
+            if len(set(crs_list)) != 1:
+                raise ValueError("CRS mismatch between datasets")
+
+        # Use Merge or combine_by_coords to combine the NetCDFs
+        ds_combined = xr.combine_by_coords(datasets, combine_attrs="override")
+
+        for dim in ds_combined.dims: 
+            ds_combined = ds_combined.sortby(dim) # Sort (for consistency)
+
+        # To do: Alternate approach is to use Merge. Pick one of the two methods after testing.
+        # compat='no_conflicts' ensures overlapping non-null values must agree
+        #ds_combined = xr.merge(datasets, compat="no_conflicts")
+
+        # --- Optional fill ---
+        if fill_value is not None:
+            ds_merged = ds_merged.fillna(fill_value)
+
+        return ds_combined
