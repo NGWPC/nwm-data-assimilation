@@ -9,7 +9,7 @@ import time
 import fiona
 from shapely.geometry import Point
 from shapely.ops import unary_union
-from shapely import contains_xy
+from shapely import intersects_xy
 from pyproj import CRS
 from typing import List, Optional
 from .DataReader import DataReader
@@ -19,7 +19,7 @@ class DataProcessor(DataReader):
     """
     Handles catchment-time NetCDF and grid generation.
     """
-    def __init__(self, catchment_output_netcdf_file: str, gpkg_file: str, template_grid_file: str, 
+    def __init__(self, catchment_output_netcdf_file: str, gpkg_file: str, template_grid_file_name: str, 
                   config_path: str, output_class: str, category: str, domain: str,
                  produce_template: bool, produce_output: bool, chunk_size: int = 100) -> None:
         super().__init__(catchment_output_netcdf_file, chunk_size)
@@ -50,11 +50,12 @@ class DataProcessor(DataReader):
         if set(self.nc_catchments) != set(self.gpkg_catchment_list):
             raise ValueError("There is a mistmatch between catchment IDs in geopackage and netcdf")   
 
-        if produce_template:
-            self.obsolete_create_template_grid_netcdf_from_geopackage(gpkg_gdf, template_grid_file)
-        self.ds_template_grid = xr.open_dataset(template_grid_file)
+        # Old workflow
+        # if produce_template:
+        #     self.obsolete_create_template_grid_netcdf_from_geopackage(gpkg_gdf, template_grid_file)
+        # self.ds_template_grid = xr.open_dataset(template_grid_file)
 
-        # if produce_output: # Old workflow
+        # if produce_output: 
         #     self.grid_points = self.obsolete_build_grid_centroids()
         #     self.obsolete_build_grid_lookup(gpkg_gdf)
         #     output_path = 'sample_data/sample_netcdf/sample_output/final_test' #Change this to command line argument later
@@ -63,14 +64,26 @@ class DataProcessor(DataReader):
         #     end_time = time.perf_counter()
         #     duration_minutes = (end_time - start_time) / 60
         #     print(f"Function execution time: {duration_minutes:.4f} minutes")
+
+        # New workflow
         if produce_template:
-            self.create_template_grid_netcdf_using_config(gpkg_gdf, template_grid_file,
+            self.create_template_grid_netcdf_using_config(gpkg_gdf, template_grid_file_name,
                                                           config_path, output_class, category, domain)
-        self.ds_template_grid = xr.open_dataset(template_grid_file)
+        self.ds_template_grid = xr.open_dataset(template_grid_file_name)
+        print(self.ds_template_grid.rio.crs)
         
         if produce_output:
-            catchment_grid = self.build_catchment_id_grid(template_grid_file, gpkg_gdf, "x", "y") # Change hardcoded values later
-            mapped_grid = self.map_catchment_data_to_grid(catchment_grid,catchment_output_netcdf_file, "catchments","time") # Change hardcoded values later
+            # change variable name in the randomvals.nc This is strictly for testing purposes.
+            self.catchment_ds = self.catchment_ds.rename({
+                'sm_frac_0.4m': 'ACCET',
+                'sm_profile_0.1m': 'ACSNOM',
+                'sm_profile_0.4m': 'EDIR',
+                'sm_profile_1.5m': 'ISNOW',
+                'sm_profile_2m': 'QRAIN',
+                'SWE_mm': 'QSNOW'
+            })
+            catchment_grid = self.build_catchment_id_grid(template_grid_file_name, gpkg_gdf, "x", "y") # Change hardcoded values later
+            mapped_grid = self.map_catchment_data_to_grid(catchment_grid, "catchments","time") # Change hardcoded values later
             output_dir = 'sample_data/sample_netcdf/sample_output/final_test' #Change this to command line argument later
             start_time = time.perf_counter()
             self.write_netcdf_per_timestep(mapped_grid, output_dir, "time")
@@ -99,7 +112,7 @@ class DataProcessor(DataReader):
         ])
         return normalized
     
-    def _snap_to_grid(value: float, origin: float, resolution: int, direction: np.ufunc):
+    def _snap_to_grid(self, value: float, origin: float, resolution: int, direction: np.ufunc):
         if direction == np.floor:
             return origin + np.floor((value - origin) / resolution) * resolution
         elif direction == np.ceil:
@@ -163,13 +176,14 @@ class DataProcessor(DataReader):
     ) -> None:
         """
         Create a template grid aligned to a reference grid defined in config.json.
+        The template grid is for the extents in the geopackage (usually basin level).
         """
         # Read config file
         with open(config_path, "r") as f:
             config = json.load(f)
 
         # Find matching entry
-        entry = next((c_item for c_item in config if 
+        entry = next((c_item for c_item in config["files"] if 
               c_item["class"] == output_class and 
               c_item["category"] == category and 
               c_item["domain"] == domain), None)
@@ -186,23 +200,8 @@ class DataProcessor(DataReader):
         y_name = entry["location_name"]["y"]
 
         ds = xr.open_dataset(file_name)
-        target_crs = None
-        if not ds.rio.crs:
-            # Try CF convention (grid_mapping)
-            for var in ds.variables:
-                if "grid_mapping" in ds[var].attrs:
-                    grid_map_var = ds[var].attrs["grid_mapping"]
-                    target_crs = ds[grid_map_var].attrs.get("crs_wkt", None)
-                    break
-            if target_crs is None:
-                raise ValueError("CRS not found in NetCDF file.")
-            ds = ds.rio.write_crs(target_crs)
-        else:
-            target_crs = ds.rio.crs
-
-        # Alternate for CRS. Commented for now.
-        # TO DO: Add a check when wkt is not available. 
-        # target_crs = CRS.from_user_input(wkt)
+        # To do: Have to figure out a workflow when CRS is "Not Available"
+        target_crs = CRS.from_user_input(wkt) 
         
         gdf = geopackage_gdf.to_crs(target_crs)
         geom = unary_union(gdf.geometry) 
@@ -221,22 +220,55 @@ class DataProcessor(DataReader):
                 y_name: slice(snapped_miny, snapped_maxy),
             }
         )
-        x_subset = self.ds_grid[x_name].values
-        y_subset = self.ds_grid[y_name].values
+        x_subset = ds_subset[x_name].values
+        y_subset = ds_subset[y_name].values
         xx, yy = np.meshgrid(x_subset, y_subset)
 
-        mask = contains_xy(geom, xx, yy)
-        ds_masked = ds_subset.where(mask)
+        mask = intersects_xy(geom, xx, yy)
+        mask_da = xr.DataArray(mask,
+            dims=(y_name, x_name),
+            coords={
+                y_name: ds_subset[y_name],
+                x_name: ds_subset[x_name],
+            },
+        )
+        ds_masked = ds_subset.copy()
+
+        for var in ds_subset.data_vars:
+            da = ds_subset[var]
+            # Only mask numeric variables
+            if np.issubdtype(da.dtype, np.number):
+                ds_masked[var] = da.where(mask_da)
+            else:
+                ds_masked[var] = da # Leave non-numeric untouched
+        
         # Drop empty rows/cols that are outside of the polygon boundary
         ds_clipped = ds_masked.dropna(dim=y_name, how="all")
         ds_clipped = ds_clipped.dropna(dim=x_name, how="all")
-        ds_clipped = ds_clipped.rio.write_crs(target_crs)
-        ds_clipped["crs"] = ([], 0)
-        ds_clipped["crs"].attrs["spatial_ref"] = wkt
-        ds_clipped["crs"].attrs["esri_pe_string"] = wkt
 
+        # Add CRS to clipped grid
+        # Since the grid is created from an existing NWM grid,
+        # we need to strip out the existing grid_mapping. 
+        # It was found that this interferes with rio CRS encoding below.
+        for name, var in ds_clipped.variables.items():
+            var.attrs.pop("grid_mapping", None)
+            var.encoding.pop("grid_mapping", None)
+
+        # Also, remove existing crs variable to avoid duplicate crs definitions
+        if "crs" in ds_clipped:
+            ds_clipped = ds_clipped.drop_vars("crs")
+
+        # Had to use rio.set_spatial_dims and write_transform for the CRS to stick.
+        ds_clipped = ds_clipped.rio.set_spatial_dims(x_dim="x", y_dim="y")
+        ds_clipped = ds_clipped.rio.write_crs(target_crs)
+        ds_clipped = ds_clipped.rio.write_transform()
+        # ds_clipped["crs"] = ([], 0)
+        # ds_clipped["crs"].attrs["spatial_ref"] = wkt
+        # ds_clipped["crs"].attrs["esri_pe_string"] = wkt
+                
+        print(ds_clipped.rio.crs)
         # Save
-        ds.to_netcdf(template_grid_netcdf_path)
+        ds_clipped.to_netcdf(template_grid_netcdf_path)
         print(f"NetCDF template grid written to {template_grid_netcdf_path}")
 
     def obsolete_build_grid_centroids(self) -> gpd.GeoDataFrame:
@@ -474,9 +506,9 @@ class DataProcessor(DataReader):
         y_dim: str = "y",
     ) -> xr.DataArray:
         """
-        Returns a DataArray (y, x) where each cell contains a catchment ID.
+        Returns a DataArray (y, x) where each cell in the basin-level grid contains a catchment ID.
         """
-        ds = xr.open_dataset(template_nc_path) #alternatively, we can use self.ds_template_grid?
+        ds = xr.open_dataset(template_nc_path)
         x = ds[x_dim].values
         y = ds[y_dim].values
 
@@ -523,7 +555,7 @@ class DataProcessor(DataReader):
                                    catchment_dim: str = "catchments", time_dim: str = "time"
     ) -> xr.Dataset:
         """
-        Broadcast catchment-based variables onto grid using catchment_id grid.
+        Assign catchment-based variables onto basin-level grid using catchment_id grid.
         """
 
         ds_data = self.catchment_ds
@@ -586,7 +618,7 @@ class DataProcessor(DataReader):
             # Output filename and save
             t_str = np.datetime_as_string(t, unit='s') 
             formatted_t = t_str.replace('-', '_').replace(':', '_')
-            output_file = os.path.join(output_dir, f"grid_{formatted_t}.nc")
+            output_file = os.path.join(output_dir, f"new_grid_{formatted_t}.nc")
             ds_t.to_netcdf(output_file)
 
     def merge_basin_netcdfs(nc_files: list[str], fill_value: float | None = None, check_crs: bool = True
