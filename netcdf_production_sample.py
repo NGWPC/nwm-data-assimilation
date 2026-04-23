@@ -10,18 +10,17 @@ def randomize_values(netcdf_file: str, output_file: str) -> None:
     reader = DataReader(netcdf_file)
     reader.assign_random_values(output_file)
 
-#def build_nwm_grids_config(netcdf_folder_path: str, output_json: str):
-    
-
-def create_template_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str):
+def create_template_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
     #Usage
     #python netcdf_wrapper_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/grid_template.nc
-    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, True, False)
+    #new workflow: python netcdf_production_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
+    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, config_json_file, 'analysis_assim', 'land', 'conus', True, False)
 
-def create_nwm_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str):
+def create_nwm_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
     #Usage:
     #python netcdf_wrapper_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/grid_template.nc
-    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, False, True)
+    #new workflow: python netcdf_production_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
+    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, config_json_file, 'analysis_assim', 'land', 'conus', False, True)
 
 def create_nwm_grid_dask(netcdf_file: str, gpkg_file: str, template_grid_file: str):
     #Usage:
@@ -60,12 +59,14 @@ def main() -> None:
     parser_template_grid.add_argument("catchment_netcdf_file")
     parser_template_grid.add_argument("catchment_gpkg_file")
     parser_template_grid.add_argument("template_grid_file")
+    parser_template_grid.add_argument("config_json_file")
     
     #create nwm grid
     parser_nwm_grid = subparsers.add_parser("create-nwm-grid")
     parser_nwm_grid.add_argument("catchment_netcdf_file")
     parser_nwm_grid.add_argument("catchment_gpkg_file")
     parser_nwm_grid.add_argument("template_grid_file")
+    parser_nwm_grid.add_argument("config_json_file")
 
     #download current NWM output netcdfs from nomads server
     parser_nwm_download = subparsers.add_parser("download-nwm-outputs")
@@ -87,9 +88,9 @@ def main() -> None:
     if args.command == "randomize":
         randomize_values(args.input_file, args.output_file)
     elif args.command == "create-template-grid":
-        create_template_grid(args.catchment_netcdf_file, args.catchment_gpkg_file, args.template_grid_file)
+        create_template_grid(args.catchment_netcdf_file, args.catchment_gpkg_file, args.template_grid_file, args.config_json_file)
     elif args.command == "create-nwm-grid":
-        create_nwm_grid(args.catchment_netcdf_file, args.catchment_gpkg_file, args.template_grid_file)
+        create_nwm_grid(args.catchment_netcdf_file, args.catchment_gpkg_file, args.template_grid_file, args.config_json_file)
     elif args.command == "download-nwm-outputs":
         download_netcdf(args.download_url, args.output_folder_path)
     elif args.command == "obtain-netcdf-metadata":
