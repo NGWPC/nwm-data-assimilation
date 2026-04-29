@@ -78,9 +78,17 @@ class SimCalculator(Calculator):
         data_dict = dict(zip(catchment_ids, data))
 
         # Create catchment ID column and then lookup values from dict
-        basin_gdf["catchment_id"] = (
-            basin_gdf["divide_id"].str.split("-").str[1].astype(int)
-        )
+        catchment_field = ''
+        if "divide_id" in basin_gdf.columns:
+            catchment_field = "divide_id"
+        elif "div_id" in basin_gdf.columns:
+            catchment_field = "div_id"
+        if catchment_field == '':
+            raise ValueError("Field for catchment ID is missing int the basins geodataframe/geopackage")
+        else:
+            basin_gdf["catchment_id"] = (
+                basin_gdf[catchment_field].astype(str).str.split("-").str[-1].astype(int)
+            )
         basin_gdf[self.column] = basin_gdf["catchment_id"].map(data_dict).fillna(np.nan)
 
         return basin_gdf
@@ -90,12 +98,17 @@ class ObsCalculator(Calculator, SnotelCalculator):
     """Calculator for Observed data processing."""
 
     def __init__(
-        self, basin_gdf: gpd.GeoDataFrame, ds: xr.Dataset, group_id: str = "divide_id"
+        self, basin_gdf: gpd.GeoDataFrame, ds: xr.Dataset
     ):
         """Initialize the calculator."""
         super().__init__(basin_gdf)
         self.ds = ds
-        self._group_id = group_id
+        if "divide_id" in basin_gdf.columns:
+            self._group_id = "divide_id"
+        elif "div_id" in basin_gdf.columns:
+            self._group_id = "div_id"
+        else:
+            raise ValueError("Field for catchment ID is missing int the basins geodataframe/geopackage")
 
     @property
     @lru_cache
