@@ -42,13 +42,16 @@ class DataReader:
 
         with fsspec.open(self.netcdf_file, mode="rb") as f:
             ds = xr.open_dataset(f)
-
-        for var_name in ds.data_vars:
+        if ds.sizes.get("time", 0) > 48:    
+            ds_48 = ds.isel(time=slice(0, 48))
+        else:
+            ds_48 = ds
+        for var_name in ds_48.data_vars:
             print(f"Assigning random values to {var_name}")
             random_values = np.random.uniform(
-                1.0, 10.0, size=ds[var_name].shape
+                10.0, 20.0, size=ds_48[var_name].shape
             )
-            ds[var_name].values = random_values
+            ds_48[var_name].values = random_values
 
-        ds.to_netcdf(output_file)
+        ds_48.to_netcdf(output_file)
         print(f"Saved updated dataset to {output_file}")

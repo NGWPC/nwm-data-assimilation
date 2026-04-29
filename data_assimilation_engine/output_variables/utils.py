@@ -11,6 +11,7 @@ from datetime import datetime
 from pyproj import CRS
 from typing import List, Set, Tuple, Optional
 
+# To do: Move these to a consts.py file before production
 nwm_variables_list = ['sfcheadsubrt', 'zwattablrt', 'inflow', 'outflow', 'reservoir_assimilated_value', 
 'water_sfc_elev', 'nudge', 'qBucket', 'streamflow', 'velocity', 'qBtmVertRunoff', 'qSfcLatRunoff', 
 'ACSNOM', 'ACCET', 'SNOWT_AVG', 'EDIR', 'SOILICE', 'SOILSAT_TOP', 'ISNOW', 'QRAIN', 'FSNO', 'SNOWH', 
@@ -18,171 +19,7 @@ nwm_variables_list = ['sfcheadsubrt', 'zwattablrt', 'inflow', 'outflow', 'reserv
 'GRDFLX', 'TRAD', 'FSA', 'CANWAT', 'LH', 'FIRA', 'HFX']
 
 
-class NetCDFMetadata:
-    def __init__(
-        self,
-        file_path: str,
-        resolution_x: float,
-        resolution_y: float,
-        origin_x: float,
-        origin_y: float,
-        x_loc: str,
-        y_loc: str,
-        wkt: Optional[str],
-        variables: str,
-        output_class: str,
-        category: str,
-        domain: str,
-    ) -> None:
-        self.file_path: str = file_path
-        self.resolution_x: float = resolution_x
-        self.resolution_y: float = resolution_y
-        self.origin_x: float = origin_x
-        self.origin_y: float = origin_y
-        self.x_name: str = x_loc
-        self.y_name: str = y_loc
-        self.nwm_variables: str = variables
-        self.crs_wkt: str = wkt
-        self.output_class: str = output_class
-        self.category: str = category
-        self.domain: str = domain
-
-    def key(self) -> tuple[str, str, str]:
-        """
-        Unique identifier for duplicate checking
-        """
-        return (self.output_class, self.category, self.domain)
-
-    def __repr__(self) -> str: #for debugging purposes
-        return (
-            f"NetCDFMetadata(file_path={self.file_path}, "
-            f"class={self.output_class}, category={self.category}, domain={self.domain})"
-        )
-    
-def download_nwm_data_from_server(base_url: str, local_root: str) -> None:
-    """
-    Main function to download a unique set of output files from the server
-    """
-    if not os.path.exists(local_root):
-        os.makedirs(local_root)
-    
-    formatted_date = datetime.now().strftime("%Y%m%d")
-    formatted_url = f"{base_url}/nwm.{formatted_date}/"
-    existing_keys = build_existing_keys(local_root) # build class, category, domain keys in local folder, if exists.
-    download_nwm_data_recursive(formatted_url, local_root, existing_keys)
-
-def create_nwm_template_grids(src_root_folder: str, dest_root_folder: str) -> None:
-    """
-    Creates template grids for all NWM netcdf products using a sample set of netcdfs.
-    """
-    coords_to_reset = ['time', 'x', 'y', 'latitude', 'longitude']
-
-    for root, dirs, files in os.walk(src_root_folder):
-        # Determine the relative path to recreate subfolders
-        rel_path = os.path.relpath(root, src_root_folder)
-        target_dir = os.path.join(dest_root_folder, rel_path)
-        
-        # Create the target directory if it doesn't exist
-        os.makedirs(target_dir, exist_ok=True)
-
-        for file in files:
-            if file.endswith('.nc'):
-                src_path = os.path.join(root, file)
-                dst_path = os.path.join(target_dir, file)
-
-                # Process the NetCDF using xarray
-                with xr.open_dataset(src_path) as ds:
-                    # Reset data variables
-                    for var in ds.data_vars:
-                        if var in nwm_variables_list:
-                            ds[var].values[:] = -1
-                    
-                    # Reset coordinate variables
-                    for coord in coords_to_reset:
-                        if coord in ds.coords:
-                            ds[coord].values[:] = - 1
-                    # Save to the desired location
-                    ds.to_netcdf(dst_path)
-                    print(f"Processed: {dst_path}")
-
-def debug_netcdf_structure_in_folder(folder_path: str) -> None:
-    """
-    Recursively scans a folder for NetCDF files and prints their structure.
-    """
-    nc_files: List[str] = []
-    logging.basicConfig(
-        filename='app.log', 
-        level=logging.INFO,
-        format='%(message)s'
-        #format='%(asctime)s - %(message)s'
-    )
-    data_variables_list = []
-    for root, _, files in os.walk(folder_path):
-        for file in files:
-            if file.endswith(".nc"):
-                nc_files.append(os.path.join(root, file))
-
-    if not nc_files:
-        print(f"No NetCDF files found in: {folder_path}")
-        return
-    logging.info(f"Found {len(nc_files)} NetCDF files within the folder")
-
-    for file_path in nc_files:
-        logging.info("=" * 80)
-        logging.info(f"FILE: {file_path}")
-
-        try:
-            with xr.open_dataset(file_path) as ds:
-
-                # Variables
-                logging.info("--Variables:")
-                for var_name, var in ds.data_vars.items():
-                    logging.info(f"----  {var_name}: shape={var.shape}, dtype={var.dtype}")
-                    output_class, category, domain = parse_filename_metadata(file_path)
-                    data_variables_list.append(var_name + ";" + output_class + ";" + category + ";" + domain)
-
-                # Dimensions
-                logging.info("--Dimensions:")
-                for dim_name, dim_size  in ds.sizes.items():
-                    logging.info(f"----  {dim_name}: size={dim_size}")
-
-                # CRS-specific attributes if present
-                is_crs_present = False 
-                is_sref_present = False 
-                for crs_name in ["crs", "CRS", "spatial_ref"]:
-                    if crs_name in ds.variables:
-                        logging.info(f"--CRS Variable: {crs_name}")
-                        is_crs_present = True
-                        crs_var = ds.variables[crs_name]
-                        if 'spatial_ref' in crs_var.attrs:
-                            spatial_ref_raw = ds.variables[crs_name].attrs['spatial_ref']
-                            is_sref_present = True
-                            logging.info(f"----{spatial_ref_raw}")
-                logging.info(f"-- CRS Available: {is_crs_present}; Spatial_ref Available: {is_sref_present}")
-            with open('__variables_check.csv', 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Variable", "Class", "Category", "Domain"])
-                for var in data_variables_list:
-                    if not var.startswith('crs'):
-                        row = var.split(";")
-                        writer.writerow(row)
-        except Exception as e:
-            print(f"\n Failed to read file: {file_path}")
-            print(f"Error: {e}")
-
-def obtain_metadata_information(local_root: str, output_name: str) -> None:
-    """
-    Parse the metadata information from the downloaded NWM output files and write a CSV and a json
-    """
-    if not os.path.exists(local_root):
-        raise Exception(f"Folder does not exist: {local_root}")
-    
-    metadata_list = process_downloaded_files(local_root)
-    output_csv = os.path.join(local_root, output_name + ".csv")
-    write_metadata_to_csv(metadata_list, output_csv)
-    output_json = os.path.join(local_root, output_name + "_config.json")
-    write_metadata_to_config_json(metadata_list, output_json)
-
+# region common
 def parse_filename_metadata(filename: str) -> Tuple[str, str, str]:
     """
     Extract output_class, category and domain from filename.
@@ -196,14 +33,27 @@ def parse_filename_metadata(filename: str) -> Tuple[str, str, str]:
     category = components[3]
     domain = components[5]
     return output_class, category, domain
+# endregion
+
+# region data download
+def download_nwm_data_from_server(base_url: str, local_root: str) -> None:
+    """
+    Main function to download a unique set of output files from the server
+    """
+    if not os.path.exists(local_root):
+        os.makedirs(local_root)
     
-    
+    formatted_date = datetime.now().strftime("%Y%m%d")
+    formatted_url = f"{base_url}/nwm.{formatted_date}/"
+    existing_keys = build_existing_keys(local_root) # build class, category, domain keys in local folder, if exists.
+    download_nwm_data_recursive(formatted_url, local_root, existing_keys)
+
 def download_nwm_data_recursive(download_url: str, local_path: str, 
     existing_keys: Set[Tuple[str, str, str]]
 ) -> None:
     """
     Recursively download a unique set of output files from the server
-    and create a mirrored folder structure as server
+    and create a mirrored folder structure locally
     """
     response = requests.get(download_url)
     if response.status_code != 200:
@@ -249,7 +99,7 @@ def download_file(url: str, save_path: str) -> None:
 
 def build_existing_keys(local_root: str) -> Set[Tuple[str, str, str]]:
     """
-    Builds file keys in local folder. These keys are used for function re-runs 
+    Builds file keys in local folder. These keys are used when function is re-run 
     and enables the capability to not download a file again.
     """
     keys = set()
@@ -261,9 +111,66 @@ def build_existing_keys(local_root: str) -> Set[Tuple[str, str, str]]:
 
     return keys
 
+# endregion
+
+# region metadata extraction
+class NetCDFMetadata:
+    def __init__(
+        self,
+        file_path: str,
+        resolution_x: float,
+        resolution_y: float,
+        origin_x: float,
+        origin_y: float,
+        x_loc: str,
+        y_loc: str,
+        wkt: Optional[str],
+        variables: str,
+        output_class: str,
+        category: str,
+        domain: str,
+    ) -> None:
+        self.file_path: str = file_path
+        self.resolution_x: float = resolution_x
+        self.resolution_y: float = resolution_y
+        self.origin_x: float = origin_x
+        self.origin_y: float = origin_y
+        self.x_name: str = x_loc
+        self.y_name: str = y_loc
+        self.nwm_variables: str = variables
+        self.crs_wkt: str = wkt
+        self.output_class: str = output_class
+        self.category: str = category
+        self.domain: str = domain
+
+    def key(self) -> tuple[str, str, str]:
+        """
+        Unique identifier for duplicate checking
+        """
+        return (self.output_class, self.category, self.domain)
+
+    def __repr__(self) -> str: #for debugging purposes
+        return (
+            f"NetCDFMetadata(file_path={self.file_path}, "
+            f"class={self.output_class}, category={self.category}, domain={self.domain})"
+        )
+
+def obtain_metadata_information(local_root: str, output_name: str) -> None:
+    """
+    Parse the metadata information from the downloaded NWM output files and write a CSV and a json
+    """
+    if not os.path.exists(local_root):
+        raise Exception(f"Folder does not exist: {local_root}")
+    
+    metadata_list = process_downloaded_files(local_root)
+    output_csv = os.path.join(local_root, output_name + ".csv")
+    write_metadata_to_csv(metadata_list, output_csv)
+    output_json = os.path.join(local_root, output_name + "_config.json")
+    write_metadata_to_config_json(metadata_list, output_json)
+
 def process_downloaded_files(local_root: str) -> List[NetCDFMetadata]:
     """
-    Process downloaded files and create a list of metadata objects for a config json
+    Process downloaded files and create a list of metadata objects for config json
     """
     metadata_list: List[NetCDFMetadata] = []
 
@@ -334,9 +241,6 @@ def extract_wkt_from_crs(crs_var) -> Optional[str]:
 def write_metadata_to_csv(metadata_list: List[NetCDFMetadata], output_csv: str) -> None:
     """
     Writes a list of NetCDFMetadata objects to a CSV file.
-
-    :param metadata_list: List of NetCDFMetadata objects
-    :param output_csv: Output CSV file path
     """
     fieldnames: List[str] = [
         "file_path",
@@ -407,10 +311,202 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
     config = {
         "files": info_list
     }
-    # config: Dict[str, List[Dict[str, Any]]] = {
-    #     "files": [to_dict(m) for m in metadata_list]
-    # }
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(config, f, indent = 2)
 
     print(f"Config JSON written to: {output_json}")
+
+def debug_netcdf_structure_in_folder(folder_path: str) -> None:
+    """
+    Recursively scans a folder for NetCDF files and prints their structure.
+    """
+    # This function is used for testing purposes. 
+    # It also uses a local logging to save all information into a file.
+    nc_files: List[str] = []
+    data_variables_list = []
+    logging.basicConfig(filename='app.log', level=logging.INFO, format='%(message)s')
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith(".nc"):
+                nc_files.append(os.path.join(root, file))
+
+    if not nc_files:
+        print(f"No NetCDF files found in: {folder_path}")
+        return
+    logging.info(f"Found {len(nc_files)} NetCDF files within the folder")
+
+    for file_path in nc_files:
+        logging.info("-" * 80)
+        logging.info(f"FILE: {file_path}")
+
+        try:
+            with xr.open_dataset(file_path) as ds:
+                # Variables
+                logging.info("--Variables:")
+                for var_name, var in ds.data_vars.items():
+                    logging.info(f"----  {var_name}: shape={var.shape}, dtype={var.dtype}")
+                    output_class, category, domain = parse_filename_metadata(file_path)
+                    data_variables_list.append(var_name + ";" + output_class + ";" + category + ";" + domain)
+
+                # Dimensions
+                logging.info("--Dimensions:")
+                for dim_name, dim_size  in ds.sizes.items():
+                    logging.info(f"----  {dim_name}: size={dim_size}")
+
+                # CRS-specific attributes if present
+                is_crs_present = False 
+                is_sref_present = False 
+                for crs_name in ["crs", "CRS", "spatial_ref"]:
+                    if crs_name in ds.variables:
+                        logging.info(f"--CRS Variable: {crs_name}")
+                        is_crs_present = True
+                        crs_var = ds.variables[crs_name]
+                        if 'spatial_ref' in crs_var.attrs:
+                            spatial_ref_raw = ds.variables[crs_name].attrs['spatial_ref']
+                            is_sref_present = True
+                            logging.info(f"----{spatial_ref_raw}")
+                logging.info(f"-- CRS Available: {is_crs_present}; Spatial_ref Available: {is_sref_present}")
+            
+            # The snippet below is use to write variables along with the class, category and domain
+            # This produces an additional csv with just basic variables information.
+            with open('variables_ccategories.csv', 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Variable", "Class", "Category", "Domain"])
+                for var in data_variables_list:
+                    if not var.startswith('crs'):
+                        row = var.split(";")
+                        writer.writerow(row)
+        except Exception as e:
+            print(f"\n Failed to read file: {file_path}")
+            print(f"Error: {e}")
+# endregion
+
+# region create template grids
+def create_nwm_template_grids(src_root_folder: str, dest_root_folder: str) -> None:
+    """
+    Creates template grids for all NWM netcdf products using a sample set of netcdfs.
+    """
+    # This function is there for testing purposes.
+    # We can delete this once we are prodution ready.
+    coords_to_reset = ['time', 'x', 'y', 'latitude', 'longitude']
+
+    for root, dirs, files in os.walk(src_root_folder):
+        # Determine the relative path to recreate subfolders
+        rel_path = os.path.relpath(root, src_root_folder)
+        target_dir = os.path.join(dest_root_folder, rel_path)
+        
+        # Create the target directory if it doesn't exist
+        os.makedirs(target_dir, exist_ok=True)
+
+        for file in files:
+            if file.endswith('.nc'):
+                src_path = os.path.join(root, file)
+                dest_path = os.path.join(target_dir, file)
+
+                # Process the NetCDF using xarray
+                with xr.open_dataset(src_path) as ds:
+                    # Reset data variables
+                    for var in ds.data_vars:
+                        if var in nwm_variables_list:
+                            ds[var].values[:] = -1
+                    
+                    # Reset coordinate variables
+                    for coord in coords_to_reset:
+                        if coord in ds.coords:
+                            ds[coord].values[:] = - 1 # To do: Gives warning for time. Need to address
+                    # Save to the desired location
+                    ds.to_netcdf(dest_path)
+                    print(f"Processed: {dest_path}")
+# endregion
+
+# region basin grid products
+def create_combined_basin_netcdf_products (timestep_netcdf_folder: str, output_folder: str) -> None:
+    """
+    Main calling function to create a combined basins product
+    """
+    # Randomly pick timestep outputs at 6 hour intervals
+    for i in range(0, 5, 6):
+        search_string = f"01T{i:02}"
+        files_list = find_files_by_timestep(timestep_netcdf_folder, search_string)
+        merged_ds: xr.Dataset = merge_basin_netcdfs(files_list)
+        output_file = os.path.join(output_folder, f"combined_grid_{i:02}_.nc")
+        merged_ds.to_netcdf(output_file)
+
+def find_files_by_timestep(root_dir: str, search_timestep: str) -> List[str]:
+    """
+    Function to recursively search a folder for a specific substring
+    """
+    matched_files = []
+    for dirpath, _, filenames in os.walk(root_dir):
+        for fname in filenames:
+            if search_timestep in fname:
+                full_path = os.path.join(dirpath, fname)
+                matched_files.append(full_path)
+    return matched_files
+
+def merge_basin_netcdfs(nc_files: list[str], fill_value: float | None = None, check_crs: bool = True
+) -> xr.Dataset:
+    """
+    Merge multiple NetCDF subsets.
+    Assumes same grid resolution, same coordinate system and no overlaps
+    """
+    # This function is not working as expected. We will address this in a later sprint in PI-10
+    # For testing purposes, making the variables and the units uniform
+    # across all datasets being combined.
+    # Also, this function tests combine function with only two datasets
+    
+    datasets = [xr.open_dataset(f) for f in nc_files]
+    dt_list = []
+    for ds in datasets:
+        for var in ds.data_vars:
+            ds[var].attrs['variable units'] = 'm'
+        # Normalize coordinate ordering. This is needed so that the
+        # the merged output don't get flipped spatially.
+        if "y" in ds:
+            ds = ds.sortby("y", ascending=True)
+        if len(dt_list) == 0:
+            dt_list.append(ds) # add first file as is.
+        else:
+            # For testing purposes, have been using datasets with different timesteps.
+            # Using the snippet below to match timesteps as well.
+            ds_updated = ds.assign_coords(time=dt_list[0].time)
+            dt_list.append(ds_updated)
+    
+    # Check CRS and confirm that they are the same for all the netcdf files
+    if check_crs:
+        crs_list = []
+        for ds in datasets:
+            if "crs" in ds:
+                crs_list.append(ds.variables["crs"].attrs['spatial_ref'])
+            else:
+                raise ValueError("One dataset missing CRS")
+        if len(set(crs_list)) != 1:
+            raise ValueError("CRS mismatch between datasets")
+
+    # Use combine_by_coords to combine the NetCDFs
+    # combine_by_coords gave a FutureWarning 
+    # FutureWarning: In a future version of xarray the default value for data_vars 
+    # will change from data_vars='all' to data_vars=None. This is likely to lead 
+    # to different results when multiple datasets have matching variables with 
+    # overlapping values. To opt in to new defaults and get rid of these warnings 
+    # now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly
+    ds_combined = xr.combine_by_coords(
+        dt_list,
+        data_vars="minimal",   # removes FutureWarning
+        coords="minimal",
+        compat="override"
+    )
+    ds_combined = ds_combined.sortby("y", ascending=False)
+
+    # To do: Alternate approach is to use Merge. We can test this later.
+    # compat='no_conflicts' ensures overlapping non-null values must agree
+    #ds_combined = xr.merge(datasets, compat="no_conflicts")
+
+    # Optional fill value , if provided
+    # To do: Examine NWM products to see if there are multiple fill values
+    # and whether they need to be filled. 
+    if fill_value is not None:
+        ds_combined = ds_combined.fillna(fill_value)
+
+    return ds_combined
+# endregion

@@ -5,43 +5,41 @@ import data_assimilation_engine.output_variables.utils as utils
 
 def randomize_values(netcdf_file: str, output_file: str) -> None:
     #Usage:
-    # python netcdf_wrapper_sample.py randomize sample_data/sample_netcdf/g01123000.nc sample_data/sample_netcdf/catchment_randomvals.nc
+    # python netcdf_production_sample.py randomize sample_data/sample_netcdf/catchment_output_CNF.nc sample_data/sample_netcdf/catchment_randomvals_cnf.nc
 
     reader = DataReader(netcdf_file)
     reader.assign_random_values(output_file)
 
 def create_template_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
     #Usage
-    #python netcdf_wrapper_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/grid_template.nc
-    #new workflow: python netcdf_production_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
-    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, config_json_file, 'analysis_assim', 'land', 'conus', True, False)
+    # python netcdf_production_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
+    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, config_json_file, 'medium_range_blend', 'terrain_rt', 'conus', True, False)
 
 def create_nwm_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
     #Usage:
-    #python netcdf_wrapper_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/grid_template.nc
-    #new workflow: python netcdf_production_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
+    # python netcdf_production_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
     processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, config_json_file, 'analysis_assim', 'land', 'conus', False, True)
 
-def create_nwm_grid_dask(netcdf_file: str, gpkg_file: str, template_grid_file: str):
+def download_netcdf_from_nomads(download_url: str, output_folder: str):
     #Usage:
-    #python netcdf_wrapper_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/grid_template.nc
-    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, False, True)
-
-def download_netcdf(download_url: str, output_folder: str):
-    #Usage:
-    #python netcdf_production_sample.py download-nwm-outputs https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/prod sample_data/nwm_output
+    # python netcdf_production_sample.py download-nwm-outputs https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/prod sample_data/nwm_output
     utils.download_nwm_data_from_server(download_url, output_folder)
 
 def extract_netcdf_metadata(netcdf_root_folder: str, output_file_name: str):
     #Usage:
-    #python netcdf_production_sample.py obtain-netcdf-metadata sample_data/nwm_output metadata
+    # python netcdf_production_sample.py obtain-netcdf-metadata sample_data/nwm_output metadata
     utils.obtain_metadata_information(netcdf_root_folder, output_file_name)
     #utils.debug_netcdf_structure_in_folder(netcdf_root_folder)
 
 def create_template_nwm_grids_data(netcdf_root_folder: str, templates_folder: str):
     #Usage:
-    #python netcdf_production_sample.py create-template-nwm-grid sample_data/nwm_output sample_data/nwm_templates
+    # python netcdf_production_sample.py create-template-nwm-grid sample_data/nwm_output sample_data/nwm_templates
     utils.create_nwm_template_grids(netcdf_root_folder, templates_folder)
+
+def combine_basin_grids(netcdf_folder: str, output_folder: str):
+    #Usage:
+    # python netcdf_production_sample.py create-combined-basin-grid sample_data/sample_netcdf/sample_output/merge_test sample_data/sample_netcdf/sample_output/merge_test
+    utils.create_combined_basin_netcdf_products(netcdf_folder, output_folder)
 
 def main() -> None:
 
@@ -83,6 +81,11 @@ def main() -> None:
     parser_template_grids.add_argument("nwm_output_grids_folder")
     parser_template_grids.add_argument("nwm_template_grids_folder")
 
+    #create basin level netcdf using timestep netcdfs
+    parser_basin_grids = subparsers.add_parser("create-combined-basin-grid")
+    parser_basin_grids.add_argument("timestep_grids_folder")
+    parser_basin_grids.add_argument("output_basin_grids_folder")
+
     args = parser.parse_args()
 
     if args.command == "randomize":
@@ -92,11 +95,13 @@ def main() -> None:
     elif args.command == "create-nwm-grid":
         create_nwm_grid(args.catchment_netcdf_file, args.catchment_gpkg_file, args.template_grid_file, args.config_json_file)
     elif args.command == "download-nwm-outputs":
-        download_netcdf(args.download_url, args.output_folder_path)
+        download_netcdf_from_nomads(args.download_url, args.output_folder_path)
     elif args.command == "obtain-netcdf-metadata":
         extract_netcdf_metadata(args.local_folder_path, args.file_name)
     elif args.command == "create-template-nwm-grid":
         create_template_nwm_grids_data(args.nwm_output_grids_folder, args.nwm_template_grids_folder)
+    elif args.command == "create-combined-basin-grid":
+        combine_basin_grids(args.timestep_grids_folder, args.output_basin_grids_folder)
     else:
         parser.print_help()
     
