@@ -189,7 +189,7 @@ class S3Loader:
             s3_uri = (
                 f"s3://{self.obs_prefix}/gages-{self.basin_id}_{self.variable_name}.csv"
             )
-            print(repr(s3_uri))
+            # print(repr(s3_uri))
             if fs.exists(s3_uri):
                 return s3_uri
             else:
