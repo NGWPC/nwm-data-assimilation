@@ -129,13 +129,27 @@ class FileLoader(DataLoader):
 
         """
         try:
-            # Extract just the catchment numbers from divide_id
-            catchment_ids = pd.to_numeric(
-                self.catchment_gdf["divide_id"].str.replace("cat-", "", regex=False)
-            )
+            # Extract just the catchment numbers from divide_id (or div_id)
+            catchment_field = ''
+            catchment_area_field = ''
+            if "divide_id" in self.catchment_gdf.columns:
+                catchment_field = "divide_id"
+                catchment_area_field = "areasqkm"
+            elif "div_id" in self.catchment_gdf.columns:
+                catchment_field = "div_id"
+                catchment_area_field = "area_sqkm"
+            if catchment_field == '':
+                raise ValueError("Field for catchment ID is missing int the basins geodataframe/geopackage")
+            else:
+                catchment_ids = pd.to_numeric(
+                    self.catchment_gdf[catchment_field]
+                    .astype(str)
+                    .str.split("-")
+                    .str[-1]
+                )
 
             # Get areas from geometry
-            areas = self.catchment_gdf["areasqkm"]
+            areas = self.catchment_gdf[catchment_area_field]
 
             # Create dictionary with integer keys
             area_dict = dict(zip(catchment_ids, areas))
@@ -175,6 +189,7 @@ class S3Loader:
             s3_uri = (
                 f"s3://{self.obs_prefix}/gages-{self.basin_id}_{self.variable_name}.csv"
             )
+            print(repr(s3_uri))
             if fs.exists(s3_uri):
                 return s3_uri
             else:
