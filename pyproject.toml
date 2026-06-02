@@ -33,7 +33,7 @@ dependencies = [
     "s3fs==2026.2.0",
     "dask[complete]==2025.7.0",  # Includes Dask core + recommended dependencies
     "distributed==2025.7.0",  # Adds support for parallel computing
-    "requests~=2.33.1",
+    "requests~=2.34.2",
     "ruff==0.12.10",
     "python-dotenv~=1.2.1",
     "rioxarray==0.19.0",
