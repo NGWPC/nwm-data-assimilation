@@ -5,18 +5,13 @@ import csv
 import numpy as np
 import json
 import logging
+from . import consts
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pyproj import CRS
 from typing import List, Set, Tuple, Optional
-
-# To do: Move these to a consts.py file before production
-nwm_variables_list = ['sfcheadsubrt', 'zwattablrt', 'inflow', 'outflow', 'reservoir_assimilated_value', 
-'water_sfc_elev', 'nudge', 'qBucket', 'streamflow', 'velocity', 'qBtmVertRunoff', 'qSfcLatRunoff', 
-'ACSNOM', 'ACCET', 'SNOWT_AVG', 'EDIR', 'SOILICE', 'SOILSAT_TOP', 'ISNOW', 'QRAIN', 'FSNO', 'SNOWH', 
-'SNLIQ', 'SNEQV', 'QSNOW', 'SOIL_T', 'SOIL_M', 'SFCRNOFF', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'UGDRNOFF', 
-'GRDFLX', 'TRAD', 'FSA', 'CANWAT', 'LH', 'FIRA', 'HFX']
+from functools import reduce
 
 
 # region common
@@ -213,7 +208,7 @@ def extract_netcdf_metadata(file_path: str) -> NetCDFMetadata:
             y_loc_name = nwm_var
         elif nwm_var in crs_info: #CRS wkt
             proj_wkt = extract_wkt_from_crs(ds.variables[nwm_var])
-        elif nwm_var in nwm_variables_list: #NWM output variables
+        elif nwm_var in consts.NWM_VARIABLES_LIST: #NWM output variables
             vars_in_netcdf.append(nwm_var)
     nwm_variables = ", ".join(vars_in_netcdf)
     return NetCDFMetadata(file_path, res_x, res_y, origin_x, origin_y, x_loc_name, y_loc_name, proj_wkt, nwm_variables, output_class, category, domain)
@@ -381,7 +376,7 @@ def debug_netcdf_structure_in_folder(folder_path: str) -> None:
             print(f"Error: {e}")
 # endregion
 
-# region create template grids
+# region (to delete) create template grids
 def create_nwm_template_grids(src_root_folder: str, dest_root_folder: str) -> None:
     """
     Creates template grids for all NWM netcdf products using a sample set of netcdfs.
@@ -407,7 +402,7 @@ def create_nwm_template_grids(src_root_folder: str, dest_root_folder: str) -> No
                 with xr.open_dataset(src_path) as ds:
                     # Reset data variables
                     for var in ds.data_vars:
-                        if var in nwm_variables_list:
+                        if var in consts.NWM_VARIABLES_LIST:
                             ds[var].values[:] = -1
                     
                     # Reset coordinate variables
@@ -420,17 +415,19 @@ def create_nwm_template_grids(src_root_folder: str, dest_root_folder: str) -> No
 # endregion
 
 # region basin grid products
-def create_combined_basin_netcdf_products (timestep_netcdf_folder: str, output_folder: str) -> None:
+def create_combined_basin_netcdf_products (reference_grid: str, timestep_netcdf_folder: str, output_folder: str) -> None:
     """
     Main calling function to create a combined basins product
     """
     # Randomly pick timestep outputs at 6 hour intervals
-    for i in range(0, 5, 6):
+    for i in range(0, 20, 6):
         search_string = f"01T{i:02}"
         files_list = find_files_by_timestep(timestep_netcdf_folder, search_string)
-        merged_ds: xr.Dataset = merge_basin_netcdfs(files_list)
+        variables_of_interest = ["ACCET"]
+        # merged_ds = merge_basin_netcdfs(reference_grid, files_list)
+        merged_ds, encoding = create_multi_basin_netcdfs(reference_grid, files_list, variables_of_interest, 1.0, None, True)
         output_file = os.path.join(output_folder, f"combined_grid_{i:02}_.nc")
-        merged_ds.to_netcdf(output_file)
+        merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
 
 def find_files_by_timestep(root_dir: str, search_timestep: str) -> List[str]:
     """
@@ -439,37 +436,40 @@ def find_files_by_timestep(root_dir: str, search_timestep: str) -> List[str]:
     matched_files = []
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
-            if search_timestep in fname:
+            if search_timestep in fname and fname.endswith('.nc'):
                 full_path = os.path.join(dirpath, fname)
                 matched_files.append(full_path)
     return matched_files
 
-def merge_basin_netcdfs(nc_files: list[str], fill_value: float | None = None, check_crs: bool = True
+def merge_basin_netcdfs(reference_grid: str, nc_files: list[str], fill_value: float | None = None, check_crs: bool = True
 ) -> xr.Dataset:
     """
     Merge multiple NetCDF subsets.
     Assumes same grid resolution, same coordinate system and no overlaps
     """
-    # This function is not working as expected. We will address this in a later sprint in PI-10
     # For testing purposes, making the variables and the units uniform
     # across all datasets being combined.
     # Also, this function tests combine function with only two datasets
     
+    ref_grid = xr.open_dataset(reference_grid)
     datasets = [xr.open_dataset(f) for f in nc_files]
     dt_list = []
     for ds in datasets:
+        # the test datasets have different units for variables. 
+        # For testing, just making them all same units.
         for var in ds.data_vars:
             ds[var].attrs['variable units'] = 'm'
-        # Normalize coordinate ordering. This is needed so that the
-        # the merged output don't get flipped spatially.
-        if "y" in ds:
-            ds = ds.sortby("y", ascending=True)
+
+        # To avoid shift changes due to precision in the lat-lon values, we will
+        # re-index the coordinates to match the reference grid.
+        # tolerance of 1m meaning any misalignment within 1m gets snapped.
+        ds_reindexed = ds.reindex(y=ref_grid.y, x=ref_grid.x, method="nearest", tolerance=1.0)
         if len(dt_list) == 0:
-            dt_list.append(ds) # add first file as is.
+            dt_list.append(ds_reindexed) # add first file as is.
         else:
             # For testing purposes, have been using datasets with different timesteps.
             # Using the snippet below to match timesteps as well.
-            ds_updated = ds.assign_coords(time=dt_list[0].time)
+            ds_updated = ds_reindexed.assign_coords(time=dt_list[0].time)
             dt_list.append(ds_updated)
     
     # Check CRS and confirm that they are the same for all the netcdf files
@@ -483,24 +483,7 @@ def merge_basin_netcdfs(nc_files: list[str], fill_value: float | None = None, ch
         if len(set(crs_list)) != 1:
             raise ValueError("CRS mismatch between datasets")
 
-    # Use combine_by_coords to combine the NetCDFs
-    # combine_by_coords gave a FutureWarning 
-    # FutureWarning: In a future version of xarray the default value for data_vars 
-    # will change from data_vars='all' to data_vars=None. This is likely to lead 
-    # to different results when multiple datasets have matching variables with 
-    # overlapping values. To opt in to new defaults and get rid of these warnings 
-    # now use `set_options(use_new_combine_kwarg_defaults=True) or set data_vars explicitly
-    ds_combined = xr.combine_by_coords(
-        dt_list,
-        data_vars="minimal",   # removes FutureWarning
-        coords="minimal",
-        compat="override"
-    )
-    ds_combined = ds_combined.sortby("y", ascending=False)
-
-    # To do: Alternate approach is to use Merge. We can test this later.
-    # compat='no_conflicts' ensures overlapping non-null values must agree
-    #ds_combined = xr.merge(datasets, compat="no_conflicts")
+    ds_combined = reduce(lambda left, right: left.combine_first(right), dt_list)
 
     # Optional fill value , if provided
     # To do: Examine NWM products to see if there are multiple fill values
@@ -509,4 +492,75 @@ def merge_basin_netcdfs(nc_files: list[str], fill_value: float | None = None, ch
         ds_combined = ds_combined.fillna(fill_value)
 
     return ds_combined
+
+def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variables_of_interest: list[str] = None, 
+                              tolerance: float = 1.0, fill_value: float | None = None, 
+                              check_crs: bool = True 
+) -> xr.Dataset:
+    """
+    Merge multiple NetCDF subsets.
+    Assumes same grid resolution, same coordinate system and no overlaps
+    """
+    # Check CRS and confirm that they are the same for all the netcdf files
+    if check_crs:
+        crs_list = []
+        for nc_file in nc_files:
+            with xr.open_dataset(nc_file) as ds:
+                if "crs" in ds:
+                    crs_list.append(ds.variables["crs"].attrs['spatial_ref'])
+                else:
+                    raise ValueError("One dataset missing CRS")
+            
+        if len(set(crs_list)) != 1:
+            raise ValueError("CRS mismatch between datasets")
+
+    ref_grid = xr.open_dataset(reference_grid)
+    # the test datasets have different units for variables. 
+    # For testing, just making them all same units.
+    with xr.open_dataset(nc_files[0]) as ds_sample:
+        standardized_time = ds_sample.time.values
+
+    # Automatically grab all data variables from the first file 
+    # if variables of interest is not provided.
+    if variables_of_interest is None:
+        with xr.open_dataset(nc_files[0]) as temp_ds:
+            variables_of_interest = list(temp_ds.data_vars)
+
+    combined_variables_dict = {}
+    for var in variables_of_interest:
+        reindexed_var_arrays = []
+        for nc_file in nc_files:
+            with xr.open_dataset(nc_file) as ds:
+                # the test datasets have different units for variables. 
+                # For testing, just making them all same units.
+                for data_var in ds.data_vars:
+                    ds[data_var].attrs['variable units'] = 'm'
+
+                # Isolate the target variable to protect other variables from blooming into NaNs prematurely
+                var_of_interest = ds[var]
+
+                # Map to the national spatial coordinates layout
+                var_reindexed = var_of_interest.reindex(y=ref_grid.y, x=ref_grid.x, method="nearest", tolerance=tolerance)
+
+                # Unify the timestamp - this is only for testing. 
+                # In reality, all grids will have the same simulation timesteps
+                var_aligned = var_reindexed.assign_coords(time=standardized_time)
+                reindexed_var_arrays.append(var_aligned)
+
+            # merge the variable for all individual basins
+            combined_variables_dict[var] = reduce(lambda left, right: left.combine_first(right), reindexed_var_arrays)
+    
+    ds_combined = xr.Dataset(data_vars=combined_variables_dict, 
+                           coords={"time": standardized_time, "y": ref_grid.y, "x": ref_grid.x}, 
+                           attrs=ref_grid.attrs)
+            
+    encoding_config = {}
+    for var_name in variables_of_interest:
+        encoding_config[str(var_name)] = {
+            "zlib": True,
+            "complevel": 4,
+            "_FillValue": fill_value,
+        }
+
+    return ds_combined, encoding_config
 # endregion

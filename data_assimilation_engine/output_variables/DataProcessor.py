@@ -12,105 +12,62 @@ from shapely import intersects_xy
 from pyproj import CRS
 from typing import List, Optional
 from .DataReader import DataReader
-
+from . import consts
 
 class DataProcessor(DataReader):
     """
     Handles catchment-time NetCDF and grid generation.
     """
-    def __init__(self, catchment_output_netcdf_file: str, gpkg_file: str, template_grid_file_name: str, 
+    def __init__(self, catchment_netcdf_file: str, gpkg_file: str,
                   config_path: str, output_class: str | None, category: str | None, 
-                  domain: str | None, produce_template: bool, produce_output: bool, chunk_size: int = 100) -> None:
+                  domain: str | None, chunk_size: int = 100) -> None:
+        
+        super().__init__(catchment_netcdf_file, chunk_size)
+
+        self._catchment_ds: xr.Dataset = self.dataset
+        self._gpkg_file = gpkg_file
+        self._config_path = config_path
+        self._output_class = output_class
         if category in ['channel_rt', 'reservoir', 'total_water']:
             raise ValueError(f"The requested category - {category} - is not a gridded netcdf. This cannot be processed.")
+        else:
+            self._category = category
+            self._domain = domain
         
-        super().__init__(catchment_output_netcdf_file, chunk_size)
-
-        self.catchment_ds: xr.Dataset = self.dataset
-        self.output_variables = list(self.catchment_ds.data_vars)
         # Normalize catchment ids in netcdf with a cat- prefix for consistency.
-        self.nc_catchments = self._normalize_catchment_ids(self.catchment_ds[self.catchment_coord].values)
+        nc_catchments = self._normalize_catchment_ids(self._catchment_ds[self.catchment_coord].values)
         
         # Read geopackage, determine schema and "divides" layer
-        self.is_new_NHF_schema: bool = self._is_new_NHF_schema(gpkg_file, "reference_flowpaths")
+        is_new_NHF_schema: bool = self._is_new_NHF_schema(gpkg_file, "reference_flowpaths")
         gpkg_gdf = gpd.read_file(gpkg_file, layer="divides")
         if gpkg_gdf.empty:
             raise ValueError("No polygon geometries found in GeoPackage")
 
         # Check schema and assign catchment ID field.
-        if self.is_new_NHF_schema:
+        if is_new_NHF_schema:
             self.catchment_field = "div_id"
         else:
             self.catchment_field = "divide_id"
 
         # Normalize catchment ids in gpkg with a 'cat-' prefix for consistency.
         gpkg_gdf[self.catchment_field] = self._normalize_catchment_ids(gpkg_gdf[self.catchment_field].values)
-        self.gpkg_catchment_list = gpkg_gdf[self.catchment_field].values.tolist()
+        gpkg_catchment_list = gpkg_gdf[self.catchment_field].values.tolist()
+        self._gpkg_gdf = gpkg_gdf
         
         # Check if catchments from netcdf and geopackage match
-        if set(self.nc_catchments) != set(self.gpkg_catchment_list):
+        if set(nc_catchments) != set(gpkg_catchment_list):
             raise ValueError("There is a mistmatch between catchment IDs in geopackage and netcdf")   
 
-        if produce_template:
-            self.create_template_grid_netcdf_using_config(gpkg_gdf, template_grid_file_name,
-                                                          config_path, output_class, category, domain)
-        self.ds_template_grid = xr.open_dataset(template_grid_file_name)
-        
-        if produce_output:
-            # change variable name in the randomvals.nc This is strictly for testing purposes. 
-            # The commented code below is meant to test various categories.
-            # analysis_assim.land.conus
-            # self.catchment_ds = self.catchment_ds.rename({
-            #     'sm_frac_0.4m': 'ACCET',
-            #     'sm_profile_0.1m': 'ACSNOM',
-            #     'sm_profile_0.4m': 'EDIR',
-            #     'sm_profile_1.5m': 'ISNOW',
-            #     'sm_profile_2m': 'QRAIN',
-            #     'SWE_mm': 'QSNOW'
-            # })
-            
-            # analysis_assim.terrain_rt.conus; medium_range_blend.terrain_rt.conus
-            self.catchment_ds = self.catchment_ds.drop_vars(["sm_profile_0.4m", "sm_profile_1.5m", "sm_profile_2m", "SWE_mm"])
-            self.catchment_ds = self.catchment_ds.rename({
-                'sm_frac_0.4m': 'sfcheadsubrt',
-                'sm_profile_0.1m': 'zwattablrt'
-            })
 
-            # long_range.land_2.conus
-            # self.catchment_ds = self.catchment_ds.rename({
-            #     'sm_frac_0.4m': 'ACCET',
-            #     'sm_profile_0.1m': 'UGDRNOFF',
-            #     'sm_profile_0.4m': 'SOILSAT',
-            #     'sm_profile_1.5m': 'SFCRNOFF',
-            #     'sm_profile_2m': 'SOILSAT_TOP',
-            #     'SWE_mm': 'SNEQV'
-            # })
+    def set_template_grid(self, template_grid_path: str):
+        self.ds_template_grid = xr.open_dataset(template_grid_path)
 
-            # medium_range_blend.land.conus
-            # self.catchment_ds = self.catchment_ds.rename({
-            #     'sm_frac_0.4m': 'FSA',
-            #     'sm_profile_0.1m': 'FIRA',
-            #     'sm_profile_0.4m': 'HFX',
-            #     'sm_profile_1.5m': 'TRAD',
-            #     'sm_profile_2m': 'LH',
-            #     'SWE_mm': 'SNEQV'
-            # })
-
-            catchment_grid = self.build_catchment_id_grid(template_grid_file_name, gpkg_gdf, "x", "y") # Change hardcoded values later
-            mapped_grid = self.map_catchment_data_to_grid(catchment_grid, "catchments","time") # Change hardcoded values later
-            output_dir = 'sample_data/sample_netcdf/sample_output/final_test' #Change this to command line argument later
-            start_time = time.perf_counter()
-            self.write_netcdf_per_timestep(mapped_grid, output_dir, "time")
-            end_time = time.perf_counter()
-            duration_minutes = (end_time - start_time) / 60
-            print(f"Function execution time: {duration_minutes:.4f} minutes")
-            
     def _is_new_NHF_schema(self, geopackage_path: str, layer_name: str) -> bool:
         """
         Check the data schema in the geopackage for the new NHF format
         """
         layers = gpd.list_layers(geopackage_path)
-        tabular_layers = layers[layers['geometry_type'].isna()]
+        tabular_layers = layers[layers[consts.GPKG_GEOMETRY_TYPE_IDENTIFIER].isna()]
         return layer_name.lower() in tabular_layers['name'].tolist()
     
     def _normalize_catchment_ids(self, ids) -> np.ndarray:
@@ -132,27 +89,22 @@ class DataProcessor(DataReader):
         elif direction == np.ceil:
             return origin + np.ceil((value - origin) / resolution) * resolution
     
-    def create_template_grid_netcdf_using_config(self, geopackage_gdf: gpd.GeoDataFrame, template_grid_netcdf_path: str,
-        config_path: str,
-        output_class: str,
-        category: str,
-        domain: str
-    ) -> None:
+    def create_template_grid_netcdf_using_config(self, template_grid_netcdf_path: str) -> None:
         """
         Create a template grid aligned to a reference grid defined in config.json.
         The template grid covers the extents in the geopackage (usually basin level).
         """
         # Read config file
-        with open(config_path, "r") as f:
+        with open(self._config_path, "r") as f:
             config = json.load(f)
 
         # Find matching entry
         entry = next((c_item for c_item in config["files"] if 
-              c_item["class"] == output_class and 
-              c_item["category"] == category and 
-              c_item["domain"] == domain), None)
+              c_item["class"] == self._output_class and 
+              c_item["category"] == self._category and 
+              c_item["domain"] == self._domain), None)
         if entry is None:
-            raise ValueError(f"Cannot find a config file entry that matches {output_class}, {category} and {domain}")
+            raise ValueError(f"Cannot find a config file entry that matches {self._output_class}, {self._category} and {self._domain}")
 
         origin_x = entry["origin"]["x"]
         origin_y = entry["origin"]["y"]
@@ -167,7 +119,7 @@ class DataProcessor(DataReader):
         # To do: Have to figure out a workflow when CRS is "Not Available"
         target_crs = CRS.from_user_input(wkt) 
         
-        gdf = geopackage_gdf.to_crs(target_crs)
+        gdf = self._gpkg_gdf.to_crs(target_crs)
         geom = unary_union(gdf.geometry) 
         
         # Get bounding box and snap to origin in config
@@ -210,18 +162,78 @@ class DataProcessor(DataReader):
         ds_clipped = ds_masked.dropna(dim=y_name, how="all")
         ds_clipped = ds_clipped.dropna(dim=x_name, how="all")
 
+        # Reinforce crs as a scalar variable.
+        # This removes the string1 dimension that gets added
+        # and creates crs as a string scalar variable.
+        crs_attrs = ds_clipped["crs"].attrs
+        ds_clipped = ds_clipped.drop_encoding()
+        del ds_clipped["crs"]
+        ds_clipped["crs"] = xr.DataArray("", dims=())
+        ds_clipped["crs"].attrs = crs_attrs
+
         # Save
         ds_clipped.to_netcdf(template_grid_netcdf_path)
+        self.ds_template_grid = xr.open_dataset(template_grid_netcdf_path)
+
         print(f"NetCDF template grid written to {template_grid_netcdf_path}")
 
-    def build_catchment_id_grid(self, template_nc_path: str, gpkg_gdf: gpd.GeoDataFrame, 
-        x_dim: str = "x",
-        y_dim: str = "y",
-    ) -> xr.DataArray:
+    def produce_nwm_output_grid(self, output_dir: str) -> None:
+        # change variable name in the randomvals.nc This is strictly for testing purposes. 
+        # The case statements should be removed before going into production.
+        cat_class_domain = self._output_class + '_' + self._category +  '_' + self._domain
+        match cat_class_domain:
+            case "analysis_assim_land_conus":
+                # analysis_assim.land.conus
+                self._catchment_ds = self._catchment_ds.rename({
+                    'sm_frac_0.4m': 'ACCET',
+                    'sm_profile_0.1m': 'ACSNOM',
+                    'sm_profile_0.4m': 'EDIR',
+                    'sm_profile_1.5m': 'ISNOW',
+                    'sm_profile_2m': 'QRAIN',
+                    'SWE_mm': 'QSNOW'
+                })
+            case "analysis_assim_terrain_rt_conus" | "medium_range_blend_terrain_rt_conus":
+                # analysis_assim.terrain_rt.conus; medium_range_blend.terrain_rt.conus
+                self._catchment_ds = self._catchment_ds.drop_vars(["sm_profile_0.4m", "sm_profile_1.5m", "sm_profile_2m", "SWE_mm"])
+                self._catchment_ds = self._catchment_ds.rename({
+                    'sm_frac_0.4m': 'sfcheadsubrt',
+                    'sm_profile_0.1m': 'zwattablrt'
+                })
+            case "long_range_land_2_conus":
+                # long_range.land_2.conus
+                self._catchment_ds = self._catchment_ds.rename({
+                    'sm_frac_0.4m': 'ACCET',
+                    'sm_profile_0.1m': 'UGDRNOFF',
+                    'sm_profile_0.4m': 'SOILSAT',
+                    'sm_profile_1.5m': 'SFCRNOFF',
+                    'sm_profile_2m': 'SOILSAT_TOP',
+                    'SWE_mm': 'SNEQV'
+                })
+            case "medium_range_blend_land_conus": 
+                # medium_range_blend.land.conus
+                self._catchment_ds = self._catchment_ds.rename({
+                    'sm_frac_0.4m': 'FSA',
+                    'sm_profile_0.1m': 'FIRA',
+                    'sm_profile_0.4m': 'HFX',
+                    'sm_profile_1.5m': 'TRAD',
+                    'sm_profile_2m': 'LH',
+                    'SWE_mm': 'SNEQV'
+                })
+
+        catchment_grid = self.build_catchment_id_grid("x", "y") # Change hardcoded values later
+        mapped_grid = self.map_catchment_data_to_grid(catchment_grid, consts.DIM_CATCHMENTS)
+        
+        start_time = time.perf_counter()
+        self.write_netcdf_per_timestep(mapped_grid, output_dir, consts.DIM_TIME)
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"Function execution time: {duration_minutes:.4f} minutes")
+
+    def build_catchment_id_grid(self, x_dim: str = "x", y_dim: str = "y") -> xr.DataArray:
         """
         Returns a DataArray (y, x) where each cell in the basin-level grid contains a catchment ID.
         """
-        ds = xr.open_dataset(template_nc_path)
+        ds = self.ds_template_grid
         x = ds[x_dim].values
         y = ds[y_dim].values
 
@@ -249,7 +261,7 @@ class DataProcessor(DataReader):
 
         # Spatial join with catchments for grid point to catchment association
         # To do: Using sjoin here. For larger areas, we may need to revisit if computing efficiency drops.
-        gdf_poly = gpkg_gdf.to_crs(crs)
+        gdf_poly = self._gpkg_gdf.to_crs(crs)
         joined = gpd.sjoin(
             gdf_ncgrid_points,
             gdf_poly[[self.catchment_field, "geometry"]],
@@ -271,13 +283,13 @@ class DataProcessor(DataReader):
         return catchment_id_da
     
     def map_catchment_data_to_grid(self, catchment_grid: xr.DataArray,
-                                   catchment_dim: str = "catchments", time_dim: str = "time"
+                                   catchment_dim: str = consts.DIM_CATCHMENTS
     ) -> xr.Dataset:
         """
         Assign catchment-based variables onto basin-level grid using the catchment_id grid.
         """
 
-        ds_data = self.catchment_ds
+        ds_data = self._catchment_ds
 
         # Convert catchment IDs to index positions
         catchment_ids = ds_data[catchment_dim].values
