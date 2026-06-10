@@ -1,7 +1,7 @@
 import fsspec
 import xarray as xr
 import numpy as np
-
+from . import consts
 
 class DataReader:
     def __init__(self, netcdf_file: str, chunk_size: int = 100) -> None:
@@ -16,8 +16,8 @@ class DataReader:
             ds: xr.Dataset = xr.open_dataset(
                 f,
                 chunks={
-                    "time": 1,
-                    "catchment": self.chunk_size
+                    consts.DIM_TIME: 1,
+                    consts.DIM_CATCHMENTS: self.chunk_size
                 }
             )
             return ds.load()
@@ -42,7 +42,7 @@ class DataReader:
 
         with fsspec.open(self.netcdf_file, mode="rb") as f:
             ds = xr.open_dataset(f)
-        if ds.sizes.get("time", 0) > 48:    
+        if ds.sizes.get(consts.DIM_TIME, 0) > 48:    
             ds_48 = ds.isel(time=slice(0, 48))
         else:
             ds_48 = ds

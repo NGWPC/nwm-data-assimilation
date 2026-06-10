@@ -65,9 +65,10 @@ Positional Arguments:
 
 #### create-combined-basin-grid:
 This function is primarily used for producing intermediate files for testing. This should be deleted when scripts are production-ready.
-python netcdf_production_sample.py create-combined-basin-grid nwm_timestep_grid_path nwm_multibasin_grid_path
+python netcdf_production_sample.py create-combined-basin-grid nwm_reference_grid nwm_timestep_grid_path nwm_multibasin_grid_path
 
 Positional Arguments:  
+- nwm_reference_grid: Reference NWM grid for a given category, class and domain.
 - nwm_timestep_grid_path: Path to the folder where the necessary timestep netcdf files have been created.
 - nwm_multibasin_grid_path: Path to the folder where all the combined/merged multi-basin grids will be saved.
 
@@ -92,4 +93,4 @@ python netcdf_production_sample.py obtain-netcdf-metadata sample_data/nwm_output
 python netcdf_production_sample.py create-template-nwm-grid sample_data/nwm_output sample_data/nwm_templates
 
 #### create-combined-basin-grid
-python netcdf_production_sample.py create-combined-basin-grid sample_data/sample_netcdf/sample_output/merge_test sample_data/sample_netcdf/sample_output/merge_test
+python netcdf_production_sample.py create-combined-basin-grid sample_data/nwm_output/analysis_assim/nwm.t00z.analysis_assim.land.tm00.conus.nc sample_data/sample_netcdf/sample_output/merge_test sample_data/sample_netcdf/sample_output/merge_test

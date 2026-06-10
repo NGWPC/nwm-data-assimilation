@@ -13,12 +13,16 @@ def randomize_values(netcdf_file: str, output_file: str) -> None:
 def create_template_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
     #Usage
     # python netcdf_production_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
-    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, config_json_file, 'medium_range_blend', 'terrain_rt', 'conus', True, False)
+    processor = DataProcessor(netcdf_file, gpkg_file, config_json_file, 'analysis_assim', 'land', 'conus')
+    processor.create_template_grid_netcdf_using_config(template_grid_file)
 
 def create_nwm_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
     #Usage:
     # python netcdf_production_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
-    processor = DataProcessor(netcdf_file, gpkg_file, template_grid_file, config_json_file, 'analysis_assim', 'land', 'conus', False, True)
+    processor = DataProcessor(netcdf_file, gpkg_file, config_json_file, 'analysis_assim', 'land', 'conus')
+    processor.set_template_grid(template_grid_file)
+    output_dir = 'sample_data/sample_netcdf/sample_output/new_test'
+    processor.produce_nwm_output_grid(output_dir)
 
 def download_netcdf_from_nomads(download_url: str, output_folder: str):
     #Usage:
@@ -36,10 +40,10 @@ def create_template_nwm_grids_data(netcdf_root_folder: str, templates_folder: st
     # python netcdf_production_sample.py create-template-nwm-grid sample_data/nwm_output sample_data/nwm_templates
     utils.create_nwm_template_grids(netcdf_root_folder, templates_folder)
 
-def combine_basin_grids(netcdf_folder: str, output_folder: str):
+def combine_basin_grids(reference_grid: str, netcdf_folder: str, output_folder: str):
     #Usage:
-    # python netcdf_production_sample.py create-combined-basin-grid sample_data/sample_netcdf/sample_output/merge_test sample_data/sample_netcdf/sample_output/merge_test
-    utils.create_combined_basin_netcdf_products(netcdf_folder, output_folder)
+    # python netcdf_production_sample.py create-combined-basin-grid sample_data/nwm_output/analysis_assim/nwm.t00z.analysis_assim.land.tm00.conus.nc sample_data/sample_netcdf/sample_output/merge_test sample_data/sample_netcdf/sample_output/merge_test
+    utils.create_combined_basin_netcdf_products(reference_grid, netcdf_folder, output_folder)
 
 def main() -> None:
 
@@ -83,6 +87,7 @@ def main() -> None:
 
     #create basin level netcdf using timestep netcdfs
     parser_basin_grids = subparsers.add_parser("create-combined-basin-grid")
+    parser_basin_grids.add_argument("reference_grid")
     parser_basin_grids.add_argument("timestep_grids_folder")
     parser_basin_grids.add_argument("output_basin_grids_folder")
 
@@ -101,7 +106,7 @@ def main() -> None:
     elif args.command == "create-template-nwm-grid":
         create_template_nwm_grids_data(args.nwm_output_grids_folder, args.nwm_template_grids_folder)
     elif args.command == "create-combined-basin-grid":
-        combine_basin_grids(args.timestep_grids_folder, args.output_basin_grids_folder)
+        combine_basin_grids(args.reference_grid, args.timestep_grids_folder, args.output_basin_grids_folder)
     else:
         parser.print_help()
     
