@@ -1,33 +1,27 @@
 #!/usr/bin/env python3
-"""
-Fetch NHF gage GeoPackages from the Icefabric API for SWE reprocessing.
-
-This script is intended for the Data Assimilation NHF SWE reprocessing story:
-  1. Read a gage list, e.g. USGS_gages.txt from icefabric.
-  2. Filter to domains with SNODAS coverage: CONUS, Alaska, Hawaii.
-  3. Retrieve each gage GeoPackage from the Icefabric API with source=nhf.
-  4. Write per-domain manifests so failures can be retried or documented.
-
-Example:
-    python -m data_assimilation_engine.swe.SNODAS_preprocessing.fetch_nhf_gage_gpkgs \
-      --gage-list USGS_gages.txt \
-      --output-dir /tmp/nhf_gpkgs \
-      --environment oe \
-      --domains CONUS Alaska Hawaii \
-      --manifest nhf_gpkg_fetch_manifest.csv
-"""
+"""Fetch NHF gage GeoPackages from Icefabric for multiple gage providers."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-import os
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, Optional
+from urllib.parse import quote
 
 import httpx
+
+try:
+    from data_assimilation_engine.swe.SNODAS_preprocessing.nhf_gage_list_utils import (
+        GageRecord,
+        normalize_domain,
+        read_gage_lists,
+        safe_file_id,
+    )
+except ImportError:  # standalone/local execution
+    from nhf_gage_list_utils import GageRecord, normalize_domain, read_gage_lists, safe_file_id
 
 DEFAULT_LAYERS = [
     "divides",
@@ -42,76 +36,19 @@ DEFAULT_LAYERS = [
     "hydrolocations",
 ]
 
-DOMAIN_TO_API = {
-    "conus": "CONUS",
-    "CONUS": "CONUS",
-    "ak": "Alaska",
-    "alaska": "Alaska",
-    "Alaska": "Alaska",
-    "hi": "Hawaii",
-    "hawaii": "Hawaii",
-    "Hawaii": "Hawaii",
-    "prvi": "Puerto_Rico",
-    "puerto_rico": "Puerto_Rico",
-    "Puerto_Rico": "Puerto_Rico",
-    "gl": "Great_Lakes",
-    "great_lakes": "Great_Lakes",
-    "Great_Lakes": "Great_Lakes",
-}
-
 SNODAS_DOMAINS_DEFAULT = {"CONUS", "Alaska", "Hawaii"}
-
-
-@dataclass
-class GageRecord:
-    gage_id: str
-    domain: str
-    agency: str = ""
-    enabled: str = ""
 
 
 @dataclass
 class FetchResult:
     gage_id: str
+    file_id: str
     domain: str
+    agency: str
     status: str
     output_file: str
     url: str
     note: str = ""
-
-
-def normalize_domain(domain: str) -> str:
-    value = DOMAIN_TO_API.get(str(domain).strip())
-    if value is None:
-        raise ValueError(f"Unsupported domain '{domain}'. Known domains: {sorted(DOMAIN_TO_API)}")
-    return value
-
-
-def read_gage_list(path: str | Path, domains: Optional[set[str]] = None) -> List[GageRecord]:
-    """Read an icefabric-style gage list.
-
-    Expected rows can be tab- or whitespace-separated, usually like:
-        01021480    CONUS    USGS    true
-
-    Lines starting with '#' and blank lines are skipped.
-    """
-    records: List[GageRecord] = []
-    with open(path, "r", encoding="utf-8") as fp:
-        for line_no, raw_line in enumerate(fp, start=1):
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.replace(",", " ").split()
-            if len(parts) < 2:
-                raise ValueError(f"Invalid gage-list row {line_no}: {raw_line!r}")
-            gage_id = parts[0].strip()
-            domain = normalize_domain(parts[1].strip())
-            agency = parts[2].strip() if len(parts) > 2 else ""
-            enabled = parts[3].strip() if len(parts) > 3 else ""
-            if domains and domain not in domains:
-                continue
-            records.append(GageRecord(gage_id=gage_id, domain=domain, agency=agency, enabled=enabled))
-    return records
 
 
 def icefabric_base_url(environment: str) -> str:
@@ -128,26 +65,28 @@ def fetch_one_gpkg(
     output_dir: Path,
     environment: str,
     source: str = "nhf",
-    timeout_note: str = "",
     overwrite: bool = False,
     layers: Optional[list[str]] = None,
 ) -> FetchResult:
     layers = layers or DEFAULT_LAYERS
-    domain_dir = output_dir / record.domain
+    file_id = safe_file_id(record.gage_id)
+    domain_dir = output_dir / record.domain / (record.agency or "UNKNOWN")
     domain_dir.mkdir(parents=True, exist_ok=True)
 
-    # Icefabric/MSWM convention is gauge_<gage>.gpkg.  The SWE processor accepts both gauge_ and gages-.
-    output_file = domain_dir / f"gauge_{record.gage_id}.gpkg"
-    url = f"{icefabric_base_url(environment)}/{record.gage_id}/gpkg"
+    output_file = domain_dir / f"gauge_{file_id}.gpkg"
+    basin_for_url = quote(record.gage_id, safe="")
+    url = f"{icefabric_base_url(environment)}/{basin_for_url}/gpkg"
 
     if output_file.exists() and not overwrite and output_file.stat().st_size > 0:
         return FetchResult(
-            gage_id=record.gage_id,
-            domain=record.domain,
-            status="exists",
-            output_file=str(output_file),
-            url=url,
-            note="file already exists; use --overwrite to replace",
+            record.gage_id,
+            file_id,
+            record.domain,
+            record.agency,
+            "exists",
+            str(output_file),
+            url,
+            "file already exists; use --overwrite to replace",
         )
 
     params = {
@@ -164,28 +103,32 @@ def fetch_one_gpkg(
         if not content or len(content) < 1024:
             return FetchResult(
                 record.gage_id,
+                file_id,
                 record.domain,
+                record.agency,
                 "empty_response",
                 str(output_file),
                 str(response.url),
-                f"response size={len(content) if content else 0} bytes {timeout_note}",
+                f"response size={len(content) if content else 0} bytes",
             )
         output_file.write_bytes(content)
-        return FetchResult(record.gage_id, record.domain, "downloaded", str(output_file), str(response.url), "")
+        return FetchResult(record.gage_id, file_id, record.domain, record.agency, "downloaded", str(output_file), str(response.url), "")
     except httpx.TimeoutException as exc:
-        return FetchResult(record.gage_id, record.domain, "timeout", str(output_file), url, str(exc))
+        return FetchResult(record.gage_id, file_id, record.domain, record.agency, "timeout", str(output_file), url, str(exc))
     except httpx.HTTPStatusError as exc:
-        return FetchResult(record.gage_id, record.domain, f"http_{exc.response.status_code}", str(output_file), str(exc.request.url), str(exc))
-    except Exception as exc:  # noqa: BLE001 - manifest should capture all unexpected failures
-        return FetchResult(record.gage_id, record.domain, "failed", str(output_file), url, repr(exc))
+        return FetchResult(record.gage_id, file_id, record.domain, record.agency, f"http_{exc.response.status_code}", str(output_file), str(exc.request.url), str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return FetchResult(record.gage_id, file_id, record.domain, record.agency, "failed", str(output_file), url, repr(exc))
 
 
 def write_manifest(path: str | Path, rows: Iterable[FetchResult]) -> None:
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True) if path.parent != Path(".") else None
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(rows)
+    fieldnames = list(asdict(rows[0]).keys()) if rows else ["gage_id", "file_id", "domain", "agency", "status", "output_file", "url", "note"]
     with open(path, "w", newline="", encoding="utf-8") as fp:
-        writer = csv.DictWriter(fp, fieldnames=list(asdict(rows[0]).keys()) if rows else ["gage_id", "domain", "status", "output_file", "url", "note"])
+        writer = csv.DictWriter(fp, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
             writer.writerow(asdict(row))
@@ -193,11 +136,14 @@ def write_manifest(path: str | Path, rows: Iterable[FetchResult]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch NHF gage GeoPackages from Icefabric API.")
-    parser.add_argument("--gage-list", required=True, help="Path to USGS_gages.txt or equivalent whitespace-separated gage list.")
-    parser.add_argument("--output-dir", required=True, help="Directory to write downloaded geopackages. Files are grouped by domain.")
+    parser.add_argument("--gage-list", required=True, nargs="+", help="One or more gage-list files. Supports USGS, TXDOT, ENVCA, CADWR formats.")
+    parser.add_argument("--output-dir", required=True, help="Directory to write downloaded geopackages, grouped by domain/provider.")
     parser.add_argument("--environment", choices=["test", "oe"], default="oe", help="Icefabric API environment.")
     parser.add_argument("--source", choices=["hf", "nhf"], default="nhf", help="Hydrofabric source/version to request.")
     parser.add_argument("--domains", nargs="+", default=["CONUS", "Alaska", "Hawaii"], help="Domains to process. Default: CONUS Alaska Hawaii.")
+    parser.add_argument("--default-domain", default="CONUS", help="Domain to use for one-column lists, e.g. TXDOT_gages.txt.")
+    parser.add_argument("--default-agency", default="", help="Agency/provider to use when not present in the file; otherwise inferred from filename.")
+    parser.add_argument("--enabled-only", action="store_true", help="Only process rows whose enabled flag is true/1/yes when present.")
     parser.add_argument("--manifest", default="nhf_gpkg_fetch_manifest.csv", help="CSV manifest output path.")
     parser.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout seconds per request.")
     parser.add_argument("--sleep", type=float, default=0.0, help="Optional sleep seconds between API calls.")
@@ -206,22 +152,26 @@ def main() -> None:
     args = parser.parse_args()
 
     domains = {normalize_domain(d) for d in args.domains}
-    # Keep the default story scope constrained to SNODAS-supported domains unless caller explicitly changes --domains.
     invalid_for_story = domains - SNODAS_DOMAINS_DEFAULT
     if invalid_for_story:
         print(f"WARNING: requested domains outside default SNODAS NHF story scope: {sorted(invalid_for_story)}")
 
-    records = read_gage_list(args.gage_list, domains=domains)
-    if args.limit is not None:
-        records = records[: args.limit]
+    records = read_gage_lists(
+        args.gage_list,
+        domains=domains,
+        default_domain=args.default_domain,
+        default_agency=args.default_agency,
+        enabled_only=args.enabled_only,
+        limit=args.limit,
+    )
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    results: List[FetchResult] = []
+    results: list[FetchResult] = []
     with httpx.Client(timeout=args.timeout) as client:
         for i, record in enumerate(records, start=1):
-            print(f"[{i}/{len(records)}] fetching {record.domain} gage {record.gage_id}")
+            print(f"[{i}/{len(records)}] fetching {record.domain}/{record.agency or 'UNKNOWN'} gage {record.gage_id}")
             result = fetch_one_gpkg(
                 client=client,
                 record=record,
@@ -238,9 +188,9 @@ def main() -> None:
     write_manifest(args.manifest, results)
     print(f"Wrote manifest: {args.manifest}")
     if results:
-        counts = {}
-        for result in results:
-            counts[result.status] = counts.get(result.status, 0) + 1
+        counts: dict[str, int] = {}
+        for row in results:
+            counts[row.status] = counts.get(row.status, 0) + 1
         print("Status counts:")
         for status, count in sorted(counts.items()):
             print(f"  {status}: {count}")

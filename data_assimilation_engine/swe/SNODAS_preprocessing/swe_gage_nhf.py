@@ -90,8 +90,40 @@ def s3_to_bucket_key(s3_path: str) -> tuple[str, str]:
 def run_cmd(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
-
 def copy_from_s3_or_local(src: str, dst: str | Path) -> bool:
+    dst = str(dst)
+
+    if is_s3_path(src):
+        ls_cmd = ["aws", "s3", "ls", src]
+        cp_cmd = ["aws", "s3", "cp", src, dst, "--only-show-errors"]
+
+        if os.environ.get("AWS_REQUEST_PAYER", "").lower() in ("1", "true", "requester"):
+            ls_cmd.extend(["--request-payer", "requester"])
+            cp_cmd.extend(["--request-payer", "requester"])
+
+        exists = subprocess.run(
+            ls_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+
+        if not exists:
+            return False
+
+        try:
+            run_cmd(cp_cmd)
+            return True
+        except Exception as exc:
+            print(f"WARNING: failed to download SNODAS file: {src}; {exc}")
+            return False
+
+    if os.path.exists(src):
+        shutil.copyfile(src, dst)
+        return True
+
+    return False
+
+def copy_from_s3_or_local_old(src: str, dst: str | Path) -> bool:
     dst = str(dst)
 
     if is_s3_path(src):
@@ -129,6 +161,19 @@ def build_snodas_candidates(prefix: str, date: datetime) -> list[str]:
     ]
 
     return [f"{prefix}/{name}" for name in names]
+
+def output_exists(path: str) -> bool:
+    if is_s3_path(path):
+        cmd = ["aws", "s3", "ls", path]
+        if os.environ.get("AWS_REQUEST_PAYER", "").lower() in ("1", "true", "requester"):
+            cmd.extend(["--request-payer", "requester"])
+        return subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+
+    return Path(path).exists()
 
 def copy_to_s3_or_local(src: str | Path, dst: str) -> None:
     src = str(src)
@@ -281,8 +326,14 @@ class SNODASNHFGageProcessor:
         local_output = self.local_output_file_for_gage(gage_id)
         local_output.parent.mkdir(parents=True, exist_ok=True)
 
-        if not self.overwrite and not is_s3_path(dest_file) and Path(dest_file).exists():
-            return GageResult(gage_id, self.domain, "exists", dest_file, note="use --overwrite to regenerate")
+        if not self.overwrite and output_exists(dest_file):
+            return GageResult(
+                gage_id,
+                self.domain,
+                "exists",
+                dest_file,
+                note="output already exists; use --overwrite to regenerate",
+            )
 
         try:
             gage_gdf = self.read_gage_geometry(gpkg_file)
@@ -291,13 +342,25 @@ class SNODASNHFGageProcessor:
             rows = []
             missing_nc = 0
             no_overlap = 0
+            for day_index, date in enumerate(self.dates, start=1):
+                if day_index == 1 or day_index % 30 == 0 or day_index == len(self.dates):
+                    print(
+                        f"    {gage_id}: processing day {day_index}/{len(self.dates)} "
+                        f"({date:%Y-%m-%d})",
+                        flush=True,
+                    )
 
-            for date in self.dates:
                 local_nc = self.download_snodas(date)
+                delete_local_nc = False
+
                 if local_nc is None:
                     missing_nc += 1
                     rows.append({"timestamp": date.strftime("%Y-%m-%d %H:%M:%S"), "basin_avg_swe": np.nan})
                     continue
+
+                # Keep scratch small during long historical runs.
+                if is_s3_path(self.snodas_nc_prefix):
+                    delete_local_nc = True
 
                 try:
                     with xr.open_dataset(local_nc) as ds:
@@ -364,12 +427,26 @@ class SNODASNHFGageProcessor:
                 except Exception as exc:  # noqa: BLE001
                     rows.append({"timestamp": date.strftime("%Y-%m-%d %H:%M:%S"), "basin_avg_swe": np.nan})
                     print(f"WARNING: failed processing {gage_id} {date:%Y-%m-%d}: {exc}")
+                finally:
+                    if delete_local_nc:
+                        try:
+                            Path(local_nc).unlink(missing_ok=True)
+                        except Exception:
+                            pass
 
             df = pd.DataFrame(rows)
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             df = df.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
             df.to_csv(local_output, index=False, date_format="%Y-%m-%d %H:%M:%S")
-            copy_to_s3_or_local(local_output, dest_file)
+
+            upload_failed = False
+            upload_error = ""
+            try:
+                copy_to_s3_or_local(local_output, dest_file)
+            except Exception as exc:
+                upload_failed = True
+                upload_error = repr(exc)
+
 
             valid_values = int(df["basin_avg_swe"].notna().sum())
             if valid_values == 0:
@@ -379,6 +456,11 @@ class SNODASNHFGageProcessor:
             else:
                 status = "processed"
             note = f"missing_nc_days={missing_nc}; no_overlap_days={no_overlap}"
+
+            if upload_failed:
+                status = "upload_failed"
+                note = f"{note}; local_output={local_output}; upload_error={upload_error}"
+
             return GageResult(gage_id, self.domain, status, dest_file, len(df), valid_values, note)
         except Exception as exc:  # noqa: BLE001
             return GageResult(gage_id, self.domain, "failed", dest_file, 0, 0, repr(exc))
@@ -401,6 +483,12 @@ class SNODASNHFGageProcessor:
             result = self.process_one_gage(gpkg)
             print(f"  {result.status}: {result.output_file} ({result.valid_values}/{result.rows} valid)")
             results.append(result)
+
+            # Keep scratch small between gages.
+            snodas_cache = self.scratch_dir / "snodas_nc"
+            if snodas_cache.exists():
+                shutil.rmtree(snodas_cache, ignore_errors=True)
+
         self.write_manifest(results)
         print(f"Wrote manifest: {self.manifest_file}")
         return results
