@@ -7,3 +7,6 @@ NWM_VARIABLES_LIST = ['sfcheadsubrt', 'zwattablrt', 'inflow', 'outflow', 'reserv
 DIM_TIME = "time"
 DIM_CATCHMENTS = "catchments"
 GPKG_GEOMETRY_TYPE_IDENTIFIER = "geometry_type"
+X_LOC = ['x', 'lon', 'longitude']
+Y_LOC = ['y', 'lat', 'latitude']
+CRS_INFO = ['crs', 'CRS', 'spatial_ref']

@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pyproj import CRS
-from typing import List, Set, Tuple, Optional
+from typing import List, Set, Tuple, Dict, Union, Optional
 from functools import reduce
 
 
@@ -121,22 +121,28 @@ class NetCDFMetadata:
         y_loc: str,
         wkt: Optional[str],
         variables: str,
+        dimensions: str, 
+        scalar_variables: Dict[str, List[str]], 
+        data_variables_dim: Dict[str, Union[int, float, str]],
         output_class: str,
         category: str,
         domain: str,
     ) -> None:
-        self.file_path: str = file_path
-        self.resolution_x: float = resolution_x
-        self.resolution_y: float = resolution_y
-        self.origin_x: float = origin_x
-        self.origin_y: float = origin_y
-        self.x_name: str = x_loc
-        self.y_name: str = y_loc
-        self.nwm_variables: str = variables
-        self.crs_wkt: str = wkt
-        self.output_class: str = output_class
-        self.category: str = category
-        self.domain: str = domain
+        self.file_path = file_path
+        self.resolution_x = resolution_x
+        self.resolution_y = resolution_y
+        self.origin_x = origin_x
+        self.origin_y = origin_y
+        self.x_name = x_loc
+        self.y_name = y_loc
+        self.nwm_variables = variables
+        self.nwm_dimensions = dimensions
+        self.scalar_variables = scalar_variables
+        self.data_variables_dim = data_variables_dim
+        self.crs_wkt = wkt
+        self.output_class = output_class
+        self.category = category
+        self.domain = domain
 
     def key(self) -> tuple[str, str, str]:
         """
@@ -161,7 +167,10 @@ def obtain_metadata_information(local_root: str, output_name: str) -> None:
     output_csv = os.path.join(local_root, output_name + ".csv")
     write_metadata_to_csv(metadata_list, output_csv)
     output_json = os.path.join(local_root, output_name + "_config.json")
-    write_metadata_to_config_json(metadata_list, output_json)
+    ngen_json = os.path.join(local_root, output_name + "_ngenconfig.json")
+    write_metadata_to_config_json(metadata_list, output_json, ngen_json)
+    
+    
 
 def process_downloaded_files(local_root: str) -> List[NetCDFMetadata]:
     """
@@ -181,9 +190,6 @@ def extract_netcdf_metadata(file_path: str) -> NetCDFMetadata:
 
     filename = os.path.basename(file_path)
     output_class, category, domain = parse_filename_metadata(filename)
-    x_loc_info = ['x', 'lon', 'longitude']
-    y_loc_info = ['y', 'lat', 'latitude']
-    crs_info = ['crs', 'CRS', 'spatial_ref']
     res_x = -9999
     res_y = -9999
     origin_x = -9999
@@ -191,27 +197,42 @@ def extract_netcdf_metadata(file_path: str) -> NetCDFMetadata:
     proj_wkt = 'Not Available'
     vars_in_netcdf = []
     nwm_variables = ''
+    dimensions = ''
     x_loc_name = ''
     y_loc_name = ''
+    scalar_dict = {}
+    data_dict = {}
 
     ds = xr.open_dataset(file_path)
+    dimensions = ", ".join(ds.sizes.keys());
     for nwm_var in ds.variables:
-        if nwm_var in x_loc_info: #XRes: assume only one of the x_loc_info will be in the file
+        dims_list = list(ds[nwm_var].dims)
+        num_dims = len(dims_list)
+        if num_dims == 0:
+            scalar_val = ds[nwm_var].values.item()
+            if isinstance(scalar_val, bytes): #scalar variables need to be converted from bytes to string.
+                scalar_val = scalar_val.decode('utf-8')
+            scalar_dict[str(nwm_var)] = scalar_val
+        elif num_dims > 0:
+            data_dict[str(nwm_var)] = dims_list
+        
+        if nwm_var in consts.X_LOC: #XRes: assume only one of the x_loc will be in the file
             x = ds.variables[nwm_var].values
             res_x = compute_resolution(x)
             origin_x = float(x.min())
             x_loc_name = nwm_var
-        elif nwm_var in y_loc_info: #YRes: assume only one of the y_loc_info will be in the file
+        elif nwm_var in consts.Y_LOC: #YRes: assume only one of the y_loc will be in the file
             y = ds.variables[nwm_var].values
             res_y = compute_resolution(y)
             origin_y = float(y.min())
             y_loc_name = nwm_var
-        elif nwm_var in crs_info: #CRS wkt
+        elif nwm_var in consts.CRS_INFO: #CRS wkt
             proj_wkt = extract_wkt_from_crs(ds.variables[nwm_var])
         elif nwm_var in consts.NWM_VARIABLES_LIST: #NWM output variables
             vars_in_netcdf.append(nwm_var)
     nwm_variables = ", ".join(vars_in_netcdf)
-    return NetCDFMetadata(file_path, res_x, res_y, origin_x, origin_y, x_loc_name, y_loc_name, proj_wkt, nwm_variables, output_class, category, domain)
+    return NetCDFMetadata(file_path, res_x, res_y, origin_x, origin_y, x_loc_name, y_loc_name, proj_wkt, 
+                          nwm_variables, dimensions, scalar_dict, data_dict, output_class, category, domain)
 
 def compute_resolution(coords: np.ndarray) -> float:
     """
@@ -275,9 +296,9 @@ def write_metadata_to_csv(metadata_list: List[NetCDFMetadata], output_csv: str) 
                 }
             )
 
-def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_json: str) -> None:
+def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_json: str, ngen_json: str) -> None:
     """
-    Writes NetCDFMetadata objects to config JSON using WKT CRS.
+    Writes NetCDFMetadata objects to config JSON.
     """
     info_list = []
     for mdata in metadata_list:
@@ -297,6 +318,9 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
             },
             "crs_wkt": mdata.crs_wkt,
             "nwm_variables": mdata.nwm_variables,
+            "nwm_dimensions": mdata.nwm_dimensions,
+            "nwm_scalar_variables": mdata.scalar_variables,
+            "nwm_var_dimensions": mdata.data_variables_dim,
             "class": mdata.output_class,
             "category": mdata.category,
             "domain": mdata.domain
@@ -310,6 +334,27 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
         json.dump(config, f, indent = 2)
 
     print(f"Config JSON written to: {output_json}")
+
+    info_list = []
+    for mdata in metadata_list:
+        metadata_info_dict = {
+            "class": mdata.output_class,
+            "category": mdata.category,
+            "domain": mdata.domain,
+            "nwm_variables": mdata.nwm_variables,
+            "nwm_dimensions": mdata.nwm_dimensions,
+            "nwm_scalar_variables": mdata.scalar_variables,
+            "nwm_var_dimensions": mdata.data_variables_dim
+        }
+        info_list.append(metadata_info_dict)
+
+    config = {
+        "nwm_info": info_list
+    }
+    with open(ngen_json, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent = 2)
+
+    print(f"Config JSON written to: {ngen_json}")
 
 def debug_netcdf_structure_in_folder(folder_path: str) -> None:
     """
