@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os, sys, time, math
 from string import *
 from datetime import datetime, timedelta
