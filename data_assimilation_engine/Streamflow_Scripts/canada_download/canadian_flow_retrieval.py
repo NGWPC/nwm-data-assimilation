@@ -2,11 +2,13 @@
 
 from contextlib import closing
 import os, sys, time, getopt, re
-import datetime, time
+from datetime import datetime, timedelta
+import time
 import pytz
 from string import *
 from six.moves import urllib
 import ssl
+import fetch_hydrometric_csv
 #import HTMLParser
 
 
@@ -46,32 +48,36 @@ def fetch_ca_sites( sites, province, odir ):
     # Loop through each station
     #
     for site_id in sites:
-        print( datetime.datetime.now(), end = " --- " )
+        print( datetime.now(), end = " --- " )
         print( 'downloading ', site_id )
         #
         # Construct the query URL
         # 
-        dirstring = 'https://dd.weather.gc.ca/hydrometric/csv/' + province + '/hourly/'
-        filename = province + '_' + site_id + '_hourly_hydrometric.csv'
-        URL = ( dirstring + filename )
-        localFile = odir + os.path.sep + filename
-        print( datetime.datetime.now(), end = " --- " )
-        print( "URL: " + URL)
-        print( datetime.datetime.now(), end = " --- " )
-        print( "local file: " + localFile)
-               
-        #
-        # Connect to the server
-        # 
-        try:
-            lFile = urllib.request.urlretrieve(URL, localFile)
-            good_sites = good_sites + (site_id,)
-        except IOError as e:
-            #print ('WARN: site : ', site_id, ' skipped - ' #, e.reason)
-            #
-            # If failed, remember the station id and continue
-            # 
-            fail_sites = fail_sites + ( site_id, )
+
+        base_url = "https://dd.weather.gc.ca/{date}/WXO-DD/hydrometric/csv/{province}/hourly/"
+        for delta in [0, 1]:  # try today, then yesterday
+           date_str = (datetime.utcnow() - timedelta(days=delta)).strftime("%Y%m%d")
+           filename = province + '_' + site_id + '_hourly_hydrometric.csv'
+           URL = base_url.format(date=date_str, province=province) + filename
+           localFile = odir + os.path.sep + filename
+           print( datetime.now(), end = " --- " )
+           print( "URL: " + URL)
+           print( datetime.now(), end = " --- " )
+           print( "local file: " + localFile)
+           try:
+               #
+               # Connect to the server
+               # 
+               lFile = urllib.request.urlretrieve(URL, localFile)
+               good_sites = good_sites + (site_id,)
+               print(f"Success: {URL}")
+               break
+           except Exception as e:
+               #
+               # If failed, remember the station id and continue
+               # 
+               fail_sites = fail_sites + ( site_id, )
+               print(f"Failed ({date_str}): {e}")
 
     return good_sites, fail_sites
 
@@ -85,7 +91,7 @@ def build_download_list( province, odir ):
     #  Get the UTC offset, in seconds, then convert that to a
     #  timedelta object.
     #
-    tz_offset = datetime.timedelta(seconds=time.timezone)
+    tz_offset = timedelta(seconds=time.timezone)
 
     #
     #  Define the regular expression search patterns that will be repeatedly used
@@ -99,8 +105,8 @@ def build_download_list( province, odir ):
     #
     #  Define some useful date constants
     #
-    missing_time = datetime.datetime(1000, 1, 1, 1, 1, 1, 1)
-    future_offset = datetime.timedelta(days=99999)
+    missing_time = datetime(1000, 1, 1, 1, 1, 1, 1)
+    future_offset = timedelta(days=99999)
     
     #
     #  Get the directory listing from the web page.
@@ -112,13 +118,14 @@ def build_download_list( province, odir ):
     sitelist=list()
     
     urllib.request.urlcleanup()
-    urlstring = 'https://dd.weather.gc.ca/hydrometric/csv/' + province + '/hourly/'
-    print( datetime.datetime.now(), end = " --- " )
-    print( urlstring )
-    with closing(urllib.request.urlopen(urlstring)) as dirlisting:
-        for line in dirlisting:
-            s = line.decode('ascii')
-            match_site = site_pattern.search(s)
+    #urlstring = 'https://dd.weather.gc.ca/hydrometric/csv/' + province + '/hourly/'
+    #urlstring = 'https://dd.weather.gc.ca/today/hydrometric/csv/' + province + '/hourly/'
+    dirlisting = fetch_hydrometric_csv.fetch_hydrometric_csv( province )
+    data_str = dirlisting.decode('utf-8')
+    print( datetime.now(), end = " --- " )
+    lines =  data_str.splitlines(keepends=True)
+    for line in lines:
+            match_site = site_pattern.search(line)
             if (match_site):
                 total_sites += 1
                 fname = match_site.group(0)       # e.g. "ON_02AB006_hourly_hydrometric.csv"
@@ -136,7 +143,7 @@ def build_download_list( province, odir ):
                 if os.path.isfile(local_file):
                     try:
                         lfm = os.path.getmtime(local_file)    # local file mod time (float value)
-                        l_mod_time = datetime.datetime.fromtimestamp(lfm)
+                        l_mod_time = datetime.fromtimestamp(lfm)
                         l_mod_time = l_mod_time + tz_offset
                     except:
                         l_mod_time = missing_time
@@ -152,13 +159,13 @@ def build_download_list( province, odir ):
                 #  "new", and needing to be updated. The resulting sitelist will contain
                 #  a list of the site IDs for those files that need to be updated.
                 #
-                match_ts = ts_pattern.search(s)
+                match_ts = ts_pattern.search(line)
                 if match_ts:
                     ds = match_ts.group(0)
                     try:
-                        r_mod_time = datetime.datetime.strptime(ds, '%Y-%m-%d %H:%M')
+                        r_mod_time = datetime.strptime(ds, '%Y-%m-%d %H:%M')
                     except:
-                        r_mod_time = datetime.datetime.now()
+                        r_mod_time = datetime.now()
                 else:
                     r_mod_time = l_mod_time + future_offset              # default future value
 
@@ -170,7 +177,7 @@ def build_download_list( province, odir ):
                 except Exception:
                     pass
   
-    print( datetime.datetime.now(), end = " --- " )
+    print( datetime.now(), end = " --- " )
     print(len(sitelist), ' of ', total_sites, ' need to be updated')
     return sitelist
     
@@ -255,7 +262,7 @@ def canadian_flow_retrieval( odir ):
                 j = len(fail_sites)
             except:
                 j = 0
-            print( datetime.datetime.now(), end = " --- " )
+            print( datetime.now(), end = " --- " )
             print('There were ', i, ' good downloads and ', j, ' failed downloads')
             
 

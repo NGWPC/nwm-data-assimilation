@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 class EmptyDirOrFileException( Exception ):
   """Exception raised for empty input files or directories.
       Attributes:

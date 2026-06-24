@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import os, sys, time, urllib, getopt
 import logging
 from string import *
@@ -33,12 +34,12 @@ def main(argv):
       elif opt in ('-i', "--idir"):
          inputdir = arg
          if not os.path.exists( inputdir ):
-                 raise RuntimeError( 'FATAL Error: inputdir ' + \
+                 raise RuntimeError( 'FATAL ERROR: inputdir ' + \
                                  inputdir + ' does not exist!' )
       elif opt in ('-o', "--odir" ):
          outputdir = arg
          if not os.path.exists( outputdir ):
-                 raise RuntimeError( 'FATAL Error: outputdir ' + \
+                 raise RuntimeError( 'FATAL ERROR: outputdir ' + \
                                  outputdir + ' does not exist!' )
   
    return (inputdir, outputdir)
