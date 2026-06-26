@@ -101,50 +101,29 @@ def copy_from_s3_or_local(src: str, dst: str | Path) -> bool:
             ls_cmd.extend(["--request-payer", "requester"])
             cp_cmd.extend(["--request-payer", "requester"])
 
-        exists = subprocess.run(
-            ls_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode == 0
+        ls = subprocess.run(ls_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-        if not exists:
+        if ls.returncode != 0:
+            err = (ls.stderr or "").strip()
+            if "ExpiredToken" in err or "InvalidToken" in err or "AccessDenied" in err or "Bad Request" in err:
+                raise RuntimeError(f"S3 access/auth failure while checking {src}: {err}")
             return False
 
-        try:
-            run_cmd(cp_cmd)
-            return True
-        except Exception as exc:
-            print(f"WARNING: failed to download SNODAS file: {src}; {exc}")
+        cp = subprocess.run(cp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        if cp.returncode != 0:
+            err = (cp.stderr or "").strip()
+            if "ExpiredToken" in err or "InvalidToken" in err or "AccessDenied" in err or "Bad Request" in err:
+                raise RuntimeError(f"S3 access/auth failure while downloading {src}: {err}")
+            print(f"WARNING: failed to download SNODAS file: {src}; {err}")
             return False
+
+        return Path(dst).exists() and Path(dst).stat().st_size > 0
 
     if os.path.exists(src):
         shutil.copyfile(src, dst)
         return True
 
-    return False
-
-def copy_from_s3_or_local_old(src: str, dst: str | Path) -> bool:
-    dst = str(dst)
-
-    if is_s3_path(src):
-        cmd = ["aws", "s3", "cp", src, dst, "--only-show-errors"]
-
-        # Some NGWPC / public-style buckets may require requester-pays.
-        if os.environ.get("AWS_REQUEST_PAYER", "").lower() in ("1", "true", "requester"):
-            cmd.extend(["--request-payer", "requester"])
-
-        try:
-            run_cmd(cmd)
-            return True
-        except Exception as exc:
-            print(f"WARNING: failed to download SNODAS file: {src}; {exc}")
-            return False
-
-    if os.path.exists(src):
-        shutil.copyfile(src, dst)
-        return True
-
-    print(f"WARNING: local SNODAS file does not exist: {src}")
     return False
 
 
@@ -449,6 +428,25 @@ class SNODASNHFGageProcessor:
 
 
             valid_values = int(df["basin_avg_swe"].notna().sum())
+
+            if valid_values == 0:
+                note = (
+                    f"missing_nc_days={missing_nc}; "
+                    f"no_overlap_days={no_overlap}; "
+                    f"local_output={local_output}"
+                )
+                return GageResult(
+                    gage_id,
+                    self.domain,
+                    "invalid_no_valid_values_not_uploaded",
+                    dest_file,
+                    len(df),
+                    valid_values,
+                    note,
+                )
+
+            copy_to_s3_or_local(local_output, dest_file)
+
             if valid_values == 0:
                 status = "no_valid_swe_pixels"
             elif missing_nc > 0 or no_overlap > 0:
