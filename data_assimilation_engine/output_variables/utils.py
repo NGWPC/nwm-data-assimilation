@@ -1,4 +1,5 @@
 import os
+import shutil
 import requests
 import xarray as xr
 import csv
@@ -31,17 +32,25 @@ def parse_filename_metadata(filename: str) -> Tuple[str, str, str]:
 # endregion
 
 # region data download
-def download_nwm_data_from_server(base_url: str, local_root: str) -> None:
+def download_nwm_data_from_server(local_root: str, re_download: bool) -> None:
     """
     Main function to download a unique set of output files from the server
     """
-    if not os.path.exists(local_root):
-        os.makedirs(local_root)
+    os.makedirs(local_root, exist_ok = True)
+    nwm_data_folder = os.path.join(local_root, consts.NWM_DATA_LOCAL_FOLDER)
+    os.makedirs(nwm_data_folder, exist_ok = True)
+
+    # Re-download if requested
+    if (re_download):
+        if len(os.listdir(nwm_data_folder)) > 0:
+            # Delete all the contents in the local folder and re-create
+            shutil.rmtree(nwm_data_folder)
+            os.makedirs(nwm_data_folder, exist_ok = True)
     
     formatted_date = datetime.now().strftime("%Y%m%d")
-    formatted_url = f"{base_url}/nwm.{formatted_date}/"
-    existing_keys = build_existing_keys(local_root) # build class, category, domain keys in local folder, if exists.
-    download_nwm_data_recursive(formatted_url, local_root, existing_keys)
+    formatted_url = f"{consts.NOMADS_BASE_URL}/nwm.{formatted_date}/"
+    existing_keys = build_existing_keys(nwm_data_folder) # build class, category, domain keys in local folder, if exists.
+    download_nwm_data_recursive(formatted_url, nwm_data_folder, existing_keys)
 
 def download_nwm_data_recursive(download_url: str, local_path: str, 
     existing_keys: Set[Tuple[str, str, str]]
@@ -77,7 +86,7 @@ def download_nwm_data_recursive(download_url: str, local_path: str,
                     os.makedirs(local_path)
                 save_path = os.path.join(local_path, file_link)
                 download_file(file_url, save_path)
-                # Add to existing set AFTER successful download
+                # Add to existing set after successful download
                 existing_keys.add(key)
 
 def download_file(url: str, save_path: str) -> None:
@@ -144,35 +153,41 @@ class NetCDFMetadata:
         self.category = category
         self.domain = domain
 
-    def key(self) -> tuple[str, str, str]:
+    def key(self) -> tuple[str, str, str]: # not used yet.
         """
         Unique identifier for duplicate checking
         """
         return (self.output_class, self.category, self.domain)
 
-    def __repr__(self) -> str: #for debugging purposes
+    def __repr__(self) -> str: # for debugging purposes
         return (
             f"NetCDFMetadata(file_path={self.file_path}, "
             f"class={self.output_class}, category={self.category}, domain={self.domain})"
         )
 
-def obtain_metadata_information(local_root: str, output_name: str) -> None:
+def obtain_metadata_information(local_root: str) -> None:
     """
     Parse the metadata information from the downloaded NWM output files and write a CSV and a json
     """
     if not os.path.exists(local_root):
         raise Exception(f"Folder does not exist: {local_root}")
     
-    metadata_list = process_downloaded_files(local_root)
-    output_csv = os.path.join(local_root, output_name + ".csv")
+    nwm_local_folder = os.path.join(local_root, consts.NWM_DATA_LOCAL_FOLDER)
+    if not os.path.exists(nwm_local_folder):
+        raise Exception(f"Folder does not exist: {nwm_local_folder}")
+    
+    nwm_config_folder = os.path.join(local_root, consts.NWM_CONFIG_LOCAL_FOLDER)
+    os.makedirs(nwm_config_folder, exist_ok = True)
+    metadata_list = extract_metadata_from_downloaded_files(nwm_local_folder)
+    output_csv = os.path.join(nwm_config_folder, consts.NWM_CONFIG_FILE_NAME + ".csv")
     write_metadata_to_csv(metadata_list, output_csv)
-    output_json = os.path.join(local_root, output_name + "_config.json")
-    ngen_json = os.path.join(local_root, output_name + "_ngenconfig.json")
+    output_json = os.path.join(nwm_config_folder, 
+                               consts.NWM_CONFIG_FILE_NAME + consts.NWM_CONFIG_FILE_SUFFIX + ".json")
+    ngen_json = os.path.join(nwm_config_folder, 
+                             consts.NWM_CONFIG_FILE_NAME + '_ngen' + consts.NWM_CONFIG_FILE_SUFFIX + ".json")
     write_metadata_to_config_json(metadata_list, output_json, ngen_json)
-    
-    
 
-def process_downloaded_files(local_root: str) -> List[NetCDFMetadata]:
+def extract_metadata_from_downloaded_files(local_root: str) -> List[NetCDFMetadata]:
     """
     Process downloaded files and create a list of metadata objects for config json
     """
@@ -182,11 +197,11 @@ def process_downloaded_files(local_root: str) -> List[NetCDFMetadata]:
         for file in files:
             if file.endswith(".nc"):
                 file_path = os.path.join(root, file)
-                metadata_list.append(extract_netcdf_metadata(file_path))
+                metadata_list.append(extract_netcdf_metadata_from_netcdf(file_path))
 
     return metadata_list
 
-def extract_netcdf_metadata(file_path: str) -> NetCDFMetadata:
+def extract_netcdf_metadata_from_netcdf(file_path: str) -> NetCDFMetadata:
 
     filename = os.path.basename(file_path)
     output_class, category, domain = parse_filename_metadata(filename)
@@ -303,27 +318,27 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
     info_list = []
     for mdata in metadata_list:
         metadata_info_dict = {
-            "file_path": mdata.file_path,
-            "resolution": {
-                "x": mdata.resolution_x,
-                "y": mdata.resolution_y,
+            consts.JSON_FILE_PATH: mdata.file_path,
+            consts.JSON_RESOLUTION: {
+                consts.JSON_X: mdata.resolution_x,
+                consts.JSON_Y: mdata.resolution_y,
             },
-            "origin": {
-                "x": mdata.origin_x,
-                "y": mdata.origin_y,
+            consts.JSON_ORIGIN: {
+                consts.JSON_X: mdata.origin_x,
+                consts.JSON_Y: mdata.origin_y,
             },
-            "location_name": {
-                "x": mdata.x_name,
-                "y": mdata.y_name,
+            consts.JSON_LOC: {
+                consts.JSON_X: mdata.x_name,
+                consts.JSON_Y: mdata.y_name,
             },
-            "crs_wkt": mdata.crs_wkt,
-            "nwm_variables": mdata.nwm_variables,
-            "nwm_dimensions": mdata.nwm_dimensions,
-            "nwm_scalar_variables": mdata.scalar_variables,
-            "nwm_var_dimensions": mdata.data_variables_dim,
-            "class": mdata.output_class,
-            "category": mdata.category,
-            "domain": mdata.domain
+            consts.JSON_CRS: mdata.crs_wkt,
+            consts.JSON_NWM_VAR: mdata.nwm_variables,
+            consts.JSON_DIMENSION: mdata.nwm_dimensions,
+            consts.JSON_SCALAR_VAR: mdata.scalar_variables,
+            consts.JSON_VAR_DIM_MAP: mdata.data_variables_dim,
+            consts.JSON_CLASS: mdata.output_class,
+            consts.JSON_CATEGORY: mdata.category,
+            consts.JSON_DOMAIN: mdata.domain
         }
         info_list.append(metadata_info_dict)
 
@@ -334,6 +349,7 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
         json.dump(config, f, indent = 2)
 
     print(f"Config JSON written to: {output_json}")
+
 
     info_list = []
     for mdata in metadata_list:
@@ -419,6 +435,39 @@ def debug_netcdf_structure_in_folder(folder_path: str) -> None:
         except Exception as e:
             print(f"\n Failed to read file: {file_path}")
             print(f"Error: {e}")
+
+def read_output_variables_info_from_config(json_file: str) -> List[NetCDFMetadata]:
+    """
+        Parses a multi-element JSON string into a list of NetCDFMetadata objects.
+    """
+    netcdf_metadata_list: List[NetCDFMetadata] = []
+    if os.path.isfile(json_file):
+        with open(json_file, "r", encoding="utf-8") as file_stream:
+            config_data = json.load(file_stream)
+        
+        for item in config_data.get("files", []):
+            info_item = NetCDFMetadata(
+                file_path = item.get(consts.JSON_FILE_PATH, ''),
+                resolution_x = item.get(consts.JSON_RESOLUTION, {}).get(consts.JSON_X, -9999),
+                resolution_y = item.get(consts.JSON_RESOLUTION, {}).get(consts.JSON_Y, -9999),
+                origin_x = item.get(consts.JSON_ORIGIN, {}).get(consts.JSON_X, -9999),
+                origin_y = item.get(consts.JSON_ORIGIN, {}).get(consts.JSON_Y, -9999),
+                x_loc = item.get(consts.JSON_LOC, {}).get(consts.JSON_X, ''),
+                y_loc = item.get(consts.JSON_LOC, {}).get(consts.JSON_Y, ''),
+                wkt = item.get(consts.JSON_CRS, ''),
+                variables = item.get(consts.JSON_NWM_VAR, ''),
+                dimensions = item.get(consts.JSON_DIMENSION, ''),
+                scalar_variables = item.get(consts.JSON_SCALAR_VAR, {}),
+                data_variables_dim = item.get(consts.JSON_VAR_DIM_MAP, {}),
+                output_class = item.get(consts.JSON_CLASS, ''),
+                category = item.get(consts.JSON_CATEGORY, ''),
+                domain = item.get(consts.JSON_DOMAIN, '')
+            )
+            netcdf_metadata_list.append(info_item)
+    else:
+        raise ValueError("Specified config file does not exist")
+    
+    return netcdf_metadata_list
 # endregion
 
 # region (to delete) create template grids

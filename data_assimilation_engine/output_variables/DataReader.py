@@ -29,7 +29,7 @@ class DataReader:
         # Find coordinate with IDs
         for coord_name in ds.coords:
             coord = ds[coord_name]
-            if coord.dtype.kind in {"U", "S", "O"} and coord.ndim == 1: #assumes catchments are string type.
+            if coord.dtype.kind in {"i", "u"} and coord.dtype.itemsize == 8 and coord.ndim == 1: #assumes catchments are the only long type.
                 return coord.dims[0], coord_name
 
         raise ValueError("Could not find catchment IDs")
@@ -39,19 +39,46 @@ class DataReader:
         Assign random values between 1 and 10 to all data variables.
         This function can be deleted once we address the catchment netcdf writing issue.
         """
-
+        var_list = ['sm_frac_0.4m', 'sm_profile_0.1m', 'sm_profile_0.4m', 'sm_profile_1.5m', 'sm_profile_2m', 'SWE_mm']
         with fsspec.open(self.netcdf_file, mode="rb") as f:
             ds = xr.open_dataset(f)
         if ds.sizes.get(consts.DIM_TIME, 0) > 48:    
             ds_48 = ds.isel(time=slice(0, 48))
         else:
             ds_48 = ds
+        
+        # Check if all the vairables are present in the netcdf. If not add it. Only for testing.
+        for var in var_list:
+            if var not in ds_48.data_vars:
+                ds_48[var] = ds['SWE_mm'].copy(deep = True)
+
         for var_name in ds_48.data_vars:
             print(f"Assigning random values to {var_name}")
             random_values = np.random.uniform(
                 10.0, 20.0, size=ds_48[var_name].shape
             )
             ds_48[var_name].values = random_values
+
+        ds_48.to_netcdf(output_file)
+        print(f"Saved updated dataset to {output_file}")
+    
+    def add_missing_variables(self, output_file) -> None:
+        """
+        Add any missing variables in the variables list to the netcdf file.
+        This function can be deleted once we address the catchment netcdf writing issue.
+        """
+        var_list = ['sm_frac_0.4m', 'sm_profile_0.1m', 'sm_profile_0.4m', 'sm_profile_1.5m', 'sm_profile_2m', 'SWE_mm']
+        with fsspec.open(self.netcdf_file, mode="rb") as f:
+            ds = xr.open_dataset(f)
+        if ds.sizes.get(consts.DIM_TIME, 0) > 48:    
+            ds_48 = ds.isel(time=slice(0, 48))
+        else:
+            ds_48 = ds
+        
+        # Check if all the vairables are present in the netcdf. If not add it. Only for testing.
+        for var in var_list:
+            if var not in ds_48.data_vars:
+                ds_48[var] = ds['SWE_mm'].copy(deep = True)
 
         ds_48.to_netcdf(output_file)
         print(f"Saved updated dataset to {output_file}")
