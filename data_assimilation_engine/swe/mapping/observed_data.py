@@ -16,6 +16,7 @@ from data_assimilation_engine.utils.calculators import ObsCalculator
 from data_assimilation_engine.utils.dataloaders import ObsDataLoader
 from data_assimilation_engine.utils.plotters import ObservedPlotter
 from data_assimilation_engine.utils.processors import ObsProcessor
+from data_assimialation_engine.utils.s3_paths import SNODAS_NC_PREFIX, SNOTEL_CSV_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class SWEObsDataLoader(ObsDataLoader, SnotelDataLoader):
         """Initialize the SWEObsDataLoader."""
         self.dataset_name = "Band1"  # Variable name in xarray Dataset
         self.path_str = (
-            "ngwpc-forcing/snodas_nc/zz_ssmv11034tS__T0001TTNATSdate05HP001.nc"
+            f"{SNODAS_NC_PREFIX}/zz_ssmv11034tS__T0001TTNATSdate05HP001.nc"
         )
         self._chunk_size = 100  # Default chunk size
         self.x_dim_name = "lon"  # X dimension name in xarray Dataset
@@ -170,7 +171,7 @@ class SWEObsProcessor(ObsProcessor):
         """Initialize the SWE Observed Processor."""
         self._date = date
         super().__init__(gpkg_file, output_file_raw, output_file_lumped, direct_s3)
-        self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
+        self.snotel_s3_path = SNOTEL_CSV_PREFIX
         self.column = "mean_swe"
 
         self.dl = SWEObsDataLoader(self.gpkg_file)
