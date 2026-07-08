@@ -20,6 +20,7 @@ from data_assimilation_engine.utils.timeseries import (
     get_options,
 )
 from data_assimilation_engine.utils.utils import time_function
+from data_assimialation_engine.utils.s3_paths import SNODAS_CSV_PREFIX, SNOTEL_CSV_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ class SWES3Loader(S3Loader):
         """Initialize the SWESLoader with basin ID and S3 options."""
         super().__init__(basin_id, direct_s3)
         self.variable_name = "swe"
-        self.gage_prefix = "ngwpc-forcing/snotel_csv"
-        self.obs_prefix = "ngwpc-forcing/snodas_csv"
+        self.gage_prefix = SNOTEL_CSV_PREFIX
+        self.obs_prefix = SNODAS_CSV_PREFIX
 
 
 class SWEFileLoader(FileLoader):
