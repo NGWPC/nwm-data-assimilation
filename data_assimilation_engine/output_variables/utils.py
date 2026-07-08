@@ -3,6 +3,7 @@ import shutil
 import requests
 import xarray as xr
 import csv
+import pandas as pd
 import numpy as np
 import json
 import logging
@@ -29,6 +30,123 @@ def parse_filename_metadata(filename: str) -> Tuple[str, str, str]:
     category = components[3]
     domain = components[5]
     return output_class, category, domain
+
+def convert_csvs_to_netcdf(csv_folder: str):
+    """
+    Takes a directory for ngen output CSVs, automatically discovers NWM variables,
+    analyzes their native data types, and converts them to netcdf.
+    """
+    # Find all CSV files in the target directory
+    csv_files = []
+    try:
+        with os.scandir(csv_folder) as entries:
+            for entry in entries:
+                if entry.is_file() and entry.name.lower().endswith('.csv'):
+                    csv_files.append(entry.path)
+    except FileNotFoundError:
+        print(f"The directory '{csv_folder}' does not exist.")
+        return
+    
+    if not csv_files:
+        print(f"No CSV files found in directory: {csv_folder}")
+        return
+
+    # 1. Discover variables using the first valid CSV file
+    template_df = pd.read_csv(csv_files[0])
+    base_cols = consts.CSV_BASE_COLS
+    nwm_variables = [col for col in template_df.columns if col.lower() not in base_cols]
+    
+    print(f"NWM variables for netcdf: {nwm_variables}")
+
+    catchment_nc_data = []
+
+    for file_path in csv_files:
+        filename = os.path.basename(file_path)
+        try:
+            # Use file names to extract the catchment IDs. We are using splitext and isdigit 
+            # instead of the usual replace 'cat-' so that it can handle other filename formats 
+            # Assumes that the file name contains long integer catchment IDs.
+            catchment_id_name = os.path.splitext(filename)[0]
+            catchment_id_str = ''.join(filter(str.isdigit, catchment_id_name))
+            catchment_id = np.int64(catchment_id_str) # for latest NHF schema
+        except ValueError:
+            print(f"Skipping {filename}: Could not parse catchment ID as a long integer.")
+            continue
+
+        # Load CSV into Pandas
+        df = pd.read_csv(file_path)
+
+        #Convert Time column to lower case
+        if 'Time' in df.columns:
+            df.rename(columns={'Time': consts.DIM_TIME}, inplace=True)
+
+        # Safety check: Ensure this specific CSV contains all discovered data columns
+        if not set(nwm_variables).issubset(df.columns):
+            print(f"Skipping {filename}: Headers do not match the expected dataset schema.")
+            continue
+
+        # Convert time to UNIX Epoch
+        df['datetime'] = pd.to_datetime(df['time'])
+        df['epoch'] = (df['datetime'].astype('int64') // 10**9).astype(np.int32) # int32 good until year 2038
+
+        # 2. Dynamically extract columns based on their native types
+        nwm_vars_dict = {}
+        for var in nwm_variables:
+            col_type = df[var].dtype
+
+            if col_type.kind in {"U", "S", "O"}: # If the column is text/string or generic object data
+                nwm_vars_dict[var] = (["time"], df[var].astype(str).values)
+            elif col_type.kind in {"i", "u"}: # If the column is an integer type (like status codes, IDs)
+                nwm_vars_dict[var] = (["time"], df[var].values)
+            else: # Default floats/doubles
+                nwm_vars_dict[var] = (["time"], df[var].values)
+
+        # Set coordinates for xarray translation
+        df = df.set_index('epoch')
+
+        # Convert individual dataframe to an xarray Dataset
+        catchment_ds = xr.Dataset(
+            data_vars = nwm_vars_dict,
+            coords = {
+                consts.DIM_TIME: (["time"], df.index.values.astype(np.int32)),
+                consts.DIM_CATCHMENTS: catchment_id
+            }
+        )
+
+        # Expand the dataset to include 'entity' as a dimension axis
+        catchment_ds = catchment_ds.expand_dims(consts.DIM_CATCHMENTS)
+        catchment_nc_data.append(catchment_ds)
+
+    if not catchment_nc_data:
+        print("No valid data was extracted. NetCDF generation aborted.")
+        return
+
+    print(" Combining and aligning all catchments")
+    
+    # Merge all separate entities together along the 'entity' dimension
+    combined_ds = xr.combine_by_coords(catchment_nc_data)
+
+    # Explicitly enforce structural array coordinates to be 64-bit long integers
+    combined_ds[consts.DIM_TIME] = combined_ds[consts.DIM_TIME].astype(np.int32)
+    combined_ds[consts.DIM_CATCHMENTS] = combined_ds[consts.DIM_CATCHMENTS].astype(np.int64)
+
+    # Add descriptive metadata attributes dynamically
+    combined_ds[consts.DIM_TIME].attrs = {"units": "seconds since 1970-01-01 00:00:00", "calendar": "gregorian"}
+    combined_ds[consts.DIM_CATCHMENTS].attrs = {"Catchment_ID": "Catchment identifier in input"}
+    
+    for var in nwm_variables:
+        # Do we need to have a dictionary of variable name, mapping and units for attributes?
+        type_label = combined_ds[var].dtype.name
+        combined_ds[var].attrs = {"long_name": f"{var}"}
+        combined_ds[var].attrs["_FillValue"] = -1.0
+        combined_ds[var].attrs["missing_value"] = -1.0
+
+
+    output_netcdf_path = os.path.join(csv_folder, 'catchment_output.nc')
+    print(f"Saving unified NetCDF to: {output_netcdf_path}")
+    combined_ds.to_netcdf(output_netcdf_path)
+    print("Process complete!")
+
 # endregion
 
 # region data download
@@ -243,7 +361,7 @@ def extract_netcdf_metadata_from_netcdf(file_path: str) -> NetCDFMetadata:
             y_loc_name = nwm_var
         elif nwm_var in consts.CRS_INFO: #CRS wkt
             proj_wkt = extract_wkt_from_crs(ds.variables[nwm_var])
-        elif nwm_var in consts.NWM_VARIABLES_LIST: #NWM output variables
+        elif nwm_var in consts.NWM_VARIABLES_LIST or len(ds[nwm_var].dims) > 1: #NWM output variables
             vars_in_netcdf.append(nwm_var)
     nwm_variables = ", ".join(vars_in_netcdf)
     return NetCDFMetadata(file_path, res_x, res_y, origin_x, origin_y, x_loc_name, y_loc_name, proj_wkt, 
@@ -468,44 +586,6 @@ def read_output_variables_info_from_config(json_file: str) -> List[NetCDFMetadat
         raise ValueError("Specified config file does not exist")
     
     return netcdf_metadata_list
-# endregion
-
-# region (to delete) create template grids
-def create_nwm_template_grids(src_root_folder: str, dest_root_folder: str) -> None:
-    """
-    Creates template grids for all NWM netcdf products using a sample set of netcdfs.
-    """
-    # This function is there for testing purposes.
-    # We can delete this once we are prodution ready.
-    coords_to_reset = ['time', 'x', 'y', 'latitude', 'longitude']
-
-    for root, dirs, files in os.walk(src_root_folder):
-        # Determine the relative path to recreate subfolders
-        rel_path = os.path.relpath(root, src_root_folder)
-        target_dir = os.path.join(dest_root_folder, rel_path)
-        
-        # Create the target directory if it doesn't exist
-        os.makedirs(target_dir, exist_ok=True)
-
-        for file in files:
-            if file.endswith('.nc'):
-                src_path = os.path.join(root, file)
-                dest_path = os.path.join(target_dir, file)
-
-                # Process the NetCDF using xarray
-                with xr.open_dataset(src_path) as ds:
-                    # Reset data variables
-                    for var in ds.data_vars:
-                        if var in consts.NWM_VARIABLES_LIST:
-                            ds[var].values[:] = -1
-                    
-                    # Reset coordinate variables
-                    for coord in coords_to_reset:
-                        if coord in ds.coords:
-                            ds[coord].values[:] = - 1 # To do: Gives warning for time. Need to address
-                    # Save to the desired location
-                    ds.to_netcdf(dest_path)
-                    print(f"Processed: {dest_path}")
 # endregion
 
 # region basin grid products

@@ -7,6 +7,7 @@ import pandas as pd
 import xarray as xr
 import dask.array as da
 import time
+import math
 from shapely.geometry import Point
 from shapely.ops import unary_union
 from shapely import intersects_xy
@@ -29,8 +30,7 @@ class DataProcessor(DataReader):
         filename = os.path.basename(gpkg_file)
         self._geo_id = filename.replace(consts.GPKG_FILE_PREFIX, '').replace('.gpkg', '')
         
-        # Normalize catchment ids in netcdf with a cat- prefix for consistency.
-        nc_catchments = self._normalize_catchment_ids(self._catchment_ds[self.catchment_coord].values)
+        nc_catchments = self._catchment_ds[self.catchment_coord].values
         
         # Read geopackage, determine schema and "divides" layer
         is_new_NHF_schema: bool = self._is_new_NHF_schema(gpkg_file, consts.NHF_REF_OBJECT)
@@ -44,8 +44,6 @@ class DataProcessor(DataReader):
         else:
             self.catchment_field = consts.NONNHF_DIV_ID
 
-        # Normalize catchment ids in gpkg with a 'cat-' prefix for consistency.
-        gpkg_gdf[self.catchment_field] = self._normalize_catchment_ids(gpkg_gdf[self.catchment_field].values)
         gpkg_catchment_list = gpkg_gdf[self.catchment_field].values.tolist()
         self._gpkg_gdf = gpkg_gdf
         
@@ -53,6 +51,11 @@ class DataProcessor(DataReader):
         if set(nc_catchments) != set(gpkg_catchment_list):
             raise ValueError("There is a mistmatch between catchment IDs in geopackage and netcdf")
         
+        # Set log file which will be redirect to stdout.
+        # Only for testing
+        self._original_stdout = sys.stdout
+        self._log_file = None
+
     @property
     def nwm_output_class(self):
         return self._output_class
@@ -65,6 +68,10 @@ class DataProcessor(DataReader):
     def nwm_domain(self):
         return self._domain
     
+    @property
+    def log_file(self):
+        return self._log_file
+
     @nwm_output_class.setter
     def nwm_output_class(self, value):
         self._output_class = value
@@ -77,6 +84,19 @@ class DataProcessor(DataReader):
     def nwm_domain(self, value):
         self._domain = value
 
+    @log_file.setter
+    def log_file(self, log_file_path: str):
+        self.close_log()
+        if log_file_path is None:
+            return
+
+        log_folder = os.path.dirname(log_file_path)
+        if log_folder:
+            os.makedirs(log_folder, exist_ok=True)
+
+        self._log_file = open(log_file_path, "w", encoding="utf-8")
+        sys.stdout = self._log_file
+
     def set_template_grid(self, template_grid_path: str):
         self.ds_template_grid = xr.open_dataset(template_grid_path)
 
@@ -87,19 +107,6 @@ class DataProcessor(DataReader):
         layers = gpd.list_layers(geopackage_path)
         tabular_layers = layers[layers[consts.GPKG_GEOMETRY_TYPE_IDENTIFIER].isna()]
         return layer_name.lower() in tabular_layers['name'].tolist()
-    
-    def _normalize_catchment_ids(self, ids) -> np.ndarray:
-        """
-        Ensure all IDs are prefixed with 'cat-'. This is necessary when catchments are not prefixed
-        with 'cat-' in netcdf and geopackage for consistency. 
-        """
-        ids_str = ids.astype(str)
-
-        normalized = np.array([
-            id_ if id_.startswith("cat-") else f"cat-{id_}"
-            for id_ in ids_str
-        ])
-        return normalized
     
     def _snap_to_grid(self, value: float, origin: float, resolution: int, direction: np.ufunc):
         if direction == np.floor:
@@ -131,7 +138,7 @@ class DataProcessor(DataReader):
         template_nc_name = self._geo_id + '_' + self._output_class + '_' + self._category + '_' + self._domain + '.nc'
         template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
         if os.path.isfile(template_nc_file):
-            print(f"Reusing existing template file in local for {self._output_class}, {self._category}, {self._domain}")
+            print(f"----Reusing existing template file in local for {self._output_class}, {self._category}, {self._domain}")
         else:
             ds = xr.open_dataset(file_name)
             # To do: Have to figure out a workflow when CRS is "Not Available"
@@ -180,6 +187,12 @@ class DataProcessor(DataReader):
             ds_clipped = ds_masked.dropna(dim=y_name, how="all")
             ds_clipped = ds_clipped.dropna(dim=x_name, how="all")
 
+            # Set values of NWM variables to zero in the template grid
+            nwm_vars = [name for name, var in ds_clipped.data_vars.items() 
+                       if var.ndim > 0 and name not in ds_clipped.coords]
+            for var in nwm_vars:
+                ds_clipped[var] = ds_clipped[var] * 0
+
             # Create crs as a scalar variable.
             crs_attrs = ds_clipped["crs"].attrs
             ds_clipped = ds_clipped.drop_encoding()
@@ -197,129 +210,40 @@ class DataProcessor(DataReader):
         # change variable name in the randomvals.nc This is strictly for testing purposes. 
         # The case statements should be removed before going into production.
         produce_output = False
-        ds_test = self._catchment_ds
-        data_modified = False
-        cat_class_domain = mdata.output_class + '_' + mdata.category +  '_' + mdata.domain
-        target_variables_dict = mdata.data_variables_dim
-        for var_name, dims in target_variables_dict.items():
-            if var_name in ds_test.data_vars:
+        ds_modified = self._catchment_ds
+
+        # Remove data variables that should not be part of the product.
+        # You can remove variables that are in the ignore variables as well.
+        target_variables = [var.strip() for var in mdata.nwm_variables.split(",")]
+        removed_items = list(set(target_variables).intersection(set(consts.NWM_VARS_IGNORE_LIST))) # for logging
+        print(f"----Variables ignored: {removed_items}")
+        ignore_set = set(consts.NWM_VARS_IGNORE_LIST)
+        pruned_variables = [item for item in target_variables if item not in ignore_set]
+        variables_to_drop = [var for var in ds_modified.data_vars if var not in pruned_variables and len(ds_modified[var].dims) > 0]
+        ds_filtered = ds_modified.drop_vars(variables_to_drop)
+        
+        cat_class_domain = mdata.output_class + '.' + mdata.category +  '.' + mdata.domain
+        
+        for var_name in pruned_variables:
+            if var_name in ds_filtered.data_vars:
                 continue # the variable exists in ngen output. We don't need to do anything
+            else:
+                print(f"----'{var_name}' is missing in ngen output")
         
-            # if the variable doesn't exist, we will find a matching variable with those dims.
-            # make a copy of it and use it for testing. 
-            dims_set = sorted([str(dim) for dim in dims])
-            print(f"{var_name} is missing. Searching for another variable with same dimensions: {dims}...")
-            match_found = False
-            for existing_var in ds_test.data_vars:
-                # Get existing dimensions as a sorted list of strings
-                existing_dims_set = sorted([str(dim) for dim in ds_test[existing_var].dims])
-                if dims_set == existing_dims_set: # Compare both dimensional sets
-                    print(f"Found matching variable. Copying nc structure from {existing_var}")
-                    
-                    # xr.full_like preserves the exact multi-axis coordinates, shape, and chunking
-                    ds_test[var_name] = xr.full_like(ds_test[existing_var], fill_value=-1.0)
-                    
-                    # Strip out old attributes to prevent metadata contamination
-                    ds_test[var_name].attrs = {"long_name": f"Generated {var_name}", "units": "unknown"}
-                    
-                    match_found = True
-                    data_modified = True
-                    break  # Iterate to the next variable.
-                
-            if not match_found:
-                print(f"No existing variable matches the dimensions {dims} for '{var_name}'.")
-
-        if data_modified:
-            print(f"Data modified for testing: {cat_class_domain}")
-        else:
-            print(f"No changes needed. File matches NWM layout for {cat_class_domain}")
-        
-        match cat_class_domain:
-            case "analysis_assim_land_conus":
-                # analysis_assim.land.conus
-                produce_output = True
-            case "analysis_assim_terrain_rt_conus" | "medium_range_blend_terrain_rt_conus":
-                # analysis_assim.terrain_rt.conus; medium_range_blend.terrain_rt.conus
-                produce_output = True
-            case "long_range_land_2_conus":
-                # long_range.land_2.conus
-                produce_output = True
-            case "medium_range_blend_land_conus": 
-                # medium_range_blend.land.conus
-                produce_output = True
+        if (cat_class_domain in consts.NWM_PRODUCTS_LIST):
+            produce_output = True
 
         if produce_output:
             catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
-            mapped_grid = self.map_catchment_data_to_grid(ds_test, catchment_grid, consts.DIM_CATCHMENTS, mdata.x_name, mdata.y_name)
+            mapped_grid = self.map_catchment_data_to_grid(ds_filtered, catchment_grid, consts.DIM_CATCHMENTS, mdata.x_name, mdata.y_name)
             
             start_time = time.perf_counter()
             self.write_netcdf_per_timestep(mapped_grid, output_dir, consts.DIM_TIME)
             end_time = time.perf_counter()
             duration_minutes = (end_time - start_time) / 60
-            print(f"Function execution time: {duration_minutes:.4f} minutes")
+            print(f"----Function execution time: {duration_minutes:.4f} minutes")
         else:
-            print(f"Production skipped for {cat_class_domain}")
-
-    def obsolete_produce_nwm_output_grid(self, mdata: NetCDFMetadata, output_dir: str) -> None:
-        # change variable name in the randomvals.nc This is strictly for testing purposes. 
-        # The case statements should be removed before going into production.
-        produce_output = False
-        cat_class_domain = mdata.output_class + '_' + mdata.category +  '_' + mdata.domain
-        ds_test = self._catchment_ds
-        match cat_class_domain:
-            case "analysis_assim_land_conus":
-                # analysis_assim.land.conus
-                ds_test = self._catchment_ds.rename({
-                    'sm_frac_0.4m': 'ACCET',
-                    'sm_profile_0.1m': 'ACSNOM',
-                    'sm_profile_0.4m': 'EDIR',
-                    'sm_profile_1.5m': 'ISNOW',
-                    'sm_profile_2m': 'QRAIN',
-                    'SWE_mm': 'QSNOW'
-                })
-                produce_output = True
-            case "analysis_assim_terrain_rt_conus" | "medium_range_blend_terrain_rt_conus":
-                # analysis_assim.terrain_rt.conus; medium_range_blend.terrain_rt.conus
-                ds_test = self._catchment_ds.drop_vars(["sm_profile_0.4m", "sm_profile_1.5m", "sm_profile_2m", "SWE_mm"])
-                ds_test = self._catchment_ds.rename({
-                    'sm_frac_0.4m': 'sfcheadsubrt',
-                    'sm_profile_0.1m': 'zwattablrt'
-                })
-                produce_output = True
-            case "long_range_land_2_conus":
-                # long_range.land_2.conus
-                ds_test = self._catchment_ds.rename({
-                    'sm_frac_0.4m': 'ACCET',
-                    'sm_profile_0.1m': 'UGDRNOFF',
-                    'sm_profile_0.4m': 'SOILSAT',
-                    'sm_profile_1.5m': 'SFCRNOFF',
-                    'sm_profile_2m': 'SOILSAT_TOP',
-                    'SWE_mm': 'SNEQV'
-                })
-                produce_output = True
-            case "medium_range_blend_land_conus": 
-                # medium_range_blend.land.conus
-                ds_test = self._catchment_ds.rename({
-                    'sm_frac_0.4m': 'FSA',
-                    'sm_profile_0.1m': 'FIRA',
-                    'sm_profile_0.4m': 'HFX',
-                    'sm_profile_1.5m': 'TRAD',
-                    'sm_profile_2m': 'LH',
-                    'SWE_mm': 'SNEQV'
-                })
-                produce_output = True
-
-        if produce_output:
-            catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
-            mapped_grid = self.map_catchment_data_to_grid(ds_test, catchment_grid, consts.DIM_CATCHMENTS, mdata.x_name, mdata.y_name)
-            
-            start_time = time.perf_counter()
-            self.write_netcdf_per_timestep(mapped_grid, output_dir, consts.DIM_TIME)
-            end_time = time.perf_counter()
-            duration_minutes = (end_time - start_time) / 60
-            print(f"Function execution time: {duration_minutes:.4f} minutes")
-        else:
-            print(f"Production skipped for {cat_class_domain}")
+            print(f"----Production skipped for {cat_class_domain}")
 
     def build_catchment_id_grid(self, x_dim_name: str, y_dim_name: str) -> xr.DataArray:
         """
@@ -472,3 +396,24 @@ class DataProcessor(DataReader):
             formatted_t = t_str.replace('-', '_').replace(':', '_')
             output_file = os.path.join(output_dir, f"nwm.{self._geo_id}.{self._output_class}.{self._category}.{self._domain}.{formatted_t}.nc") # To do: Get this as function argument
             ds_t.to_netcdf(output_file)
+
+    def close_log(self):
+        """Restores the original terminal output and closes the file."""
+        original_stream = getattr(self, "_original_stdout", sys.stdout)
+        if sys.stdout != original_stream:
+            sys.stdout = original_stream
+
+        log_file_obj = getattr(self, "_log_file", None)
+        if log_file_obj and not log_file_obj.closed:
+            log_file_obj.flush()
+            log_file_obj.close()
+            
+        # Reset the private attribute safely
+        if hasattr(self, "_log_file"):
+            self._log_file = None
+
+    def __del__(self):
+        """
+        Close the log file if the script ends unexpectedly.
+        """
+        self.close_log()

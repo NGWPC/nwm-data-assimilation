@@ -4,6 +4,18 @@ NWM_VARIABLES_LIST = ['sfcheadsubrt', 'zwattablrt', 'inflow', 'outflow', 'reserv
 'SNLIQ', 'SNEQV', 'QSNOW', 'SOIL_T', 'SOIL_M', 'SFCRNOFF', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'UGDRNOFF', 
 'GRDFLX', 'TRAD', 'FSA', 'CANWAT', 'LH', 'FIRA', 'HFX']
 
+NWM_VARS_IGNORE_LIST = ['ACCET', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'CANWAT', 'SOILSAT',
+                        'EDIR', 'FSA', 'GRDFLX', 'ISNOW', 'UGDRNOFF', 'zwattablrt']
+
+NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.conus', 
+                     'medium_range_blend.land.conus', 'medium_range_blend.terrain_rt.conus',
+                     'medium_range.land_1.conus', 'medium_range.terrain_rt_1.conus',
+                     'medium_range.land_2.conus', 'medium_range.terrain_rt_2.conus',
+                     'medium_range.land_3.conus', 'medium_range.terrain_rt_3.conus',
+                     'medium_range.land_4.conus', 'medium_range.terrain_rt_4.conus',
+                     'long_range.land_1.conus', 'long_range.land_2.conus', 'long_range.land_3.conus', 'long_range.land_4.conus', 
+                     'short_range.land.conus', 'short_range.terrain_rt.conus']
+
 NOMADS_BASE_URL = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/prod'
 NWM_DATA_LOCAL_FOLDER = 'nwm_ref_files'
 NWM_NGEN_TEMPLATE_FOLDER = 'ngen_templates'
@@ -12,6 +24,7 @@ NWM_OUTPUT_FOLDER = 'nwm_output'
 NWM_CONFIG_LOCAL_FOLDER = 'configs'
 NWM_CONFIG_FILE_NAME = 'metadata'
 NWM_CONFIG_FILE_SUFFIX = '_config'
+LOG_FOLDER = 'logs'
 DIM_TIME = 'time'
 DIM_CATCHMENTS = 'catchments'
 NHF_REF_OBJECT = 'reference_flowpaths'
@@ -37,3 +50,4 @@ JSON_SCALAR_VAR = 'nwm_scalar_variables'
 JSON_CLASS = 'class'
 JSON_CATEGORY = 'category'
 JSON_DOMAIN = 'domain'
+CSV_BASE_COLS = ['time step','time'] #use lowercase
