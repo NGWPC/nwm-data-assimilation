@@ -39,10 +39,10 @@ def extract_netcdf_metadata(netcdf_root_folder: str):
     utils.obtain_metadata_information(netcdf_root_folder)
     #utils.debug_netcdf_structure_in_folder(netcdf_root_folder)
 
-def create_template_nwm_grids_data(netcdf_root_folder: str, templates_folder: str):
+def convert_csv_to_netcdf(csv_folder: str):
     #Usage:
-    # python netcdf_production_sample.py create-template-nwm-grid sample_data/nwm_output sample_data/nwm_templates
-    utils.create_nwm_template_grids(netcdf_root_folder, templates_folder)
+    # python netcdf_production_sample.py convert-csv-to-netcdf sample_data/medium_range_mem2
+    utils.convert_csvs_to_netcdf(csv_folder)
 
 def combine_basin_grids(reference_grid: str, netcdf_folder: str, output_folder: str):
     #Usage:
@@ -72,7 +72,7 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
         netcdf_metadata_list = utils.read_output_variables_info_from_config(json_file)
     else:
         raise ValueError("Specified config file does not exist")
-    print('Read output variables info from config')
+    # print('Read output variables info from config')
 
     # Begin data processing
     # reader = DataReader(ngen_netcdf_output_file)
@@ -85,12 +85,20 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
     ngen_template_nc_folder = os.path.join(output_folder, consts.NWM_NGEN_TEMPLATE_FOLDER)
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
-        print(f"Ready to process: {mdata.output_class}, {mdata.category}, {mdata.domain}")
-        if any(cat.lower() in mdata.category.lower() for cat in ['channel_rt', 'reservoir', 'total_water']):
-            print(f"The requested category - {mdata.category} - is not a gridded netcdf. The functionality is not implemented yet")
-            continue
-        processor.create_template_grid_netcdf_using_config(mdata, ngen_template_nc_folder)
-        processor.produce_nwm_output_grid(mdata, nwm_output_folder)
+        # if mdata.output_class == 'medium_range' and mdata.category =='land_1' and mdata.domain == 'conus':
+        if mdata.output_class == 'analysis_assim' and mdata.category =='land' and mdata.domain == 'conus':
+        # if mdata.output_class == 'medium_range_blend' and mdata.category =='terrain_rt' and mdata.domain == 'conus':
+        # if mdata.output_class == 'long_range' and mdata.category =='land_4' and mdata.domain == 'conus':
+            log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_' + mdata.output_class +  '.' + mdata.category + 
+                                    '.' + mdata.domain + '.' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
+            processor.log_file = log_file
+            processor.create_template_grid_netcdf_using_config(mdata, ngen_template_nc_folder)
+            processor.produce_nwm_output_grid(mdata, nwm_output_folder)
+        # print(f"Ready to process: {mdata.output_class}, {mdata.category}, {mdata.domain}")
+        # if any(cat.lower() in mdata.category.lower() for cat in ['channel_rt', 'reservoir', 'total_water']):
+        #     print(f"----The requested category - {mdata.category} - is not a gridded netcdf. The functionality is not implemented yet")
+        #     continue
+
 
 def main() -> None:
 
@@ -104,7 +112,7 @@ def main() -> None:
     parser_randomize.add_argument("output_file")
 
     #create template grid
-    parser_template_grid = subparsers.add_parser("create_template_grid_for_gpkg")
+    parser_template_grid = subparsers.add_parser("create-template-grid")
     parser_template_grid.add_argument("catchment_netcdf_file")
     parser_template_grid.add_argument("catchment_gpkg_file")
     parser_template_grid.add_argument("template_grid_file")
@@ -126,10 +134,9 @@ def main() -> None:
     parser_nwm_info = subparsers.add_parser("obtain-netcdf-metadata")
     parser_nwm_info.add_argument("local_folder_path")
 
-    #create template NWM output grids using the downloaded files from nomad server
-    parser_template_grids = subparsers.add_parser("create-template-nwm-grid")
-    parser_template_grids.add_argument("nwm_output_grids_folder")
-    parser_template_grids.add_argument("nwm_template_grids_folder")
+    #convert CSV files from ngen outputs to netcdf
+    parser_csv_to_nc = subparsers.add_parser("convert-csv-to-netcdf")
+    parser_csv_to_nc.add_argument("csv_folder_path")
 
     #create basin level netcdf using timestep netcdfs
     parser_basin_grids = subparsers.add_parser("create-combined-basin-grid")
@@ -155,8 +162,8 @@ def main() -> None:
         download_netcdf_from_nomads(args.download_url, args.output_folder_path)
     elif args.command == "obtain-netcdf-metadata":
         extract_netcdf_metadata(args.local_folder_path)
-    elif args.command == "create-template-nwm-grid":
-        create_template_nwm_grids_data(args.nwm_output_grids_folder, args.nwm_template_grids_folder)
+    elif args.command == "convert-csv-to-netcdf":
+        convert_csv_to_netcdf(args.csv_folder_path)
     elif args.command == "create-combined-basin-grid":
         combine_basin_grids(args.reference_grid, args.timestep_grids_folder, args.output_basin_grids_folder)
     elif args.command == "test-overall-workflow":
