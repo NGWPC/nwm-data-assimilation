@@ -16,7 +16,7 @@ from data_assimilation_engine.utils.calculators import ObsCalculator
 from data_assimilation_engine.utils.dataloaders import ObsDataLoader
 from data_assimilation_engine.utils.plotters import ObservedPlotter
 from data_assimilation_engine.utils.processors import ObsProcessor
-from data_assimialation_engine.utils.s3_paths import SNODAS_NC_PREFIX, SNOTEL_CSV_PREFIX
+from data_assimilation_engine.utils.s3_paths import SNODAS_NC_PREFIX, SNOTEL_CSV_PREFIX
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,7 @@ from data_assimilation_engine.utils.timeseries import (
     get_options,
 )
 from data_assimilation_engine.utils.utils import time_function
-from data_assimialation_engine.utils.s3_paths import SNODAS_CSV_PREFIX, SNOTEL_CSV_PREFIX
+from data_assimilation_engine.utils.s3_paths import SNODAS_CSV_PREFIX, SNOTEL_CSV_PREFIX
 
 logger = logging.getLogger(__name__)
 
