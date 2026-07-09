@@ -8,6 +8,7 @@ import xarray as xr
 import dask.array as da
 import time
 import math
+import re
 from shapely.geometry import Point
 from shapely.ops import unary_union
 from shapely import intersects_xy
@@ -207,10 +208,26 @@ class DataProcessor(DataReader):
         self.ds_template_grid = xr.open_dataset(template_nc_file)
 
     def produce_nwm_output_grid(self, mdata: NetCDFMetadata, output_dir: str) -> None:
-        # change variable name in the randomvals.nc This is strictly for testing purposes. 
-        # The case statements should be removed before going into production.
         produce_output = False
         ds_modified = self._catchment_ds
+
+        # if the output needs to have SOIL_M or SOIL_T, we need to
+        # stack the ngen output into the layers.
+        var_prefix_list = []
+        if 'SOIL_M' in mdata.nwm_variables:
+            var_prefix_list.append('SOIL_M_')
+        if 'SOIL_T' in mdata.nwm_variables:
+            var_prefix_list.append('SOIL_T_')
+            
+        if len(var_prefix_list) > 0:
+            ds_modified = self.stack_soil_variables(var_prefix_list)
+        
+        # if the output needs to have SNLIQ (snow layer liquid water), I need to expand 
+        # dimensions to include a snow layer. It is assumed to be of length=1
+        if 'SNLIQ' in mdata.nwm_variables:
+            expanded_var = ds_modified['SNLIQ'].expand_dims(dim = consts.DIM_SNOW_LYR)
+            expanded_var = expanded_var.transpose(consts.DIM_TIME, consts.DIM_SNOW_LYR, consts.DIM_CATCHMENTS)
+            ds_modified['SNLIQ'] = expanded_var
 
         # Remove data variables that should not be part of the product.
         # You can remove variables that are in the ignore variables as well.
@@ -244,6 +261,30 @@ class DataProcessor(DataReader):
             print(f"----Function execution time: {duration_minutes:.4f} minutes")
         else:
             print(f"----Production skipped for {cat_class_domain}")
+
+    def stack_soil_variables(self, var_prefix_list: List[str]) -> xr.Dataset:
+        stacked_ds = self._catchment_ds.copy()
+        for var_prefix in var_prefix_list:
+            matching_vars = [var for var in stacked_ds.data_vars if var.startswith(var_prefix)]
+            if not matching_vars:
+                raise ValueError(f"ngen output netcdf has no variables found matching the prefix '{var_prefix}'")
+
+            var_val_dict = {}
+            for var in stacked_ds.data_vars:
+                if var in matching_vars:
+                    soil_depth = var[len(var_prefix) :]
+                    depth_num = re.search(r"\d*\.\d+|\d+", soil_depth)
+                    var_val_dict[var] = float(depth_num.group()) if depth_num else 0.0
+
+            sorted_vars = sorted(var_val_dict.keys(), key = lambda k: var_val_dict[k])
+            arrays_for_stack = [stacked_ds[v].rename(var_prefix.strip("_")) for v in sorted_vars]
+            stacked_var = xr.concat(arrays_for_stack, dim = consts.DIM_SOIL_LYR)
+            stacked_var = stacked_var.transpose(consts.DIM_TIME, consts.DIM_SOIL_LYR, consts.DIM_CATCHMENTS)
+            stacked_ds[var_prefix.strip("_")] = stacked_var
+            stacked_ds = stacked_ds.drop_vars(matching_vars)
+        return stacked_ds
+    
+
 
     def build_catchment_id_grid(self, x_dim_name: str, y_dim_name: str) -> xr.DataArray:
         """
