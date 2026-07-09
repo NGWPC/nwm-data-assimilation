@@ -20,7 +20,7 @@ from data_assimilation_engine.utils.converters import Converter
 from data_assimilation_engine.utils.dataloaders import SimDataLoader
 from data_assimilation_engine.utils.plotters import SimPlotter
 from data_assimilation_engine.utils.processors import SimProcessor
-from data_assimialation_engine.utils.s3_paths import SNOTEL_CSV_PREFIX
+from data_assimilation_engine.utils.s3_paths import SNOTEL_CSV_PREFIX
 
 logger = logging.getLogger(__name__)
 
