@@ -753,7 +753,7 @@ class Processor:
     @property
     def basin_id(self) -> str:
         """Extract the basin ID from the geopackage filename."""
-        return re.search(r"(\d+)", self.gpkg_filename).group(1)
+        return self.gpkg_filename.split("_", 1)[-1]
 
     @property
     @lru_cache
