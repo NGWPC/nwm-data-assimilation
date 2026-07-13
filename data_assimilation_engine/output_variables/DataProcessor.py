@@ -222,7 +222,7 @@ class DataProcessor(DataReader):
         if len(var_prefix_list) > 0:
             ds_modified = self.stack_soil_variables(var_prefix_list)
         
-        # if the output needs to have SNLIQ (snow layer liquid water), I need to expand 
+        # if the output needs to have SNLIQ (snow layer liquid water), we need to expand 
         # dimensions to include a snow layer. It is assumed to be of length=1
         if 'SNLIQ' in mdata.nwm_variables:
             expanded_var = ds_modified['SNLIQ'].expand_dims(dim = consts.DIM_SNOW_LYR)
@@ -258,7 +258,7 @@ class DataProcessor(DataReader):
             self.write_netcdf_per_timestep(mapped_grid, output_dir, consts.DIM_TIME)
             end_time = time.perf_counter()
             duration_minutes = (end_time - start_time) / 60
-            print(f"----Function execution time: {duration_minutes:.4f} minutes")
+            print(f"----Function execution time: {duration_minutes:.2f} minutes")
         else:
             print(f"----Production skipped for {cat_class_domain}")
 
