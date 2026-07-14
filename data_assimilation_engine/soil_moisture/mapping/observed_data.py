@@ -15,6 +15,7 @@ from data_assimilation_engine.utils.calculators import ObsCalculator
 from data_assimilation_engine.utils.dataloaders import ObsDataLoader
 from data_assimilation_engine.utils.plotters import ObservedPlotter
 from data_assimilation_engine.utils.processors import ObsProcessor
+from data_assimilation_engine.utils.s3_paths import SMAP_NC_PREFIX, SNOTEL_CSV_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class SoilMoistureObsDataLoader(ObsDataLoader):
         """Initialize the SoilMoistureObsDataLoader."""
         self.dataset_name = "sm_rootzone"  # Variable name in xarray Dataset
         self.path_str = (
-            "ngwpc-forcing/smap_nc/SMAP_L4_SM_gph_dateThour3000_Vv8010_001.nc"
+            f"{SMAP_NC_PREFIX}/SMAP_L4_SM_gph_dateThour3000_Vv8010_001.nc"
         )
         self._chunk_size = 100  # Default chunk size
         self.x_dim_name = "x"  # X dimension name in xarray Dataset
@@ -176,7 +177,7 @@ class SoilMoistureObsProcessor(ObsProcessor):
         """Initialize the Soil Moisture Observed Processor."""
         self._date = date
         super().__init__(gpkg_file, output_file_raw, output_file_lumped, direct_s3)
-        # self.snotel_s3_path = "ngwpc-forcing/snotel_csv"
+        # self.snotel_s3_path = SNOTEL_CSV_PREFIX
         self.column = "mean_sm"
 
         self.dl = SoilMoistureObsDataLoader(self.gpkg_file)

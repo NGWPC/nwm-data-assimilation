@@ -15,6 +15,7 @@ from data_assimilation_engine.utils.timeseries import (
     get_options,
 )
 from data_assimilation_engine.utils.utils import time_function
+from data_assimilation_engine.utils.s3_paths import SMAP_CSV_PREFIX, SNOTEL_CSV_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +158,8 @@ class SoilMoistureS3Loader(S3Loader):
         """Initialize the SoilMoistureS3Loader with basin ID and S3 options."""
         super().__init__(basin_id, direct_s3)
         self.variable_name = "soil_moisture"
-        # self.gage_prefix = "ngwpc-forcing/snotel_csv"
-        self.obs_prefix = "ngwpc-forcing/smap_csv"
+        # self.gage_prefix = SNOTEL_CSV_PREFIX
+        self.obs_prefix = SMAP_CSV_PREFIX
 
 
 class SoilMoistureFileLoader(FileLoader):
