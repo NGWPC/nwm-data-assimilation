@@ -5,7 +5,8 @@ NWM_VARIABLES_LIST = ['sfcheadsubrt', 'zwattablrt', 'inflow', 'outflow', 'reserv
 'GRDFLX', 'TRAD', 'FSA', 'CANWAT', 'LH', 'FIRA', 'HFX']
 
 NWM_VARS_IGNORE_LIST = ['ACCET', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'CANWAT', 'SOILSAT',
-                        'EDIR', 'FSA', 'GRDFLX', 'ISNOW', 'UGDRNOFF', 'zwattablrt']
+                        'EDIR', 'FSA', 'GRDFLX', 'ISNOW', 'UGDRNOFF', 'zwattablrt',
+                        'qBtmVertRunoff', 'qSfcLatRunoff']
 
 NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.conus', 
                      'medium_range_blend.land.conus', 'medium_range_blend.terrain_rt.conus',

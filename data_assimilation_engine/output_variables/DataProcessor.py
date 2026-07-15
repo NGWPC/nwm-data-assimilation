@@ -140,6 +140,24 @@ class DataProcessor(DataReader):
         template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
         if os.path.isfile(template_nc_file):
             print(f"----Reusing existing template file in local for {self._output_class}, {self._category}, {self._domain}")
+        elif mdata.category == 'channel_rt': # indicates that it is non-geospatial. For example, channel_rt
+            ds = xr.open_dataset(file_name)
+
+            # Delete any variable that is in the ignore list. Zero the valid min and max attribute in the time dimension
+            ds = ds.drop_vars(consts.NWM_VARS_IGNORE_LIST, errors="ignore")
+            if consts.DIM_TIME in ds.coords:
+                attrs_to_reset = ['valid_min', 'valid_max']
+                for attr in attrs_to_reset:
+                    if attr in ds[consts.DIM_TIME].attrs:
+                        ds[consts.DIM_TIME].attrs[attr] = 0
+
+            # Slice all coordinates and variable arrays to zero length.
+            dims = list(ds.sizes.keys())
+            zero_slices = {dim: slice(0, 0) for dim in dims}
+            ds_template = ds.isel(zero_slices)
+
+            # Save to nc file
+            ds_template.to_netcdf(template_nc_file)
         else:
             ds = xr.open_dataset(file_name)
             # To do: Have to figure out a workflow when CRS is "Not Available"
@@ -203,12 +221,13 @@ class DataProcessor(DataReader):
 
             # Save to nc file
             ds_clipped.to_netcdf(template_nc_file)
-            print(f"NetCDF template grid written to {template_nc_file}")
-        
+
         self.ds_template_grid = xr.open_dataset(template_nc_file)
+        print(f"NetCDF template grid written to {template_nc_file}")
 
     def produce_nwm_output_grid(self, mdata: NetCDFMetadata, output_dir: str) -> None:
         produce_output = False
+        is_gridded = True
         ds_modified = self._catchment_ds
 
         # if the output needs to have SOIL_M or SOIL_T, we need to
@@ -237,7 +256,7 @@ class DataProcessor(DataReader):
         ignore_set = set(consts.NWM_VARS_IGNORE_LIST)
         pruned_variables = [item for item in target_variables if item not in ignore_set]
         variables_to_drop = [var for var in ds_modified.data_vars if var not in pruned_variables and len(ds_modified[var].dims) > 0]
-        ds_filtered = ds_modified.drop_vars(variables_to_drop)
+        ds_filtered = ds_modified.drop_vars(variables_to_drop, errors="ignore")
         
         cat_class_domain = mdata.output_class + '.' + mdata.category +  '.' + mdata.domain
         
@@ -249,8 +268,10 @@ class DataProcessor(DataReader):
         
         if (cat_class_domain in consts.NWM_PRODUCTS_LIST):
             produce_output = True
+        if mdata.category == 'channel_rt':
+            is_gridded = False
 
-        if produce_output:
+        if produce_output and is_gridded:
             catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
             mapped_grid = self.map_catchment_data_to_grid(ds_filtered, catchment_grid, consts.DIM_CATCHMENTS, mdata.x_name, mdata.y_name)
             
@@ -259,6 +280,8 @@ class DataProcessor(DataReader):
             end_time = time.perf_counter()
             duration_minutes = (end_time - start_time) / 60
             print(f"----Function execution time: {duration_minutes:.2f} minutes")
+        elif produce_output and not is_gridded:
+
         else:
             print(f"----Production skipped for {cat_class_domain}")
 
@@ -284,8 +307,6 @@ class DataProcessor(DataReader):
             stacked_ds = stacked_ds.drop_vars(matching_vars)
         return stacked_ds
     
-
-
     def build_catchment_id_grid(self, x_dim_name: str, y_dim_name: str) -> xr.DataArray:
         """
         Returns a DataArray (y, x) where each cell in the basin-level grid contains a catchment ID.
@@ -437,6 +458,89 @@ class DataProcessor(DataReader):
             formatted_t = t_str.replace('-', '_').replace(':', '_')
             output_file = os.path.join(output_dir, f"nwm.{self._geo_id}.{self._output_class}.{self._category}.{self._domain}.{formatted_t}.nc") # To do: Get this as function argument
             ds_t.to_netcdf(output_file)
+
+    import numpy as np
+import xarray as xr
+
+
+def populate_template_snapshot(
+    template_path,
+    source_path,
+    target_time,
+    var_mapping,
+    output_path="populated_snapshot.nc",
+):
+    """Expands a zeroed NetCDF template and populates it with data from a single
+
+    time snapshot, including remapping misnamed variables.
+
+    Parameters:
+    -----------
+    template_path : str
+        Path to the empty/zeroed template NetCDF file.
+    source_path : str
+        Path to the multi-time, multi-entity source NetCDF file.
+    target_time : str or datetime-like
+        The single time snapshot to extract (e.g., '2026-07-14').
+    var_mapping : dict
+        A dictionary mapping {'source_variable_name': 'template_variable_name'}.
+    output_path : str
+        Path where the final populated NetCDF will be saved.
+    """
+    # 1. Open the zeroed template and the source data
+    template_ds = xr.open_dataset(template_path)
+    source_ds = xr.open_dataset(source_path)
+
+    # 2. Extract the single time slice from the source data
+    # Using a slice (target, target) forces the time dimension to keep a length of 1
+    snapshot = source_ds.sel(time=slice(target_time, target_time))
+
+    # 3. Handle the misnamed variable by renaming it in our snapshot
+    # to match the name expected by the template
+    # errors='ignore' ensures it doesn't crash if already correctly named
+    snapshot = snapshot.rename_vars(var_mapping, errors="ignore")
+
+    # 4. Extract the unique coordinates from the snapshot to expand the template
+    new_time = snapshot.coords["time"].values
+    new_entities = snapshot.coords["entity"].values
+
+    # 5. Expand the template's dimensions by assigning the active coordinates
+    # This automatically resizes the template's structures from (0, 0) to (1, N)
+    populated_ds = template_ds.assign_coords(
+        time=new_time, entity=new_entities
+    )
+
+    # 6. Populate variables defined in the template using the snapshot data
+    for var_name in list(populated_ds.data_vars):
+        if var_name in snapshot.data_vars:
+            # Transfer the data array (retaining original attributes from template)
+            populated_ds[var_name].values = snapshot[var_name].values
+        else:
+            # Fallback: fill with zeros if a template variable isn't in this snapshot
+            print(
+                f"Warning: Variable '{var_name}' not found in snapshot. Leaving as zero filled."
+            )
+            # Since assign_coords doesn't fill values, we instantiate it with zeros
+            populated_ds[var_name] = xr.zeros_like(populated_ds[var_name])
+
+    # 7. Write the populated snapshot dataset to a new NetCDF file
+    populated_ds.to_netcdf(output_path)
+    print(
+        f"Successfully created '{output_path}' with dimensions: {dict(populated_ds.sizes)}"
+    )
+
+    return populated_ds
+
+
+# Example Usage:
+# mapping = {'temp_obs': 'temperature'}  # 'temp_obs' in source becomes 'temperature' in template
+# populate_template_snapshot(
+#     template_path="empty_template.nc",
+#     source_path="multi_time_data.nc",
+#     target_time="2026-07-14",
+#     var_mapping=mapping,
+#     output_path="final_snapshot_20260714.nc"
+# )
 
     def close_log(self):
         """Restores the original terminal output and closes the file."""

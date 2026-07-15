@@ -86,14 +86,14 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
         # if mdata.output_class == 'medium_range' and mdata.category =='land_1' and mdata.domain == 'conus':
-        if mdata.output_class == 'analysis_assim' and mdata.category =='land' and mdata.domain == 'conus':
+        if mdata.output_class == 'analysis_assim' and mdata.category =='channel_rt' and mdata.domain == 'conus':
         # if mdata.output_class == 'medium_range_blend' and mdata.category =='terrain_rt' and mdata.domain == 'conus':
         # if mdata.output_class == 'long_range' and mdata.category =='land_4' and mdata.domain == 'conus':
             log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_' + mdata.output_class +  '.' + mdata.category + 
                                     '.' + mdata.domain + '.' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
             processor.log_file = log_file
             processor.create_template_grid_netcdf_using_config(mdata, ngen_template_nc_folder)
-            processor.produce_nwm_output_grid(mdata, nwm_output_folder)
+            #processor.produce_nwm_output_grid(mdata, nwm_output_folder)
         # print(f"Ready to process: {mdata.output_class}, {mdata.category}, {mdata.domain}")
         # if any(cat.lower() in mdata.category.lower() for cat in ['channel_rt', 'reservoir', 'total_water']):
         #     print(f"----The requested category - {mdata.category} - is not a gridded netcdf. The functionality is not implemented yet")
