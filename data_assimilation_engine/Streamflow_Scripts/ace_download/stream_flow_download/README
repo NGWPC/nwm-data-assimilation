@@ -1,0 +1,7 @@
+- Dec 2024: Changed XML to Json file format
+- USACE url:
+https://cwms.sec.usace.army.mil/cwms-data/timeseries?name=KEYO.Flow-Out.Ave.1Day.1Day.Raw-USBR&office=NWDM&begin=PT-48h
+
+wget -O out.json "http://water.usace.army.mil/cwms-data/timeseries?office=NWDM&name=KEYO.Flow-Out.Ave.1Day.1Day.Raw-USBR&begin=PT-48h&format=json" | python -m json.tool out.json > out.json
+
+curl -X 'GET' 'https://cwms.sec.usace.army.mil/cwms-data/timeseries?name=KEYO.Flow-Out.Ave.1Day.1Day.Raw-USBR&office=NWDM&begin=PT-48h' -H 'accept: application/json;version=2' | python -m json.tool > out.json
