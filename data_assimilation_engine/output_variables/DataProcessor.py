@@ -41,11 +41,11 @@ class DataProcessor(DataReader):
 
         # Check schema and assign catchment ID field.
         if is_new_NHF_schema:
-            self.catchment_field = consts.NHF_DIV_ID
+            self._catchment_field = consts.NHF_DIV_ID
         else:
-            self.catchment_field = consts.NONNHF_DIV_ID
+            self._catchment_field = consts.NONNHF_DIV_ID
 
-        gpkg_catchment_list = gpkg_gdf[self.catchment_field].values.tolist()
+        gpkg_catchment_list = gpkg_gdf[self._catchment_field].values.tolist()
         self._gpkg_gdf = gpkg_gdf
         
         # Check if catchments from netcdf and geopackage match
@@ -98,8 +98,8 @@ class DataProcessor(DataReader):
         self._log_file = open(log_file_path, "w", encoding="utf-8")
         sys.stdout = self._log_file
 
-    def set_template_grid(self, template_grid_path: str):
-        self.ds_template_grid = xr.open_dataset(template_grid_path)
+    def set_template_netcdf(self, template_grid_path: str):
+        self._template_netcdf_ds = xr.open_dataset(template_grid_path)
 
     def _is_new_NHF_schema(self, geopackage_path: str, layer_name: str) -> bool:
         """
@@ -222,7 +222,7 @@ class DataProcessor(DataReader):
             # Save to nc file
             ds_clipped.to_netcdf(template_nc_file)
 
-        self.ds_template_grid = xr.open_dataset(template_nc_file)
+        self._template_netcdf_ds = xr.open_dataset(template_nc_file)
         print(f"NetCDF template grid written to {template_nc_file}")
 
     def produce_nwm_output_grid(self, mdata: NetCDFMetadata, output_dir: str) -> None:
@@ -312,7 +312,7 @@ class DataProcessor(DataReader):
         Returns a DataArray (y, x) where each cell in the basin-level grid contains a catchment ID.
         """
         try:
-            ds = self.ds_template_grid
+            ds = self._template_netcdf_ds
             x = ds[x_dim_name].values
             y = ds[y_dim_name].values
 
@@ -343,11 +343,11 @@ class DataProcessor(DataReader):
             gdf_poly = self._gpkg_gdf.to_crs(crs)
             joined = gpd.sjoin(
                 gdf_ncgrid_points,
-                gdf_poly[[self.catchment_field, "geometry"]],
+                gdf_poly[[self._catchment_field, "geometry"]],
                 how="left",
                 predicate="within"
             )
-            catchment_ids = joined[self.catchment_field].to_numpy()
+            catchment_ids = joined[self._catchment_field].to_numpy()
             catchment_grid = catchment_ids.reshape(len(y), len(x))
 
             catchment_id_da = xr.DataArray(
@@ -402,12 +402,12 @@ class DataProcessor(DataReader):
 
         # Attach coordinates from template
         ds_out = ds_out.assign_coords({
-            x_dim_name: self.ds_template_grid[x_dim_name],
-            y_dim_name: self.ds_template_grid[y_dim_name]
+            x_dim_name: self._template_netcdf_ds[x_dim_name],
+            y_dim_name: self._template_netcdf_ds[y_dim_name]
         })
 
         # Add CRS info from template grid
-        crs_attrs = self.ds_template_grid["crs"].attrs.copy()
+        crs_attrs = self._template_netcdf_ds["crs"].attrs.copy()
         ds_out["crs"] = xr.DataArray(data=0,dims=())
         ds_out["crs"].attrs = crs_attrs
 
@@ -463,58 +463,44 @@ class DataProcessor(DataReader):
 import xarray as xr
 
 
-def populate_template_snapshot(
-    template_path,
-    source_path,
-    target_time,
-    var_mapping,
-    output_path="populated_snapshot.nc",
-):
-    """Expands a zeroed NetCDF template and populates it with data from a single
-
+def populate_template_snapshot(self):
+    """
+    Expands a zeroed NetCDF template and populates it with data from a single
     time snapshot, including remapping misnamed variables.
-
-    Parameters:
-    -----------
-    template_path : str
-        Path to the empty/zeroed template NetCDF file.
-    source_path : str
-        Path to the multi-time, multi-entity source NetCDF file.
-    target_time : str or datetime-like
-        The single time snapshot to extract (e.g., '2026-07-14').
-    var_mapping : dict
-        A dictionary mapping {'source_variable_name': 'template_variable_name'}.
-    output_path : str
-        Path where the final populated NetCDF will be saved.
     """
     # 1. Open the zeroed template and the source data
-    template_ds = xr.open_dataset(template_path)
-    source_ds = xr.open_dataset(source_path)
 
-    # 2. Extract the single time slice from the source data
-    # Using a slice (target, target) forces the time dimension to keep a length of 1
-    snapshot = source_ds.sel(time=slice(target_time, target_time))
+    if not self._template_netcdf_ds:
+        raise ValueError("Template netcdf not set")
+    
+    if not self._catchment_ds:
+        raise ValueError("ngen catchment netcdf not set")
+    
+    # Extract the last time from ngen catchment output and use that as the timeslice
+    # To do: Need to update this for the correct time snapshot.
+    last_time = self._catchment_ds.coords[consts.DIM_TIME].values[-1]
+    output_snapshot = self._catchment_ds.sel(time=slice(last_time, last_time))
 
     # 3. Handle the misnamed variable by renaming it in our snapshot
     # to match the name expected by the template
     # errors='ignore' ensures it doesn't crash if already correctly named
-    snapshot = snapshot.rename_vars(var_mapping, errors="ignore")
+    output_snapshot = output_snapshot.rename_vars(var_mapping, errors="ignore")
 
-    # 4. Extract the unique coordinates from the snapshot to expand the template
-    new_time = snapshot.coords["time"].values
-    new_entities = snapshot.coords["entity"].values
+    # Extract the unique coordinates from the snapshot to expand the template
+    new_time = output_snapshot.coords[consts.DIM_TIME].values
+    new_entities = output_snapshot.coords[consts.DIM_CATCHMENTS].values
 
-    # 5. Expand the template's dimensions by assigning the active coordinates
+    # Expand the template's dimensions by assigning the active coordinates
     # This automatically resizes the template's structures from (0, 0) to (1, N)
-    populated_ds = template_ds.assign_coords(
+    populated_ds = self._template_netcdf_ds.assign_coords(
         time=new_time, entity=new_entities
     )
 
-    # 6. Populate variables defined in the template using the snapshot data
+    # Populate variables defined in the template using the snapshot data
     for var_name in list(populated_ds.data_vars):
-        if var_name in snapshot.data_vars:
+        if var_name in output_snapshot.data_vars:
             # Transfer the data array (retaining original attributes from template)
-            populated_ds[var_name].values = snapshot[var_name].values
+            populated_ds[var_name].values = output_snapshot[var_name].values
         else:
             # Fallback: fill with zeros if a template variable isn't in this snapshot
             print(
@@ -523,12 +509,9 @@ def populate_template_snapshot(
             # Since assign_coords doesn't fill values, we instantiate it with zeros
             populated_ds[var_name] = xr.zeros_like(populated_ds[var_name])
 
-    # 7. Write the populated snapshot dataset to a new NetCDF file
-    populated_ds.to_netcdf(output_path)
-    print(
-        f"Successfully created '{output_path}' with dimensions: {dict(populated_ds.sizes)}"
-    )
-
+    # Write the populated snapshot dataset to a new NetCDF file
+    # populated_ds.to_netcdf(output_path)
+    # print(f"Successfully created '{output_path}' with dimensions: {dict(populated_ds.sizes)}")
     return populated_ds
 
 
