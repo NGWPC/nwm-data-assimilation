@@ -294,13 +294,9 @@ class RFCTimeSeries:
             synthetics[:,:] = np.asarray( self.synthetics )
 #            issuetime = netCDF4.stringtochar( [ ''.join('2019-08-18_00:00:00' ) ] )
 #            chars = '1234567890aabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-            timestrings = []
-            timestrings = np.empty((len(self.issueTimeStamps),),\
-                                                 'S'+repr(self.timeStrLen))
-            for n in range(len(self.issueTimeStamps)):
-                    timestrings[ n ] = \
-                       self.issueTimeStamps[n].strftime( "%Y-%m-%d_%H:%M:00" ) 
-            issuetime[:,:] = netCDF4.stringtochar( timestrings )
+            for i, ts in enumerate(self.issueTimeStamps):
+                time_bytes = ts.strftime( "%Y-%m-%d_%H:%M:00" ).encode('utf-8')
+                issuetime[i, :] = np.frombuffer(time_bytes, dtype='S1')
 #            issuetime = netCDF4.stringtochar( \
 #               [ ''.join( t.strftime( "%Y-%m-%d_%H:%M:00" )  \
 #                                for t in self.issueTimeStamps ] ) ] )
