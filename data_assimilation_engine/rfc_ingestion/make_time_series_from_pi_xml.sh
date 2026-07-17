@@ -3,6 +3,10 @@
 # Reads individual RFC forecast xml files and the RFC stations csv file.
 # Writes timeseries netcdf files.
 # 
+# Usage:
+#   Run from repo root:
+#   ./data_assimilation_engine/rfc_ingestion/make_time_series_from_pi_xml.sh
+# 
 
 set -euo pipefail
 
