@@ -174,7 +174,7 @@ class S3Loader:
 
     @property
     @lru_cache
-    def obs_path(self) -> tuple[str, str]:
+    def obs_path(self) -> str:
         """Parse/construct observed data s3 path from gpkg filename."""
         # Construct the path using the numeric part and s3 options
         if not self.direct_s3:
@@ -185,15 +185,22 @@ class S3Loader:
             else:
                 raise FileNotFoundError(f"Could not find local csv file: {s3_path}")
         else:
-            fs = fsspec.filesystem("s3")
             s3_uri = (
                 f"s3://{self.obs_prefix}/gages-{self.basin_id}_{self.variable_name}.csv"
             )
-            # print(repr(s3_uri))
-            if fs.exists(s3_uri):
-                return s3_uri
-            else:
-                raise FileNotFoundError(f"Could not find S3 csv file: {s3_uri}")
+            try:
+                fs = fsspec.filesystem("s3")
+                if fs.exists(s3_uri):
+                    return s3_uri
+                else:
+                    raise FileNotFoundError(f"Could not find S3 csv file: {s3_uri}")
+            except FileNotFoundError:
+                raise
+            except Exception as e:
+                raise PermissionError(
+                    f"Unable to access S3 csv file {s3_uri}: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
 
     @property
     @lru_cache
@@ -205,18 +212,22 @@ class S3Loader:
         -------
         pandas.DataFrame
             DataFrame containing the CSV data
-
         """
         try:
+            obs_path = self.obs_path
+
             # Use fsspec to open the file
-            with fsspec.open(self.obs_path) as f:
+            with fsspec.open(obs_path) as f:
                 df = pd.read_csv(f)
 
             return df
 
         except Exception as e:
-            logger.info(f"Error reading S3 file {self.obs_path}: {e}")
-            return None
+            logger.exception(
+                f"Error reading observed data file: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise
 
 
 class DataParser:
@@ -869,7 +880,11 @@ class Processor:
                 f"Basin average {self.variable} data table saved to {self.csv_output}"
             )
         except Exception as e:
-            logger.info(f"Error saving data to CSV: {e}")
+            logger.exception(
+                f"Error saving data to CSV {self.csv_output}: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise
 
     @time_function
     def process(self) -> None:
