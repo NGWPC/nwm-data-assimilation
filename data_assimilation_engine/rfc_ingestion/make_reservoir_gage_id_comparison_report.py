@@ -50,10 +50,8 @@ def main() -> None:
 
     # Read CSV gages
     print(f"Reading: {settings['sites_file']}")
-    csv_gages = {
-        (row["gage"], row["RFC"])
-        for row in csv.DictReader(open(settings["sites_file"]))
-    }
+    with open(settings["sites_file"]) as f:
+        csv_gages = {(row["gage"], row["RFC"]) for row in csv.DictReader(f)}
 
     # Read XML locationIds from forecast files
     xml_locs = set()
