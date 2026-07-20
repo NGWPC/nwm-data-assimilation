@@ -89,13 +89,13 @@ def main(input_dir: str, output_sites_file: str):
             rec["RFC"] = rfc
             out_records.append(rec)
 
-    print(f"Writing: {args.output_sites_file}")
-    with open(args.output_sites_file, mode="w", newline="", encoding="utf-8") as file:
+    print(f"Writing: {output_sites_file}")
+    with open(output_sites_file, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=out_fields)
         writer.writeheader()
         writer.writerows(out_records)
 
 
 if __name__ == "__main__":
-    args = cli()
-    main(args.input_dir, args.output_sites_file)
+    _ARGS = cli()
+    main(_ARGS.input_dir, _ARGS.output_sites_file)
