@@ -29,7 +29,6 @@ Usage:
 """
 
 import csv
-import glob
 import json
 import os
 import xml.etree.ElementTree as ET
@@ -45,7 +44,6 @@ def main() -> None:
     with open(SETTINGS) as f:
         settings = json.load(f)
 
-    reservoir_data_glob_pattern = os.path.join(settings["data_dir_in"], "**/*.xml")
     report_file = os.path.splitext(os.path.abspath(__file__))[0] + "_result.json"
 
     # Read CSV gages
@@ -55,13 +53,22 @@ def main() -> None:
 
     # Read XML locationIds from forecast files
     xml_locs = set()
-    print(f"Reading files matching: {reservoir_data_glob_pattern}")
-    for xml_file in glob.glob(reservoir_data_glob_pattern, recursive=True):
-        rfc_code = extract_rfc_code(xml_file)
-        print(f"Reading: {xml_file}")
-        for elem in ET.parse(xml_file).iter():
-            if "locationId" in elem.tag and elem.text:
-                xml_locs.add((elem.text, rfc_code))
+
+    print(f"Reading xml files within: {settings['data_dir_in']}")
+    if not os.path.isdir(settings["data_dir_in"]):
+        raise NotADirectoryError(settings["data_dir_in"])
+    for root, dirs, files in os.walk(settings["data_dir_in"]):
+        dirs.sort()
+        files.sort()
+        for fn in files:
+            if not fn.lower().endswith(".xml"):
+                continue
+            xml_file = os.path.join(root, fn)
+            rfc_code = extract_rfc_code(xml_file)
+            print(f"Reading: {xml_file}")
+            for elem in ET.parse(xml_file).iter():
+                if "locationId" in elem.tag and elem.text:
+                    xml_locs.add((elem.text, rfc_code))
 
     data = {
         "both": sorted(xml_locs & csv_gages),

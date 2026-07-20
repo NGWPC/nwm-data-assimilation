@@ -73,7 +73,7 @@ def main(input_dir: str, output_sites_file: str) -> None:
         dirs.sort()
         files.sort()
         for fn in files:
-            if not fn.endswith(".xml"):
+            if not fn.lower().endswith(".xml"):
                 continue
 
             rfc_code = extract_rfc_code(fn)
