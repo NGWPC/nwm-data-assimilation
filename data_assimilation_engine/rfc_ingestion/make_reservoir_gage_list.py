@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+"""CLI script to discover raw reservoir forecast xml files within the input dir, read them to determine their gages and RFC codes,
+and write a reservoir gages list file (CSV) to be consumed by existing scripts. Args namespace mimics patterns of existing legacy scripts."""
+
 import argparse
 import csv
 import os
@@ -8,6 +11,13 @@ import xml.etree.ElementTree as ET
 
 
 def extract_rfc_code(file_name: str) -> str:
+    """Extract the RFC code associated with the provided string, assuming its word is separated by other words in the string via underscore.
+    Only the file basename is considered, not the full path.
+
+    Examples:
+        "/path/to/foo_RFCBAR_bazqux.xml" -> "RFCBAR"
+        "/path/to/bar_FOORFC_bazqux.xml" -> "FOORFC"
+    """
     extractor_pattern = r"([^_]*RFC[^_]*)(?=_)"
     bn_no_ext = os.path.splitext(os.path.basename(file_name))[0]
     # print(f"extracting pattern {extractor_pattern} from string {bn_no_ext}")
@@ -28,7 +38,9 @@ def extract_rfc_code(file_name: str) -> str:
     return rfc_code
 
 
-def cli():
+def cli() -> argparse.Namespace:
+    """Parse the current CLI args via argparse and returns an argparse.Namespace instance of the parsed result.
+    Args namespace mimics patterns of existing legacy scripts."""
     parser = argparse.ArgumentParser(description="Generate RFC reservoir gage list")
     parser.add_argument(
         "-i",
@@ -46,7 +58,9 @@ def cli():
     return args
 
 
-def main(input_dir: str, output_sites_file: str):
+def main(input_dir: str, output_sites_file: str) -> None:
+    """See docstring of this script."""
+
     if os.path.exists(output_sites_file):
         raise FileExistsError(f"Output CSV file {output_sites_file} already exists.")
     if not os.path.exists(input_dir):
