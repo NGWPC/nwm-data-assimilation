@@ -1,30 +1,32 @@
-#
-# Scan the csv reservoirs list CSV and scan the XML data files already downloaded,
-# and build a report indicating which gages exist in both, or only in the CSV list, or only in the XML data.
-# Write the report to a json file.
-#
-# The json file has keys "both", "only_csv", and "only_xml" indicating the status of each gage.
-# The value of each key is a list gages.  Each gage itself is represented as a list of length 2: gage ID, RFC ID.
-#
-# For example snippet:
-#
-# {
-#   "both": [
-#     [
-#       "ABIN5",
-#       "WGRFC"
-#     ],
-#     [
-#       "ACDO2",
-#       "ABRFC"
-#     ],
-# ...
-# }
-#
-#
-# Usage:
-#   Run from the repo root.
-#
+#!/usr/bin/env python
+
+"""Script to scan the csv reservoirs list CSV and scan the XML data files already downloaded,
+and build a report indicating which gages exist in both, or only in the CSV list, or only in the XML data.
+Write the report to a json file.
+
+The input file is defined by the global SETTINGS variable.
+
+The json file has keys "both", "only_csv", and "only_xml" indicating the status of each gage.
+The value of each key is a list gages.  Each gage itself is represented as a list of length 2: gage ID, RFC ID.
+
+For example snippet:
+
+{
+  "both": [
+    [
+      "ABIN5",
+      "WGRFC"
+    ],
+    [
+      "ACDO2",
+      "ABRFC"
+    ],
+...
+}
+
+Usage:
+  Run from the repo root.
+"""
 
 import csv
 import glob
@@ -37,7 +39,8 @@ from make_reservoir_gage_list import extract_rfc_code
 SETTINGS = "data_assimilation_engine/rfc_ingestion/reservoir_gage_data_settings.json"
 
 
-def main():
+def main() -> None:
+    """See docstring of this script."""
     print(f"Reading: {SETTINGS}")
     with open(SETTINGS) as f:
         settings = json.load(f)
