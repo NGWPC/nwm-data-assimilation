@@ -96,7 +96,7 @@ def main(input_dir: str, output_sites_file: str) -> None:
 
     for rfc in sorted(rfc2gages):
         gages = rfc2gages[rfc]
-        print(f"RFC had {len(gages)} reservoir gages")
+        print(f"RFC {repr(rfc)} had {len(gages)} reservoir gages")
         for gage in sorted(gages):
             rec = {k: "" for k in out_fields}
             rec["gage"] = gage
