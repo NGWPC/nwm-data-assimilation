@@ -9,6 +9,7 @@ NWM_VARS_IGNORE_LIST = ['ACCET', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'CANWAT', 'SO
                         'qBtmVertRunoff', 'qSfcLatRunoff']
 
 NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.conus', 
+                     'analysis_assim.channel_rt.conus', 'analysis_assim.reservoir.conus',
                      'medium_range_blend.land.conus', 'medium_range_blend.terrain_rt.conus',
                      'medium_range.land_1.conus', 'medium_range.terrain_rt_1.conus',
                      'medium_range.land_2.conus', 'medium_range.terrain_rt_2.conus',
@@ -30,6 +31,8 @@ DIM_TIME = 'time'
 DIM_CATCHMENTS = 'catchments'
 DIM_SOIL_LYR = 'soil_layers_stag'
 DIM_SNOW_LYR = 'snow_layers'
+DIM_FEATURE_ID = 'feature_id'
+DIM_REF_TIME = 'reference_time'
 NHF_REF_OBJECT = 'reference_flowpaths'
 NHF_DIV_ID = 'div_id'
 NONNHF_DIV_ID = 'divide_id'

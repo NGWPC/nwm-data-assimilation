@@ -1,6 +1,7 @@
 import argparse
 import os
 from datetime import datetime
+import time
 from data_assimilation_engine.output_variables.DataReader import DataReader
 from data_assimilation_engine.output_variables.DataProcessor import DataProcessor
 import data_assimilation_engine.output_variables.utils as utils
@@ -18,13 +19,13 @@ def create_template_grid_for_gpkg(netcdf_file: str, gpkg_file: str, template_gri
     # python netcdf_production_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
     #processor = DataProcessor(netcdf_file, gpkg_file, config_json_file, 'analysis_assim', 'land', 'conus')
     processor = DataProcessor(netcdf_file, gpkg_file)
-    processor.create_template_grid_netcdf_using_config(template_grid_file)
+    processor.create_template_netcdf_using_config(template_grid_file)
 
 def create_nwm_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
     #Usage:
     # python netcdf_production_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
     processor = DataProcessor(netcdf_file, gpkg_file, config_json_file, 'analysis_assim', 'land', 'conus')
-    processor.set_template_grid(template_grid_file)
+    processor.set_template_netcdf(template_grid_file)
     output_dir = 'sample_data/sample_netcdf/sample_output/new_test'
     processor.produce_nwm_output_grid(output_dir)
 
@@ -49,7 +50,8 @@ def combine_basin_grids(reference_grid: str, netcdf_folder: str, output_folder: 
     # python netcdf_production_sample.py create-combined-basin-grid sample_data/nwm_output/analysis_assim/nwm.t00z.analysis_assim.land.tm00.conus.nc sample_data/sample_netcdf/sample_output/merge_test sample_data/sample_netcdf/sample_output/merge_test
     utils.create_combined_basin_netcdf_products(reference_grid, netcdf_folder, output_folder)
 
-def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, output_folder: str):
+def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, output_folder: str,
+                            troute_output_file: str = '', troute_lakeout_file: str = ''):
     #Usage
     # python netcdf_production_sample.py test-overall-workflow sample_data/outputs_0629/ngen_outputs/catchment_output_sr_01123000.nc sample_data/sample_gpkg/gauge_01123000.gpkg sample_data/outputs_0629
     download = False
@@ -81,24 +83,38 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
     # reader.add_missing_variables(ngen_netcdf_output_file)
     # reader.assign_random_values(ngen_netcdf_output_file)
 
+    start_time = time.perf_counter()
+
+    
     processor = DataProcessor(ngen_netcdf_output_file, ngen_gpkg_file)
     ngen_template_nc_folder = os.path.join(output_folder, consts.NWM_NGEN_TEMPLATE_FOLDER)
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
+        if mdata.output_class == 'analysis_assim' and mdata.category =='channel_rt' and not troute_output_file:
+            raise ValueError("T-Route output file is not specified")
+        if mdata.output_class == 'analysis_assim' and mdata.category =='reservoir' and not troute_lakeout_file:
+            raise ValueError("T-Route lakeout file is not specified")
+        
         # if mdata.output_class == 'medium_range' and mdata.category =='land_1' and mdata.domain == 'conus':
-        if mdata.output_class == 'analysis_assim' and mdata.category =='channel_rt' and mdata.domain == 'conus':
+        if mdata.output_class == 'analysis_assim' and mdata.category =='reservoir' and mdata.domain == 'conus':
         # if mdata.output_class == 'medium_range_blend' and mdata.category =='terrain_rt' and mdata.domain == 'conus':
         # if mdata.output_class == 'long_range' and mdata.category =='land_4' and mdata.domain == 'conus':
             log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_' + mdata.output_class +  '.' + mdata.category + 
                                     '.' + mdata.domain + '.' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
             processor.log_file = log_file
-            processor.create_template_grid_netcdf_using_config(mdata, ngen_template_nc_folder)
-            #processor.produce_nwm_output_grid(mdata, nwm_output_folder)
+            processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
+            if mdata.category == 'channel_rt':
+                processor.set_troute_netcdf(troute_output_file)
+            if mdata.category == 'reservoir':
+                processor.set_troute_lakeout_netcdf(troute_lakeout_file)
+            processor.produce_nwm_output_product(mdata, nwm_output_folder)
         # print(f"Ready to process: {mdata.output_class}, {mdata.category}, {mdata.domain}")
         # if any(cat.lower() in mdata.category.lower() for cat in ['channel_rt', 'reservoir', 'total_water']):
         #     print(f"----The requested category - {mdata.category} - is not a gridded netcdf. The functionality is not implemented yet")
         #     continue
-
+            end_time = time.perf_counter()
+            duration_minutes = (end_time - start_time) / 60
+            print(f"----Function execution time: {duration_minutes:.2f} minutes")
 
 def main() -> None:
 
@@ -149,6 +165,8 @@ def main() -> None:
     overall_workflow.add_argument("ngen_netcdf_output_file")
     overall_workflow.add_argument("ngen_gpkg_file")
     overall_workflow.add_argument("output_folder")
+    overall_workflow.add_argument("troute_out_file")
+    overall_workflow.add_argument("troute_lakeout_file")
     
     args = parser.parse_args()
 
@@ -167,7 +185,8 @@ def main() -> None:
     elif args.command == "create-combined-basin-grid":
         combine_basin_grids(args.reference_grid, args.timestep_grids_folder, args.output_basin_grids_folder)
     elif args.command == "test-overall-workflow":
-        overall_netcdf_workflow(args.ngen_netcdf_output_file, args.ngen_gpkg_file, args.output_folder)
+        overall_netcdf_workflow(args.ngen_netcdf_output_file, args.ngen_gpkg_file, args.output_folder, 
+                                args.troute_out_file, args.troute_lakeout_file)
     else:
         parser.print_help()
     
