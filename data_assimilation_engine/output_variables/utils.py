@@ -615,58 +615,6 @@ def find_files_by_timestep(root_dir: str, search_timestep: str) -> List[str]:
                 matched_files.append(full_path)
     return matched_files
 
-def merge_basin_netcdfs(reference_grid: str, nc_files: list[str], fill_value: float | None = None, check_crs: bool = True
-) -> xr.Dataset:
-    """
-    Merge multiple NetCDF subsets.
-    Assumes same grid resolution, same coordinate system and no overlaps
-    """
-    # For testing purposes, making the variables and the units uniform
-    # across all datasets being combined.
-    # Also, this function tests combine function with only two datasets
-    
-    ref_grid = xr.open_dataset(reference_grid)
-    datasets = [xr.open_dataset(f) for f in nc_files]
-    dt_list = []
-    for ds in datasets:
-        # the test datasets have different units for variables. 
-        # For testing, just making them all same units.
-        for var in ds.data_vars:
-            ds[var].attrs['variable units'] = 'm'
-
-        # To avoid shift changes due to precision in the lat-lon values, we will
-        # re-index the coordinates to match the reference grid.
-        # tolerance of 1m meaning any misalignment within 1m gets snapped.
-        ds_reindexed = ds.reindex(y=ref_grid.y, x=ref_grid.x, method="nearest", tolerance=1.0)
-        if len(dt_list) == 0:
-            dt_list.append(ds_reindexed) # add first file as is.
-        else:
-            # For testing purposes, have been using datasets with different timesteps.
-            # Using the snippet below to match timesteps as well.
-            ds_updated = ds_reindexed.assign_coords(time=dt_list[0].time)
-            dt_list.append(ds_updated)
-    
-    # Check CRS and confirm that they are the same for all the netcdf files
-    if check_crs:
-        crs_list = []
-        for ds in datasets:
-            if "crs" in ds:
-                crs_list.append(ds.variables["crs"].attrs['spatial_ref'])
-            else:
-                raise ValueError("One dataset missing CRS")
-        if len(set(crs_list)) != 1:
-            raise ValueError("CRS mismatch between datasets")
-
-    ds_combined = reduce(lambda left, right: left.combine_first(right), dt_list)
-
-    # Optional fill value , if provided
-    # To do: Examine NWM products to see if there are multiple fill values
-    # and whether they need to be filled. 
-    if fill_value is not None:
-        ds_combined = ds_combined.fillna(fill_value)
-
-    return ds_combined
-
 def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variables_of_interest: list[str] = None, 
                               tolerance: float = 1.0, fill_value: float | None = None, 
                               check_crs: bool = True 
@@ -737,4 +685,20 @@ def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variabl
         }
 
     return ds_combined, encoding_config
+
+def combined_channel_reservoir_netcdfs(nc_files_folder: str, output_folder: str, 
+                                       output_class: str, category: str, domain: str):
+
+    # Path to your NetCDF files
+    file_pattern = "path/to/files/*.nc"
+
+    # Combine strictly along the 'entity' dimension
+    ds = xr.open_mfdataset(
+        file_pattern,
+        combine="nested",
+        concat_dim="entity",
+        coords="minimal",  # Keeps identical coordinates (like time) from duplicating
+        compat="override"  # Skips expensive consistency checks for identical variables
+    )
+
 # endregion
