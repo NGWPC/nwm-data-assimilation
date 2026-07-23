@@ -266,25 +266,7 @@ class DataProcessor(DataReader):
             expanded_var = expanded_var.transpose(consts.DIM_TIME, consts.DIM_SNOW_LYR, consts.DIM_CATCHMENTS)
             ds_modified['SNLIQ'] = expanded_var
 
-        # Remove data variables that should not be part of the product.
-        # You can remove variables that are in the ignore variables as well.
-        target_variables = [var.strip() for var in mdata.nwm_variables.split(",")]
-        removed_items = list(set(target_variables).intersection(set(consts.NWM_VARS_IGNORE_LIST))) # for logging
-        print(f"----Variables ignored: {removed_items}")
-        ignore_set = set(consts.NWM_VARS_IGNORE_LIST)
-        pruned_variables = [item for item in target_variables if item not in ignore_set]
-        variables_to_drop = [var for var in ds_modified.data_vars if var not in pruned_variables and len(ds_modified[var].dims) > 0]
-        ds_filtered = ds_modified.drop_vars(variables_to_drop, errors="ignore")
-        
         cat_class_domain = mdata.output_class + '.' + mdata.category +  '.' + mdata.domain
-        
-        for var_name in pruned_variables:
-            if var_name in ds_filtered.data_vars:
-                continue # the variable exists in ngen output. We don't need to do anything
-            else:
-                # If not in 
-                print(f"----'{var_name}' is missing in ngen output")
-        
         if (cat_class_domain in consts.NWM_PRODUCTS_LIST):
             produce_output = True
         if mdata.category in ['channel_rt', 'reservoir']:
@@ -293,9 +275,27 @@ class DataProcessor(DataReader):
         print(f"----Produce output: {produce_output} and Gridded: {is_gridded}")
 
         if produce_output and is_gridded:
+            # Remove data variables that should not be part of the product.
+            # You can remove variables that are in the ignore variables as well.
+            target_variables = [var.strip() for var in mdata.nwm_variables.split(",")]
+            removed_items = list(set(target_variables).intersection(set(consts.NWM_VARS_IGNORE_LIST))) # for logging
+            print(f"----Variables ignored: {removed_items}")
+            ignore_set = set(consts.NWM_VARS_IGNORE_LIST)
+            pruned_variables = [item for item in target_variables if item not in ignore_set]
+            variables_to_drop = [var for var in ds_modified.data_vars if var not in pruned_variables and len(ds_modified[var].dims) > 0]
+            ds_filtered = ds_modified.drop_vars(variables_to_drop, errors="ignore")
+
+            # Log any variables that are missing in ngen output.
+            for var_name in pruned_variables:
+                if var_name in ds_filtered.data_vars:
+                    continue # the variable exists in ngen output. We don't need to do anything
+                else:
+                    # If not in ngen output
+                    print(f"----'{var_name}' is missing in ngen output")
+
             catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
             mapped_grid = self.map_catchment_data_to_grid(ds_filtered, catchment_grid, consts.DIM_CATCHMENTS, mdata.x_name, mdata.y_name)
-            
+
             start_time = time.perf_counter()
             self.write_netcdf_per_timestep(mapped_grid, output_dir, consts.DIM_TIME)
             end_time = time.perf_counter()
@@ -496,199 +496,158 @@ class DataProcessor(DataReader):
         if mdata.category == 'reservoir' and not self._troute_lakeout_netcdf_ds:
             raise ValueError("troute lakeout netcdf not set")
         
-        if mdata.category =='channel_rt':
-            # Extract the last time from ngen catchment output and use that as the timeslice
-            # To do: Need to update this for the correct time snapshot.
-            last_time_1 = self._troute_netcdf_ds.coords[consts.DIM_TIME].values[-1]
-            output_snapshot_1 = self._troute_netcdf_ds.sel(time=slice(last_time_1, last_time_1))
-            last_time_2 = self._catchment_ds.coords[consts.DIM_TIME].values[-1]
-            output_snapshot_2 = self._catchment_ds.sel(time=slice(last_time_2, last_time_2))
+        reference_epoch = np.datetime64("1970-01-01T00:00:00") # set reference epoch
 
-            # For testing, since the last time snapshot doesn't align in the two datasets
-            # we align the troute output to the ngen output
-            output_snapshot_1 = output_snapshot_1.assign_coords(time=output_snapshot_2.coords[consts.DIM_TIME].values)
+        if mdata.category == 'reservoir':
+            troute_source_ds = self._troute_lakeout_netcdf_ds
+            source_ds_times = troute_source_ds[consts.DIM_TIME].values
+            sorted_times = np.sort(source_ds_times)[::-1] # sort and reverse slice
+            time_value_min = sorted_times[-1]
+            time_value_max = sorted_times[0]
+            time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+            time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+        elif mdata.category == 'channel_rt':
+            troute_source_ds = self._troute_netcdf_ds
+            units_attr_val = troute_source_ds[consts.DIM_TIME].encoding.get('units')
+            time_str = units_attr_val.split("since ")[1].strip()
+            base_datetime = np.datetime64(time_str)
+            source_ds_times = troute_source_ds[consts.DIM_TIME].values
+            #delta_seconds = seconds_offsets.astype("timedelta64[s]")
+            #source_ds_times = base_datetime + delta_seconds
+            source_ds_minutes = (source_ds_times - reference_epoch).astype("timedelta64[m]").astype(int)
+            sorted_times = np.sort(source_ds_minutes)[::-1] # sort and reverse slice
+            time_value_min = sorted_times[-1]
+            time_value_max = sorted_times[0]
 
-            # Replace any misnamed variable and also filter based on the required variables
-            var_mapping={'flow': 'streamflow'}
-            output_snapshot_1 = output_snapshot_1.rename(**var_mapping)
-            variables_to_keep = ['feature_id', 'time', 'streamflow', 'nudge', 'velocity']
-            ds_filtered_1 = output_snapshot_1[variables_to_keep]
+        # Get reference time for output
+        ref_time_val = time_value_min - 60 # 60 mins less than the smallest time.
         
-            # rename catchments to feature_id and filter required variables
-            dim_mapping={'catchments': 'feature_id'}
-            output_snapshot_2 = output_snapshot_2.rename(**dim_mapping)
-            variables_to_keep = ['feature_id', 'time', 'qBucket']
-            ds_filtered_2 = output_snapshot_2[variables_to_keep]
-            
-            # Merge the two filtered datasets together
-            merged_snapshot = xr.merge([ds_filtered_1, ds_filtered_2], join='outer', combine_attrs = 'override')
-            snapshot_time = merged_snapshot.coords[consts.DIM_TIME].values
-        else:
-            merged_snapshot = self._troute_lakeout_netcdf_ds
-            snapshot_time = merged_snapshot.coords[consts.DIM_REF_TIME].values
-        
-        
-        # Extract the feature_ids
-        feature_ids = merged_snapshot.coords[consts.DIM_FEATURE_ID].values
-        feature_ids_da = xr.DataArray(feature_ids, dims=[consts.DIM_FEATURE_ID])
-
-        # Time calculations for reference time and time dimension/variable.
-        # To do: Set up for testing. Update this if-else block for production
-        if mdata.category == 'channel_rt':
-            timesteps = self._catchment_ds.coords[consts.DIM_TIME].values
-            min_time = np.min(timesteps)
-            max_time = np.max(timesteps)
-        else:
-            ref_time = np.atleast_1d(snapshot_time)[0].astype('datetime64[m]')
-            min_time = ref_time + 60 #mins
-            max_time = ref_time + 180 #mins
-
-        # Extract the unique coordinates from the snapshot for output
-        reference_epoch = np.datetime64("1970-01-01T00:00:00")
-        snapshot_time_array = snapshot_time.astype('datetime64[m]') #we need minutes to perform timedelta
-        snapshot_time_val = np.int32((snapshot_time_array[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-        time_value_min = np.int32((min_time - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-        time_value_max = np.int32((max_time - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-        if mdata.category == 'channel_rt':
-            time_da = xr.DataArray([snapshot_time_val], dims=[consts.DIM_TIME])
-        else:
-            time_da = xr.DataArray([time_value_max], dims=[consts.DIM_TIME])
-        # print(f"Min time: {min_time}; Max time: {max_time}")
-        # print(f"Min value time: {time_value_min}; Max value time: {time_value_max}")
-
-        # reference_time variable and attributes to netcdf
-        # To do: Replace this with the actual time when the model simulations were run.
-        if mdata.category == 'channel_rt':
-            ref_time_val = time_value_max.astype("int32")
-        else:
-            ref_time_val = np.int32((min_time - 60 - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-        
-        ref_time_da = xr.DataArray(data=[ref_time_val], dims=[consts.DIM_REF_TIME])
-        
-        # Create empty dataset with the merged snapshot values
-        data_coords={
-            consts.DIM_TIME: time_da,
-            consts.DIM_FEATURE_ID: feature_ids_da,
-            consts.DIM_REF_TIME: ref_time_da
+        re_index_args = {
+            consts.DIM_FEATURE_ID: troute_source_ds[consts.DIM_FEATURE_ID].values,
+            consts.DIM_REF_TIME: [ref_time_val]
         }
-        data_vars_dict = {}
-        for var_name, var_obj in self._template_netcdf_ds.data_vars.items():
-            # shape tuple based on dimensions
-            if len(var_obj.dims) == 0: # scalar variables
-                var_shape = ()
-            else:
-                var_shape = tuple(len(data_coords[d]) for d in var_obj.dims)
-            # Construct empty array with the exact dimensions, type and attributes in the template
-            data_vars_dict[var_name] = (var_obj.dims, np.empty(var_shape, dtype=var_obj.dtype), var_obj.attrs)
 
-        populated_ds = xr.Dataset(data_vars = data_vars_dict, coords = data_coords)
+        # Create one netcdf each for tm00, tm01 and tm02
+        for time_step, snapshot_time_val in enumerate(sorted_times):
+            populated_ds = self._template_netcdf_ds.reindex(**re_index_args, fill_value = np.nan)
+            time_args = {consts.DIM_TIME: [snapshot_time_val]}
+            populated_ds = populated_ds.assign_coords(**time_args)
+            populated_ds.attrs.update(self._template_netcdf_ds.attrs)
 
-        # Copy all global attributes from template
-        populated_ds.attrs.update(self._template_netcdf_ds.attrs)
+            # Populate variables defined in the template using the negen output and troute data
+            for var_name in self._template_netcdf_ds.variables:
+                # leave the dimensions out as they (except time) have already been populated.
+                if var_name in self._template_netcdf_ds.dims:
+                    continue
+                
+                # Add reference time value to the output
+                if var_name == consts.DIM_REF_TIME:
+                    # Assign the scalar or 1D value directly to the pre-allocated template dimension
+                    populated_ds[var_name].values = np.array([ref_time_val]).astype(populated_ds[var_name].dtype)
+                    continue
 
-        # Populate variables defined in the template using the snapshot data
-        for var_name in self._template_netcdf_ds.variables:
-            # leave the dimensions out as they have already been populated.
-            if var_name in self._template_netcdf_ds.dims:
-                continue
-            
-            # Confirm if the variable is present both in snapshot and final output
-            in_snapshot = var_name in merged_snapshot.variables
-            in_populated = var_name in populated_ds.variables
-            
-            if not in_snapshot and not in_populated:
-                print(f"{var_name} is missing from both snapshot and output datasets.")
-                continue
-            elif not in_snapshot:
-                print(f"{var_name} is in the template but not found in the snapshot dataset.")
-                continue
-            elif not in_populated:
-                print(f"{var_name} is in the template but not found in the output dataset.")
-                continue
-
-            if var_name in merged_snapshot.variables:
-                print(f"----Processing variable: {var_name}")
-                out_var = merged_snapshot[var_name]
+                # Confirm if the variable is present both in lakeout and final output
+                in_snapshot = var_name in troute_source_ds.variables
+                in_populated = var_name in populated_ds.variables
+                if var_name.lower() == 'qbucket':
+                    in_ngenout = var_name in self._catchment_ds.variables
+                
+                if not in_snapshot and not in_populated:
+                    print(f"{var_name} is missing from both troute and output datasets.")
+                    continue
+                elif not in_snapshot:
+                    if self._template_netcdf_ds[var_name].ndim == 0: # Scalar variables not in the data, but in template
+                        populated_ds[var_name] = xr.DataArray(self._template_netcdf_ds[var_name].values.item())
+                        print(f"----Found a scalar variable - {var_name} that is not in the data, but present in the template.Template value has been copied over.")
+                    else:
+                        print(f"----Found a data variable - {var_name} that is not in the data, but present in the template. It is filled with NaN.")
+                    continue
+                elif not in_populated:
+                    print(f"{var_name} is in the template but not found in the output dataset.")
+                    continue
+                elif var_name.lower() == 'qbucket' and not in_ngenout:
+                    print(f"{var_name} is in the template but not found in the catchment output dataset.")
+                    continue
+                
+                # Get the time slice data for this variable, if time is one of the dimensions.
+                # Otherwise, get the full variable (typically 1D based on feature_id dimension)
                 template_var = self._template_netcdf_ds[var_name]
-                # raw_values = np.squeeze(out_var.values)
-                # populated_ds[var_name] = xr.DataArray(raw_values, dims=[consts.DIM_FEATURE_ID]) #, attrs=var_attrs)
-                if out_var.ndim == template_var.ndim:
-                    print(f"----Dimensions match for variable {var_name}")
-                    print(f"----Source   - Shape: {out_var.shape} | Dtype: {out_var.dtype}")
-                    print(f"----Template - Shape: {template_var.shape} | Dtype: {template_var.dtype}")
-        
-                    # Check if shapes are fully identical
-                    if out_var.shape != template_var.shape:
-                        print(f"----SHAPE MISMATCH: Cannot copy {out_var.shape} into {template_var.shape}!")
-                        # Optional: print a preview of the source values
-                        # print("----Source values preview:", out_var.values) 
-                    # -----------------------
-                    # if dtypes are different between template and the snapshot,
-                    # we need to do appropriate casting. This loop does only from float to int.
-                    data_values = out_var.values
+                if var_name.lower() == 'qbucket':
+                    # get time slice data from ngen catchment output. 
+                    # Convert time (mins) to secs to match ngen catchment output.
+                    snapshot_time_val_sec = int(snapshot_time_val * 60)
+                    source_var = self._catchment_ds[var_name].sel(time = snapshot_time_val_sec) #expecting parameter name: 'time'
+                else:
+                    troute_unsliced_var = troute_source_ds[var_name]
+                    if consts.DIM_TIME in troute_unsliced_var.dims:
+                        # this loop is in descending order of time. but, the source is in ascending order.
+                        # recalculate time index.
+                        total_timesteps = troute_unsliced_var.sizes[consts.DIM_TIME]
+                        inverted_time_index = total_timesteps - 1 - time_step
+                        source_var = troute_unsliced_var.isel(time = inverted_time_index) #expecting parameter name: 'time' 
+                    else:
+                        source_var = troute_unsliced_var
+                
+                tgt_shape = populated_ds[var_name].shape
+
+                if source_var.ndim == len(tgt_shape):
+                    # print(f"----Dimensions match for variable {var_name}")
+                    # print(f"----Source   - Shape: {lakeout_var.shape} | Dtype: {lakeout_var.dtype}")
+                    # print(f"----Template - Shape: {tgt_shape} | Dtype: {populated_ds[var_name].dtype}")
+
+                    data_values = source_var.values
+                    # Verify the types because the lakeout variables such as inflow and outflow are float
+                        # But, they are int in the template. So, we are casting from float to int.
                     if np.issubdtype(template_var.dtype, np.integer):
-                        if np.issubdtype(extracted_values.dtype, np.floating):
+                        if np.issubdtype(data_values.dtype, np.floating):
                             data_values = np.nan_to_num(data_values, nan=0)
                             # Use np.array().astype() to ensure scalars cast works as well.
-                            extracted_values = np.array(extracted_values).astype(template_var.dtype)
-                    
+                            data_values = np.array(data_values).astype(template_var.dtype)
                     populated_ds[var_name].values = data_values # populate the values.
                 else:
-                    print(f"----The dimensions don't match between template ({template_var.dims}) and snapshot ({out_var.dims}) for {var_name}")
-            else:
-                if self._template_netcdf_ds[var_name].ndim == 0: #Scalar variables not in the data, but in template
-                    populated_ds[var_name] = xr.DataArray(self._template_netcdf_ds[var_name].values.item()) #, attrs=var_attrs)
-                    print(f"----Found a scalar variable {var_name} that is not in the data, but present in the template.Template value has been copied over.")
-                else:
-                    # Allocate a 1D zero array sized exactly to the number of catchments/feature IDs
-                    # This is just a fallback option
-                    # shape = (len(feature_ids),)
-                    # populated_ds[var_name] = xr.DataArray(np.zeros(shape), dims=[consts.DIM_FEATURE_ID]) #, attrs=var_attrs)
-                    print(f"----Found a data variable {var_name} that is not in the data, but present in the template.It has been ignored.")
-        
-        # Transfer all other attributes from template
-        for var_name in self._template_netcdf_ds.variables:
-            if var_name in populated_ds.variables:
-                populated_ds[var_name].attrs.update(self._template_netcdf_ds[var_name].attrs)
-                populated_ds[var_name].encoding.update(self._template_netcdf_ds[var_name].encoding)
-        
-                # Prevent overwriting conflicts by clearing 'units' and calendar
-                populated_ds[var_name].attrs.pop('units', None)
-                populated_ds[var_name].attrs.pop('calendar', None)
+                    print(f"----The dimensions don't match between template ({template_var.dims}) and snapshot ({source_var.dims}) for {var_name}")
+                
+            # Transfer all other attributes from template
+            for var_name in self._template_netcdf_ds.variables:
+                if var_name in populated_ds.variables:
+                    populated_ds[var_name].attrs.update(self._template_netcdf_ds[var_name].attrs)
+                    populated_ds[var_name].encoding.update(self._template_netcdf_ds[var_name].encoding)
+            
+                    # Prevent overwriting conflicts by clearing 'units' and calendar
+                    populated_ds[var_name].attrs.pop('units', None)
+                    populated_ds[var_name].attrs.pop('calendar', None)
 
-                # Copy Fill and missing values from the template DS
-                has_missing = 'missing_value' in self._template_netcdf_ds[var_name].encoding
-                has_fill = '_FillValue' in self._template_netcdf_ds[var_name].encoding
-                if  has_missing and has_fill:
-                    tgt_value = self._template_netcdf_ds[var_name].encoding['missing_value']
-                    populated_ds[var_name].encoding['missing_value'] = tgt_value
-                    populated_ds[var_name].encoding['_FillValue'] = tgt_value
-                elif has_missing and not has_fill:
-                    tgt_value = self._template_netcdf_ds[var_name].encoding['missing_value']
-                    populated_ds[var_name].encoding['missing_value'] = tgt_value
-                    populated_ds[var_name].encoding['_FillValue'] = None # set it to None.
-                elif has_fill and not has_missing:
-                    tgt_value = self._template_netcdf_ds[var_name].encoding['_FillValue']
-                    populated_ds[var_name].encoding['_FillValue'] = tgt_value
-                    populated_ds[var_name].encoding['missing_value'] = None
-        
-        # Add valid min and max times to the "time" attributes and specify units for all time related variables
-        populated_ds[consts.DIM_TIME].attrs["valid_min"] = time_value_min
-        populated_ds[consts.DIM_TIME].attrs["valid_max"] = time_value_max
-        populated_ds[consts.DIM_TIME].attrs['units'] = "minutes since 1970-01-01 00:00:00"
+                    # Copy Fill and missing values from the template DS
+                    has_missing = 'missing_value' in self._template_netcdf_ds[var_name].encoding
+                    has_fill = '_FillValue' in self._template_netcdf_ds[var_name].encoding
+                    if  has_missing and has_fill:
+                        tgt_value = self._template_netcdf_ds[var_name].encoding['missing_value']
+                        populated_ds[var_name].encoding['missing_value'] = tgt_value
+                        populated_ds[var_name].encoding['_FillValue'] = tgt_value
+                    elif has_missing and not has_fill:
+                        tgt_value = self._template_netcdf_ds[var_name].encoding['missing_value']
+                        populated_ds[var_name].encoding['missing_value'] = tgt_value
+                        populated_ds[var_name].encoding.pop('_FillValue', None)
+                        populated_ds[var_name].attrs.pop("_FillValue", None)
+                    elif has_fill and not has_missing:
+                        tgt_value = self._template_netcdf_ds[var_name].encoding['_FillValue']
+                        populated_ds[var_name].encoding['_FillValue'] = tgt_value
+                        populated_ds[var_name].encoding.pop('missing_value', None)
+                        populated_ds[var_name].attrs.pop("missing_value", None)
+            
+            # Add valid min and max times to the "time" attributes
+            populated_ds[consts.DIM_TIME].attrs["valid_min"] = np.int32(time_value_min)
+            populated_ds[consts.DIM_TIME].attrs["valid_max"] = np.int32(time_value_max)
 
-        # Manually assign units and encoding for reference time. 
-        # Without this it was encoding as nanoseconds since 1970-01-01
-        populated_ds[consts.DIM_REF_TIME].attrs['units'] = "minutes since 1970-01-01 00:00:00"
+            # Manually assign units and encoding for reference time. 
+            # Without this it was encoding as nanoseconds since 1970-01-01
+            populated_ds[consts.DIM_REF_TIME].attrs['units'] = "minutes since 1970-01-01 00:00:00"
 
-
-        # Output filename and save
-        os.makedirs(output_dir, exist_ok=True)
-        datetime_obj = np.datetime64(int(time_value_max), "m")
-        t_str = np.datetime_as_string(datetime_obj, unit='m') 
-        formatted_t = t_str.replace('-', '_').replace(':', '_')
-        output_file = os.path.join(output_dir, f"nwm.{self._geo_id}.{self._output_class}.{self._category}.{self._domain}.{formatted_t}.nc")
-        populated_ds.to_netcdf(output_file)
+            # Output filename and save
+            os.makedirs(output_dir, exist_ok=True)
+            formatted_t = f"{time_step:02d}"
+            output_file = os.path.join(output_dir, f"nwm.{self._geo_id}.{self._output_class}.{self._category}.{self._domain}.tm{formatted_t}.nc")
+            populated_ds.to_netcdf(output_file)
 
     def close_log(self):
         """Restores the original terminal output and closes the file."""
