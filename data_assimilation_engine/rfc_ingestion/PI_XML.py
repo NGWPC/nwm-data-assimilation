@@ -452,7 +452,7 @@ class PI_XML:
                           t = fstperiod[0] - timedelta( hours = 1 ) 
                           while t > t1 + timedelta( days = 1 ):
                               f.timeValueQuality.update( {t: \
-                                        ( float( s.missVal ), 0.0, True ) } )
+                                        ( float( f.missVal ), 0.0, True ) } )
                               f.timeValueQuality.move_to_end( t, \
                                                                    last=False )
                               t = t - timedelta( hours = 1 )
@@ -475,7 +475,7 @@ class PI_XML:
                      t = fstperiod[0] - timedelta( hours = 1 ) 
                      while t > t1 + timedelta( days = 1 ):
                            f.timeValueQuality.update( {t: \
-                                        ( float( s.missVal ), 0.0, True ) } )
+                                        ( float( f.missVal ), 0.0, True ) } )
                            f.timeValueQuality.move_to_end( t, \
                                                                    last=False )
                            t = t - timedelta( hours = 1 )

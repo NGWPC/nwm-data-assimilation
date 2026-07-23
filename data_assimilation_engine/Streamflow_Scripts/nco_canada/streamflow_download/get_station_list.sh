@@ -7,7 +7,7 @@ LDIR="$DBNROOT/user/can_streamgauge"
 for varnum in 5 46 47; do
   local_tmpname="station_list_tmp_var${varnum}.txt"
   local_filename="stations_all_var${varnum}.txt"
-  curl -s -o ${LDIR}/${local_tmpname} "https://wateroffice.ec.gc.ca/services/recent_real_time_data/csv/inline?parameters[]=${varnum}"
+  curl -s -k -o ${LDIR}/${local_tmpname} "https://wateroffice.ec.gc.ca/services/recent_real_time_data/csv/inline?parameters[]=${varnum}"
   cat ${LDIR}/${local_tmpname} | grep ${varnum} | awk -F "," '{print $1}' > ${LDIR}/${local_filename}
 done
 echo 'Pull complete'
