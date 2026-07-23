@@ -11,3 +11,4 @@ build
 
 **/testdata/**
 **/test_data/**
+**/testdata_out/**

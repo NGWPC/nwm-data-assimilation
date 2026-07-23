@@ -13,7 +13,7 @@
 
 import os, sys, time, csv, re
 sys.path.append( os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))\
-                + '/usgs_download/analysis/')
+                + '/Streamflow_Scripts/usgs_download/analysis/')
 import logging
 import math
 from string import *
