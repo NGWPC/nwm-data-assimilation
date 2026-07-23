@@ -1,0 +1,6 @@
+{
+    "data_dir_in": "data_assimilation_engine/rfc_ingestion/testdata/",
+    "sites_file": "data_assimilation_engine/rfc_ingestion/RFC_Reservoir_Locations_for_Forecast_Ingest_into_NWM_All_RFCs_20260717.csv",
+    "data_dir_out": "data_assimilation_engine/rfc_ingestion/testdata_out/",
+    "target_s3_root": "s3://ngwpc-dev/nwm-tools-data/rfc/reservoirs"
+}
