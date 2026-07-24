@@ -150,16 +150,24 @@ def convert_csvs_to_netcdf(csv_folder: str):
 # endregion
 
 # region data download
-def download_nwm_data_from_server(local_root: str, re_download: bool) -> None:
+def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
     """
-    Main function to download a unique set of output files from the server
+    Main function to download a unique set of output files from the NWM server.
+    The root URL and the subfolder where the content is downloaded is dictated through 
+    variables in consts.py
+
+    Args:
+        local_root (str): The root folder for outputs. 
+        re_download (bool): argument indicating that we need to redownload the data.
+        Defaults to False.
     """
     os.makedirs(local_root, exist_ok = True)
     nwm_data_folder = os.path.join(local_root, consts.NWM_DATA_LOCAL_FOLDER)
     os.makedirs(nwm_data_folder, exist_ok = True)
 
     # Re-download if requested
-    if (re_download):
+    # To consider: may be we should do away with the re_download argument altogether
+    if (re_download): 
         if len(os.listdir(nwm_data_folder)) > 0:
             # Delete all the contents in the local folder and re-create
             shutil.rmtree(nwm_data_folder)
@@ -169,6 +177,10 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> None:
     formatted_url = f"{consts.NOMADS_BASE_URL}/nwm.{formatted_date}/"
     existing_keys = build_existing_keys(nwm_data_folder) # build class, category, domain keys in local folder, if exists.
     download_nwm_data_recursive(formatted_url, nwm_data_folder, existing_keys)
+
+    # After successful download of data, build the metadata config and save it to configs subfolder
+    config_json = obtain_metadata_information(local_root)
+    return config_json
 
 def download_nwm_data_recursive(download_url: str, local_path: str, 
     existing_keys: Set[Tuple[str, str, str]]
@@ -184,6 +196,9 @@ def download_nwm_data_recursive(download_url: str, local_path: str,
     soup = BeautifulSoup(response.text, 'html.parser')
     links = soup.find_all('a', href=True)
     file_links = [link['href'] for link in links if not link['href'].startswith('/')]
+    if len(file_links) == 0:
+        raise Exception(f"No valid file links available for download from {download_url}")
+    
     for file_link in file_links:
         file_url = urljoin(download_url, file_link)
         if (file_url.endswith('/')):
@@ -283,7 +298,7 @@ class NetCDFMetadata:
             f"class={self.output_class}, category={self.category}, domain={self.domain})"
         )
 
-def obtain_metadata_information(local_root: str) -> None:
+def obtain_metadata_information(local_root: str) -> str:
     """
     Parse the metadata information from the downloaded NWM output files and write a CSV and a json
     """
@@ -297,13 +312,10 @@ def obtain_metadata_information(local_root: str) -> None:
     nwm_config_folder = os.path.join(local_root, consts.NWM_CONFIG_LOCAL_FOLDER)
     os.makedirs(nwm_config_folder, exist_ok = True)
     metadata_list = extract_metadata_from_downloaded_files(nwm_local_folder)
-    output_csv = os.path.join(nwm_config_folder, consts.NWM_CONFIG_FILE_NAME + ".csv")
-    write_metadata_to_csv(metadata_list, output_csv)
     output_json = os.path.join(nwm_config_folder, 
                                consts.NWM_CONFIG_FILE_NAME + consts.NWM_CONFIG_FILE_SUFFIX + ".json")
-    ngen_json = os.path.join(nwm_config_folder, 
-                             consts.NWM_CONFIG_FILE_NAME + '_ngen' + consts.NWM_CONFIG_FILE_SUFFIX + ".json")
-    write_metadata_to_config_json(metadata_list, output_json, ngen_json)
+    write_metadata_to_config_json(metadata_list, output_json)
+    return output_json 
 
 def extract_metadata_from_downloaded_files(local_root: str) -> List[NetCDFMetadata]:
     """
@@ -429,10 +441,14 @@ def write_metadata_to_csv(metadata_list: List[NetCDFMetadata], output_csv: str) 
                 }
             )
 
-def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_json: str, ngen_json: str) -> None:
+def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_json: str) -> None:
     """
     Writes NetCDFMetadata objects to config JSON.
     """
+    # Delete any existing config file
+    if os.path.exists(output_json):
+        os.remove(output_json)
+
     info_list = []
     for mdata in metadata_list:
         metadata_info_dict = {
@@ -467,28 +483,6 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
         json.dump(config, f, indent = 2)
 
     print(f"Config JSON written to: {output_json}")
-
-
-    info_list = []
-    for mdata in metadata_list:
-        metadata_info_dict = {
-            "class": mdata.output_class,
-            "category": mdata.category,
-            "domain": mdata.domain,
-            "nwm_variables": mdata.nwm_variables,
-            "nwm_dimensions": mdata.nwm_dimensions,
-            "nwm_scalar_variables": mdata.scalar_variables,
-            "nwm_var_dimensions": mdata.data_variables_dim
-        }
-        info_list.append(metadata_info_dict)
-
-    config = {
-        "nwm_info": info_list
-    }
-    with open(ngen_json, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent = 2)
-
-    print(f"Config JSON written to: {ngen_json}")
 
 def debug_netcdf_structure_in_folder(folder_path: str) -> None:
     """

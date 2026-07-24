@@ -9,9 +9,11 @@ import dask.array as da
 import time
 import math
 import re
-from shapely.geometry import Point
-from shapely.ops import unary_union
-from shapely import intersects_xy
+import shapely
+# from shapely.geometry import Point
+# from shapely.ops import unary_union
+# from shapely import intersects_xy, intersects
+# from shapely import points
 from pyproj import CRS
 from typing import List, Optional
 from .DataReader import DataReader
@@ -73,6 +75,10 @@ class DataProcessor(DataReader):
     def log_file(self):
         return self._log_file
 
+    @property
+    def geo_id(self):
+        return self._geo_id
+    
     @nwm_output_class.setter
     def nwm_output_class(self, value):
         self._output_class = value
@@ -95,7 +101,7 @@ class DataProcessor(DataReader):
         if log_folder:
             os.makedirs(log_folder, exist_ok=True)
 
-        self._log_file = open(log_file_path, "w", encoding="utf-8")
+        self._log_file = open(log_file_path, "a", encoding="utf-8", buffering=1)
         sys.stdout = self._log_file
 
     def set_template_netcdf(self, template_grid_path: str):
@@ -121,6 +127,133 @@ class DataProcessor(DataReader):
         elif direction == np.ceil:
             return origin + np.ceil((value - origin) / resolution) * resolution
     
+    def old_create_template_netcdf_using_config(self, mdata: NetCDFMetadata, template_netcdf_folder: str) -> None:
+        """
+        Create a template grid aligned to a reference grid defined in config.json.
+        The output template grid covers the extents of the divides in the geopackage.
+        """
+
+        os.makedirs(template_netcdf_folder, exist_ok = True)
+
+        self._output_class = mdata.output_class
+        self._category = mdata.category
+        self._domain = mdata.domain
+        origin_x = mdata.origin_x
+        origin_y = mdata.origin_y
+        res_x = mdata.resolution_x
+        res_y = mdata.resolution_y
+        wkt = mdata.crs_wkt
+        file_name = mdata.file_path
+        x_name = mdata.x_name
+        y_name = mdata.y_name
+
+        # Check if the template file already exists for this request
+        template_nc_name = self._geo_id + '_' + self._output_class + '_' + self._category + '_' + self._domain + '.nc'
+        template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
+        if os.path.isfile(template_nc_file):
+            print(f"----Reusing existing template file in local for {self._output_class}, {self._category}, {self._domain}")
+        elif mdata.category in ['channel_rt', 'reservoir']: # indicates that it is non-geospatial. For example, channel_rt
+            ds = xr.open_dataset(file_name)
+
+            # Delete any variable that is in the ignore list. Zero the valid min and max attribute in the time dimension
+            ds = ds.drop_vars(consts.NWM_VARS_IGNORE_LIST, errors="ignore")
+            if consts.DIM_TIME in ds.coords:
+                attrs_to_reset = ['valid_min', 'valid_max']
+                for attr in attrs_to_reset:
+                    if attr in ds[consts.DIM_TIME].attrs:
+                        ds[consts.DIM_TIME].attrs[attr] = 0
+
+            # Slice all coordinates and variable arrays to zero length.
+            dims = list(ds.sizes.keys())
+            zero_slices = {dim: slice(0, 0) for dim in dims}
+            ds_template = ds.isel(zero_slices)
+
+            # Save to nc file
+            ds_template.to_netcdf(template_nc_file)
+        else:
+            ds = xr.open_dataset(file_name)
+            # To do: Have to figure out a workflow when CRS is "Not Available"
+            target_crs = CRS.from_user_input(wkt) 
+            
+            gdf = self._gpkg_gdf.to_crs(target_crs)
+            geom = shapely.ops.unary_union(gdf.geometry) 
+            
+            # Get bounding box and snap to origin in the national reference grid
+            minx, miny, maxx, maxy = gdf.total_bounds
+
+            snapped_minx = self._snap_to_grid(minx, origin_x, res_x, np.floor)
+            snapped_maxx = self._snap_to_grid(maxx, origin_x, res_x, np.ceil)
+            snapped_miny = self._snap_to_grid(miny, origin_y, res_y, np.floor)
+            snapped_maxy = self._snap_to_grid(maxy, origin_y, res_y, np.ceil)
+
+            # Filter national grid to a sub-grid within the snapped bounding box
+            # 1. Determine if the national grid Y-coordinate counts upwards or downwards
+            y_dir = 1 if ds[y_name].values[1] > ds[y_name].values[0] else -1
+
+            # 2. Slice dynamically based on the direction of the reference grid
+            if y_dir == 1:
+                y_slice = slice(snapped_miny, snapped_maxy) # South to North
+            else:
+                y_slice = slice(snapped_maxy, snapped_miny) # North to South
+
+            # 3. Perform your selection using the verified slice orientation
+            ds_subset = ds.sel(
+                {
+                    x_name: slice(snapped_minx, snapped_maxx),
+                    y_name: y_slice #slice(snapped_miny, snapped_maxy),
+                }
+            )
+            x_subset = ds_subset[x_name].values
+            y_subset = ds_subset[y_name].values
+            xx, yy = np.meshgrid(x_subset, y_subset)
+
+            flat_mask = shapely.intersects_xy(geom, xx.ravel(), yy.ravel())
+            grid_mask = flat_mask.reshape(ds_subset[y_name].size, ds_subset[x_name].size)
+            mask_da = xr.DataArray(grid_mask,
+                dims=(y_name, x_name),
+                coords={
+                    y_name: ds_subset[y_name].values,
+                    x_name: ds_subset[x_name].values
+                }
+            )
+            ds_masked = ds_subset.copy()
+
+            for var in ds_subset.data_vars:
+                da = ds_subset[var]
+                # Only mask numeric variables
+                if np.issubdtype(da.dtype, np.number):
+                    ds_masked[var] = da.where(mask_da)
+                else:
+                    ds_masked[var] = da # Leave non-numeric untouched
+            
+            # Drop empty rows/cols that are outside of the polygon boundary
+            dataset_mask = ds_masked.to_array().notnull().any(dim="variable")
+            ds_clipped = ds_masked.dropna(dim=y_name, how="all")
+            ds_clipped = ds_clipped.dropna(dim=x_name, how="all")
+
+            # Set values of NWM variables to zero in the template grid
+            nwm_vars = [name for name, var in ds_clipped.data_vars.items() 
+                       if var.ndim > 0 and name not in ds_clipped.coords]
+            for var in nwm_vars:
+                ds_clipped[var] = ds_clipped[var] * 0
+
+            # Create crs as a scalar variable.
+            crs_attrs = ds_clipped["crs"].attrs
+            ds_clipped = ds_clipped.drop_encoding()
+            del ds_clipped["crs"]
+            ds_clipped["crs"] = xr.DataArray("", dims=())
+            ds_clipped["crs"].attrs = crs_attrs
+
+            print("--- FINAL DATASET CHECK FOR 3S ---")
+            print(f"Dimension name for Y is '{y_name}', first 3 values are: {ds_clipped[y_name].values[:3]}")
+            print(f"Dimension name for X is '{x_name}', first 3 values are: {ds_clipped[x_name].values[:3]}")
+
+            # Save to nc file
+            ds_clipped.to_netcdf(template_nc_file)
+
+        self._template_netcdf_ds = xr.open_dataset(template_nc_file)
+        print(f"NetCDF template grid written to {template_nc_file}")
+
     def create_template_netcdf_using_config(self, mdata: NetCDFMetadata, template_netcdf_folder: str) -> None:
         """
         Create a template grid aligned to a reference grid defined in config.json.
@@ -170,44 +303,43 @@ class DataProcessor(DataReader):
             target_crs = CRS.from_user_input(wkt) 
             
             gdf = self._gpkg_gdf.to_crs(target_crs)
-            geom = unary_union(gdf.geometry) 
+            union_geom = shapely.ops.unary_union(gdf.geometry) 
             
             # Get bounding box and snap to origin in the national reference grid
             minx, miny, maxx, maxy = gdf.total_bounds
 
-            snapped_minx = self._snap_to_grid(minx, origin_x, res_x, np.floor)
-            snapped_maxx = self._snap_to_grid(maxx, origin_x, res_x, np.ceil)
-            snapped_miny = self._snap_to_grid(miny, origin_y, res_y, np.floor)
-            snapped_maxy = self._snap_to_grid(maxy, origin_y, res_y, np.ceil)
+            # snapped_minx = self._snap_to_grid(minx, origin_x, res_x, np.floor)
+            # snapped_maxx = self._snap_to_grid(maxx, origin_x, res_x, np.ceil)
+            # snapped_miny = self._snap_to_grid(miny, origin_y, res_y, np.floor)
+            # snapped_maxy = self._snap_to_grid(maxy, origin_y, res_y, np.ceil)
 
-            # Filter national grid to a sub-grid within the snapped bounding box
-            # 1. Determine if the national grid Y-coordinate counts upwards or downwards
-            y_dir = 1 if ds[y_name].values[1] > ds[y_name].values[0] else -1
+            snapped_minx = np.floor(minx / res_x) * res_x
+            snapped_miny = np.floor(miny / res_y) * res_y
+            snapped_maxx = np.ceil(maxx / res_x) * res_x
+            snapped_maxy = np.ceil(maxy / res_y) * res_y
 
-            # 2. Slice dynamically based on the direction of the reference grid
-            if y_dir == 1:
-                y_slice = slice(snapped_miny, snapped_maxy) # South to North
-            else:
-                y_slice = slice(snapped_maxy, snapped_miny) # North to South
-
-            # 3. Perform your selection using the verified slice orientation
-            ds_subset = ds.sel(
+            # Filter national grid to a sub-grid within the snapped bounding box using slice
+            ds_subset = ds.sortby([x_name, y_name]).sel(
                 {
                     x_name: slice(snapped_minx, snapped_maxx),
-                    y_name: y_slice #slice(snapped_miny, snapped_maxy),
+                    y_name: slice(snapped_miny, snapped_maxy)
                 }
             )
-            x_subset = ds_subset[x_name].values
-            y_subset = ds_subset[y_name].values
-            xx, yy = np.meshgrid(x_subset, y_subset)
 
-            flat_mask = intersects_xy(geom, xx.ravel(), yy.ravel())
-            grid_mask = flat_mask.reshape(ds_subset[y_name].size, ds_subset[x_name].size)
+            # create 1D coordinate arrays for the snapped subset
+            x_subset_1D = ds_subset[x_name].values
+            y_subset_1D = ds_subset[y_name].values
+            xx, yy = np.meshgrid(x_subset_1D, y_subset_1D)
+
+            shapely.prepare(union_geom) # for faster processing, just in case.
+            flat_mask = shapely.intersects_xy(union_geom, xx.ravel(), yy.ravel())
+            grid_mask = flat_mask.reshape(len(y_subset_1D), len(x_subset_1D))
+            
             mask_da = xr.DataArray(grid_mask,
                 dims=(y_name, x_name),
                 coords={
-                    y_name: ds_subset[y_name].values,
-                    x_name: ds_subset[x_name].values
+                    y_name: y_subset_1D,
+                    x_name: x_subset_1D
                 }
             )
             ds_masked = ds_subset.copy()
@@ -220,9 +352,24 @@ class DataProcessor(DataReader):
                 else:
                     ds_masked[var] = da # Leave non-numeric untouched
             
-            # Drop empty rows/cols that are outside of the polygon boundary
-            ds_clipped = ds_masked.dropna(dim=y_name, how="all")
-            ds_clipped = ds_clipped.dropna(dim=x_name, how="all")
+            # Combine variables to find valid outer coordinate indices
+            combined_mask = ds_masked.to_array().notnull()
+            dims_to_collapse = [dim for dim in combined_mask.dims if dim not in [x_name, y_name]]
+            dataset_mask = combined_mask.any(dim=dims_to_collapse)
+
+            # Extract non-null coordinates along each axis to locate the outer envelope borders
+            y_valid = ds_masked[y_name].where(dataset_mask.any(dim=x_name), drop=True)
+            x_valid = ds_masked[x_name].where(dataset_mask.any(dim=y_name), drop=True)
+            
+            if y_valid.size > 0 and x_valid.size > 0:
+                ymin, ymax = y_valid.values.min(), y_valid.values.max()
+                xmin, xmax = x_valid.values.min(), x_valid.values.max()
+                ds_clipped = ds_masked.sel({
+                    x_name: slice(xmin, xmax),
+                    y_name: slice(ymin, ymax)
+                })
+            else:
+                ds_clipped = ds_masked.copy()
 
             # Set values of NWM variables to zero in the template grid
             nwm_vars = [name for name, var in ds_clipped.data_vars.items() 
@@ -497,7 +644,11 @@ class DataProcessor(DataReader):
             raise ValueError("troute lakeout netcdf not set")
         
         reference_epoch = np.datetime64("1970-01-01T00:00:00") # set reference epoch
-
+        # We have to identify min and max times and reference times for the products. 
+        # The approach is different because each product uses different way of reporting time.
+        # ngen catchment output reports in seconds since reference_epoch.
+        # troute output reports in offset seconds since the model initialization time.
+        # troute lakeout (waterbody) reports in minutes since reference epoch.
         if mdata.category == 'reservoir':
             troute_source_ds = self._troute_lakeout_netcdf_ds
             source_ds_times = troute_source_ds[consts.DIM_TIME].values
@@ -512,8 +663,6 @@ class DataProcessor(DataReader):
             time_str = units_attr_val.split("since ")[1].strip()
             base_datetime = np.datetime64(time_str)
             source_ds_times = troute_source_ds[consts.DIM_TIME].values
-            #delta_seconds = seconds_offsets.astype("timedelta64[s]")
-            #source_ds_times = base_datetime + delta_seconds
             source_ds_minutes = (source_ds_times - reference_epoch).astype("timedelta64[m]").astype(int)
             sorted_times = np.sort(source_ds_minutes)[::-1] # sort and reverse slice
             time_value_min = sorted_times[-1]

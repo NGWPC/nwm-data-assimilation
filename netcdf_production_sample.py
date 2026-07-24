@@ -96,7 +96,7 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
             raise ValueError("T-Route lakeout file is not specified")
         
         # if mdata.output_class == 'medium_range' and mdata.category =='land_1' and mdata.domain == 'conus':
-        if mdata.output_class == 'analysis_assim' and mdata.category =='reservoir' and mdata.domain == 'conus':
+        if mdata.output_class == 'analysis_assim' and mdata.category =='land' and mdata.domain == 'conus':
         # if mdata.output_class == 'medium_range_blend' and mdata.category =='terrain_rt' and mdata.domain == 'conus':
         # if mdata.output_class == 'long_range' and mdata.category =='land_4' and mdata.domain == 'conus':
             log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_' + mdata.output_class +  '.' + mdata.category + 
@@ -107,7 +107,7 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
                 processor.set_troute_netcdf(troute_output_file)
             if mdata.category == 'reservoir':
                 processor.set_troute_lakeout_netcdf(troute_lakeout_file)
-            processor.produce_nwm_output_product(mdata, nwm_output_folder)
+            # processor.produce_nwm_output_product(mdata, nwm_output_folder)
         # print(f"Ready to process: {mdata.output_class}, {mdata.category}, {mdata.domain}")
         # if any(cat.lower() in mdata.category.lower() for cat in ['channel_rt', 'reservoir', 'total_water']):
         #     print(f"----The requested category - {mdata.category} - is not a gridded netcdf. The functionality is not implemented yet")
