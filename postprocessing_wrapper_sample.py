@@ -26,6 +26,8 @@ production_inputs = [
     "sample_data/troute_netcdfs/toute_lakeout_3n.nc"
     "sample_data/outputs_root/configs/metadata_config.json",
     None,
+    "4",
+    "analysis_assim"
     "output"
 ]
 # create output for geopackage extents.
@@ -40,6 +42,8 @@ overall_workflow_inputs = [
     "sample_data/troute_netcdfs/toute_lakeout_3n.nc"
     "sample_data/outputs_root/configs/metadata_config.json",
     None,
+    "0"
+    "medium_range_blend"
     "all"
 ]
 # overall workflow for creating products for geopackage extents.

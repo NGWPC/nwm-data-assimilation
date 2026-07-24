@@ -52,7 +52,8 @@ def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gp
         _processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
 
 def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: str, troute_lakeout_netcdf: str, 
-                                   config_json: str, output_templates_folder: str | None):
+                                   config_json: str, output_templates_folder: str | None, 
+                                   output_cycle_hour: int, output_cycle_type: str):
     
     if output_templates_folder is None or output_templates_folder == '':
         # If no folder is specified, we will assume it as a subfolder within the root as defined in consts.py.
@@ -66,31 +67,36 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     else:
         raise ValueError("Specified config file does not exist")
     
-    # Confirm that template files exist for all categories. Gather a dictionary as well
+    # Confirm that template files exist for the cycle type. Gather a dictionary as well
     # To do: Update this to include only conus for demo?
     template_files_dict = {}
     for mdata in netcdf_metadata_list:
-        template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' 
-        + mdata.category + '_' + mdata.domain
-        template_nc_file = os.path.join(ngen_template_nc_folder, template_nc_name + '.nc')
-        if os.path.isfile(template_nc_file):
-            template_files_dict[template_nc_name] = template_nc_file
-        else:
-            raise ValueError(f"Template file for {_processor.geo_id}.{_processor.nwm_output_class}.{_processor.nwm_category}.{_processor.nwm_domain} does not exist")
+        if mdata.output_class == output_cycle_type:
+            template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' 
+            + mdata.category + '_' + mdata.domain
+            template_nc_file = os.path.join(ngen_template_nc_folder, template_nc_name + '.nc')
+            if os.path.isfile(template_nc_file):
+                template_files_dict[template_nc_name] = template_nc_file
+            else:
+                raise ValueError(f"Template file for {_processor.geo_id}.{_processor.nwm_output_class}.{_processor.nwm_category}.{_processor.nwm_domain} does not exist")
     
     # set output folder for the nwm products for the geopackage
     nwm_output_folder = os.path.join(root_output_folder, consts.NWM_OUTPUT_FOLDER)
     os.makedirs(nwm_output_folder, exist_ok = True)
 
+    # set cycle hour
+    formatted_hr = f"{output_cycle_hour:02d}"
+
     for mdata in netcdf_metadata_list:
-        _processor.nwm_output_class = mdata.output_class
-        _processor.nwm_category = mdata.category
-        _processor.nwm_domain = mdata.domain
-        template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
-        _processor.set_template_netcdf(template_files_dict[template_nc_name])
-        _processor.set_troute_netcdf(troute_output_netcdf)
-        _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
-        _processor.produce_nwm_output_product(mdata, nwm_output_folder)
+        if mdata.output_class == output_cycle_type:
+            _processor.nwm_output_class = mdata.output_class
+            _processor.nwm_category = mdata.category
+            _processor.nwm_domain = mdata.domain
+            template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
+            _processor.set_template_netcdf(template_files_dict[template_nc_name])
+            _processor.set_troute_netcdf(troute_output_netcdf)
+            _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
+            _processor.produce_nwm_output_product(mdata, nwm_output_folder)
 
 # Postporcessing Entrypoint
 def netcdf_production_workflow(args_list) -> Optional[Any]:
@@ -127,7 +133,7 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_templates_folder)
 
         case "output":
-            if len(args_list) < 8:
+            if len(args_list) < 10:
                 raise ValueError("'output' action requires argument for root output folder, " + 
                 "ngen catchments netcdf, geopackage troute outputs and config json: [root output folder path, " + 
                 "catchments netcdf, geopackage, troute output, troute lakeout, config json, " +
@@ -139,10 +145,12 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             troute_lakeout_netcdf = args_list[4]
             config_json_file = args_list[5]
             output_templates_folder = args_list[6]
+            output_cycle_hour = int(args_list[7])
+            output_cycle_type = args_list[8]
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
             create_nwm_products_for_gpkg(root_output_folder, troute_output_netcdf, troute_lakeout_netcdf, 
-                                         config_json_file, output_templates_folder)
+                                         config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type)
 
         case "all":
             if len(args_list) < 8:
@@ -157,12 +165,14 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             troute_lakeout_netcdf = args_list[4]
             config_json_file = args_list[5]
             output_templates_folder = args_list[6]
+            output_cycle_hour = int(args_list[7])
+            output_cycle_type = args_list[8]
 
             config_json_file = download_netcdf_from_nomads(root_output_folder)
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
             create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_templates_folder)
             create_nwm_products_for_gpkg(root_output_folder, troute_output_netcdf, troute_lakeout_netcdf, 
-                                         config_json_file, output_templates_folder)
+                                         config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type)
             
     print("NetCDF Production workflow completed Successfully")
