@@ -19,6 +19,7 @@ def create_dataprocessor(root_output_folder: str, netcdf_file: str, gpkg_file: s
         os.makedirs(log_folder, exist_ok = True)
         log_file = os.path.join(log_folder, 'nwm_postprocessing_' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
         _processor.log_file = log_file
+    return _processor
 
 def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = False) -> str:
     return utils.download_nwm_data_from_server(root_output_folder, re_download)
@@ -72,13 +73,12 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     template_files_dict = {}
     for mdata in netcdf_metadata_list:
         if mdata.output_class == output_cycle_type:
-            template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' 
-            + mdata.category + '_' + mdata.domain
+            template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
             template_nc_file = os.path.join(ngen_template_nc_folder, template_nc_name + '.nc')
             if os.path.isfile(template_nc_file):
                 template_files_dict[template_nc_name] = template_nc_file
             else:
-                raise ValueError(f"Template file for {_processor.geo_id}.{_processor.nwm_output_class}.{_processor.nwm_category}.{_processor.nwm_domain} does not exist")
+                raise ValueError(f"Template file for {_processor.geo_id}.{mdata.output_class}.{mdata.category}.{mdata.domain} does not exist")
     
     # set output folder for the nwm products for the geopackage
     nwm_output_folder = os.path.join(root_output_folder, consts.NWM_OUTPUT_FOLDER)
@@ -104,6 +104,9 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
     Main entrypoint function. Parses the args list and handles action
     based on user preferences.
     """
+
+    global _processor
+
     if not args_list:
         print("The arguments list to post processing is either null or empty.")
         raise ValueError("Workflow aborted: The arguments list cannot be None or empty.")

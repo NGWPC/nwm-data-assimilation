@@ -30,6 +30,9 @@ class DataProcessor(DataReader):
 
         self._catchment_ds: xr.Dataset = self.dataset
         self._gpkg_file = gpkg_file
+        self._output_class = None
+        self._category = None
+        self._domain = None
         filename = os.path.basename(gpkg_file)
         self._geo_id = filename.replace(consts.GPKG_FILE_PREFIX, '').replace('.gpkg', '')
         
@@ -40,6 +43,7 @@ class DataProcessor(DataReader):
         gpkg_gdf = gpd.read_file(gpkg_file, layer=consts.GPKG_DIVIDES_LYR)
         if gpkg_gdf.empty:
             raise ValueError("No polygon geometries found in GeoPackage")
+        gpkg_gdf["geometry"] = gpkg_gdf["geometry"].make_valid()
 
         # Check schema and assign catchment ID field.
         if is_new_NHF_schema:
@@ -152,7 +156,7 @@ class DataProcessor(DataReader):
         template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
         if os.path.isfile(template_nc_file):
             print(f"----Reusing existing template file in local for {self._output_class}, {self._category}, {self._domain}")
-        elif mdata.category in ['channel_rt', 'reservoir']: # indicates that it is non-geospatial. For example, channel_rt
+        elif mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'): # indicates that it is non-geospatial. For example, channel_rt
             ds = xr.open_dataset(file_name)
 
             # Delete any variable that is in the ignore list. Zero the valid min and max attribute in the time dimension
@@ -279,7 +283,7 @@ class DataProcessor(DataReader):
         template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
         if os.path.isfile(template_nc_file):
             print(f"----Reusing existing template file in local for {self._output_class}, {self._category}, {self._domain}")
-        elif mdata.category in ['channel_rt', 'reservoir']: # indicates that it is non-geospatial. For example, channel_rt
+        elif mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):  # indicates that it is non-geospatial. For example, channel_rt
             ds = xr.open_dataset(file_name)
 
             # Delete any variable that is in the ignore list. Zero the valid min and max attribute in the time dimension
