@@ -7,12 +7,13 @@ import pandas as pd
 import numpy as np
 import json
 import logging
+from pathlib import Path
 from . import consts
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pyproj import CRS
-from typing import List, Set, Tuple, Dict, Union, Optional
+from typing import List, Set, Tuple, Dict, Union, Any, Optional
 from functools import reduce
 
 
@@ -126,7 +127,7 @@ def convert_csvs_to_netcdf(csv_folder: str):
     # Merge all separate entities together along the 'entity' dimension
     combined_ds = xr.combine_by_coords(catchment_nc_data)
 
-    # Explicitly enforce structural array coordinates to be 64-bit long integers
+    # Enforce structural array coordinates to be 64-bit long integers
     combined_ds[consts.DIM_TIME] = combined_ds[consts.DIM_TIME].astype(np.int32)
     combined_ds[consts.DIM_CATCHMENTS] = combined_ds[consts.DIM_CATCHMENTS].astype(np.int64)
 
@@ -583,36 +584,48 @@ def read_output_variables_info_from_config(json_file: str) -> List[NetCDFMetadat
 # endregion
 
 # region basin grid products
-def create_combined_basin_netcdf_products (reference_grid: str, timestep_netcdf_folder: str, output_folder: str) -> None:
+def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: str, config_json: str,
+                            output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str) -> None:
     """
     Main calling function to create a combined basins product
     """
-    # Randomly pick timestep outputs at 6 hour intervals
-    for i in range(0, 20, 6):
-        search_string = f"01T{i:02}"
-        files_list = find_files_by_timestep(timestep_netcdf_folder, search_string)
-        variables_of_interest = ["ACCET"]
-        # merged_ds = merge_basin_netcdfs(reference_grid, files_list)
-        merged_ds, encoding = create_multi_basin_netcdfs(reference_grid, files_list, variables_of_interest, 1.0, None, True)
-        output_file = os.path.join(output_folder, f"combined_grid_{i:02}_.nc")
-        merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
-
-def find_files_by_timestep(root_dir: str, search_timestep: str) -> List[str]:
-    """
-    Function to recursively search a folder for a specific substring
-    """
-    matched_files = []
-    for dirpath, _, filenames in os.walk(root_dir):
-        for fname in filenames:
-            if search_timestep in fname and fname.endswith('.nc'):
-                full_path = os.path.join(dirpath, fname)
-                matched_files.append(full_path)
-    return matched_files
+    os.makedirs(output_folder, exist_ok=True)
+    cycle_hr = f"t{output_cycle_hr.zfill(2)}z"
+    time_list = ['tm00', 'tm01', 'tm02']
+    netcdf_metadata_list = read_output_variables_info_from_config(config_json)
+    product_categories = {}
+    for mdata in netcdf_metadata_list:
+        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
+            product_categories[mdata.category] = mdata.file_path
+    
+    is_gridded = True
+    for category, ref_file in product_categories.items():
+        if category.startswith('channel_rt') or category.startswith('reservoir'):
+            is_gridded = False
+        elif category.startswith('land') or category.startswith('terrain_rt'):
+            is_gridded = True
+        
+        for tm in time_list:
+            keywords_list = [cycle_hr, output_cycle_type, category, tm, output_cycle_domain]
+            matching_files = [str(full_file_path)
+                for full_file_path in Path(netcdf_folder).glob("*.nc")
+                if all(keyword in full_file_path.name for keyword in keywords_list)
+            ]
+            if len(matching_files) > 0:
+                if is_gridded:
+                    merged_ds, encoding = create_multi_basin_netcdfs(ref_file, matching_files, None, 1.0, True)
+                else:
+                    # print(f"File category: {category}; Feature ID present: {has_featureid}")
+                    merged_ds, encoding = combined_non_gridded_netcdfs(matching_files, True)
+                # Write dataset to disk
+                output_file = os.path.join(output_folder, f"nwm.{cycle_hr}.{output_cycle_type}.{category}.{tm}.{output_cycle_domain}.nc")
+                merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
+            else:
+                print(f"No matching files to combine for {output_cycle_type}, {category}, {output_cycle_domain}")
 
 def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variables_of_interest: list[str] = None, 
-                              tolerance: float = 1.0, fill_value: float | None = None, 
-                              check_crs: bool = True 
-) -> xr.Dataset:
+                              tolerance: float = 1.0, check_crs: bool = True 
+) -> Tuple[xr.Dataset, Dict[str, Dict[str, Any]]]:
     """
     Merge multiple NetCDF subsets.
     Assumes same grid resolution, same coordinate system and no overlaps
@@ -631,10 +644,12 @@ def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variabl
             raise ValueError("CRS mismatch between datasets")
 
     ref_grid = xr.open_dataset(reference_grid)
-    # the test datasets have different units for variables. 
-    # For testing, just making them all same units.
-    with xr.open_dataset(nc_files[0]) as ds_sample:
-        standardized_time = ds_sample.time.values
+
+    # Gather the time and global attributes from the first dataset
+    global_attrs = None
+    with xr.open_dataset(nc_files[0]) as first_da:
+        standardized_time = first_da.time.values
+        global_attrs = first_da.attrs.copy()
 
     # Automatically grab all data variables from the first file 
     # if variables of interest is not provided.
@@ -643,56 +658,81 @@ def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variabl
             variables_of_interest = list(temp_ds.data_vars)
 
     combined_variables_dict = {}
+    
     for var in variables_of_interest:
-        reindexed_var_arrays = []
+        reindexed_var_array = []
         for nc_file in nc_files:
             with xr.open_dataset(nc_file) as ds:
-                # the test datasets have different units for variables. 
-                # For testing, just making them all same units.
-                for data_var in ds.data_vars:
-                    ds[data_var].attrs['variable units'] = 'm'
-
-                # Isolate the target variable to protect other variables from blooming into NaNs prematurely
                 var_of_interest = ds[var]
 
-                # Map to the national spatial coordinates layout
+                # Map to the national spatial coordinates layout and add to the reindexed var array
                 var_reindexed = var_of_interest.reindex(y=ref_grid.y, x=ref_grid.x, method="nearest", tolerance=tolerance)
-
-                # Unify the timestamp - this is only for testing. 
-                # In reality, all grids will have the same simulation timesteps
-                var_aligned = var_reindexed.assign_coords(time=standardized_time)
-                reindexed_var_arrays.append(var_aligned)
+                reindexed_var_array.append(var_reindexed)
 
             # merge the variable for all individual basins
-            combined_variables_dict[var] = reduce(lambda left, right: left.combine_first(right), reindexed_var_arrays)
+            # get the attributes from the first element of the reindexed
+            var_attrs = reindexed_var_array[0].attrs.copy()
+            var_encoding = reindexed_var_array[0].encoding.copy()
+            combined = reduce(lambda left, right: left.combine_first(right), reindexed_var_array)
+            combined.attrs = var_attrs
+            combined.encoding = var_encoding
+
+            combined_variables_dict[var] = combined
     
     ds_combined = xr.Dataset(data_vars=combined_variables_dict, 
                            coords={"time": standardized_time, "y": ref_grid.y, "x": ref_grid.x}, 
-                           attrs=ref_grid.attrs)
+                           attrs=global_attrs)
             
     encoding_config = {}
     for var_name in variables_of_interest:
         encoding_config[str(var_name)] = {
             "zlib": True,
-            "complevel": 4,
-            "_FillValue": fill_value,
+            "complevel": 4
         }
 
     return ds_combined, encoding_config
 
-def combined_channel_reservoir_netcdfs(nc_files_folder: str, output_folder: str, 
-                                       output_class: str, category: str, domain: str):
+def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> Tuple[xr.Dataset, Dict[str, Dict[str, Any]]]:
 
-    # Path to your NetCDF files
-    file_pattern = "path/to/files/*.nc"
-
-    # Combine strictly along the 'entity' dimension
-    ds = xr.open_mfdataset(
-        file_pattern,
+    if has_featureid:
+        combined = xr.open_mfdataset(
+        nc_files,
         combine="nested",
-        concat_dim="entity",
-        coords="minimal",  # Keeps identical coordinates (like time) from duplicating
-        compat="override"  # Skips expensive consistency checks for identical variables
-    )
+        concat_dim=consts.DIM_FEATURE_ID,
+        preprocess=preprocess_sort,
+        combine_attrs="override"
+        )
+        combined = combined.sortby(consts.DIM_FEATURE_ID)
+    # else:
+    #     combined = xr.open_mfdataset(
+    #         nc_files,
+    #         combine="by_coords",
+    #         preprocess=preprocess_sort,
+    #         combine_attrs="override"
+    #     )
+    encoding = {}
+    for var in combined.data_vars:
+        if consts.DIM_FEATURE_ID in combined[var].dims:
+            encoding[var] = {
+                "zlib": True,
+                "complevel": 4,
+                "shuffle": True
+            }
+        else:
+            encoding[var] = {
+                "zlib": True,
+                "complevel": 4,
+                "shuffle": True
+            }
+    return combined, encoding
 
+def preprocess_sort(ds: xr.Dataset) -> xr.Dataset:
+    # This sorts the dataset sequentially. 
+    
+    # It is necessary to avoid the following error:
+    # ValueError: Resulting object does not have monotonic global indexes along dimension feature_id
+    if consts.DIM_FEATURE_ID in ds.dims and consts.DIM_FEATURE_ID in ds.coords:
+        if not ds.indexes[consts.DIM_FEATURE_ID].is_monotonic_increasing:
+            ds = ds.sortby(consts.DIM_FEATURE_ID)
+    return ds
 # endregion

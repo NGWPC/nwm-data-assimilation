@@ -54,7 +54,8 @@ def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gp
 
 def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: str, troute_lakeout_netcdf: str, 
                                    config_json: str, output_templates_folder: str | None, 
-                                   output_cycle_hour: int, output_cycle_type: str):
+                                   output_cycle_hour: int, output_cycle_type: str, 
+                                   output_cycle_domain: str):
     
     if output_templates_folder is None or output_templates_folder == '':
         # If no folder is specified, we will assume it as a subfolder within the root as defined in consts.py.
@@ -88,7 +89,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     formatted_hr = f"{output_cycle_hour:02d}"
 
     for mdata in netcdf_metadata_list:
-        if mdata.output_class == output_cycle_type:
+        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
             _processor.nwm_output_class = mdata.output_class
             _processor.nwm_category = mdata.category
             _processor.nwm_domain = mdata.domain
@@ -96,9 +97,15 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
             _processor.set_template_netcdf(template_files_dict[template_nc_name])
             _processor.set_troute_netcdf(troute_output_netcdf)
             _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
-            _processor.produce_nwm_output_product(mdata, nwm_output_folder)
+            _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
 
-# Postporcessing Entrypoint
+def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
+                            output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
+
+    utils.create_combined_basin_netcdf_products(netcdf_folder, output_folder, config_json, output_cycle_hr, 
+                                                output_cycle_type, output_cycle_domain)
+
+# Postprocessing Entrypoint
 def netcdf_production_workflow(args_list) -> Optional[Any]:
     """
     Main entrypoint function. Parses the args list and handles action
@@ -116,16 +123,16 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
     match action_item:
         case "download":
             if len(args_list) < 2:
-                raise ValueError("'download' action requires argument for root output folder: [root output folder path, 'download']")
+                raise ValueError("'download' action requires argument for: [root output folder path, 'download']")
             root_output_folder = args_list[0]
             config_json_file = download_netcdf_from_nomads(root_output_folder)
             return config_json_file
 
         case "template":
             if len(args_list) < 6:
-                raise ValueError("'template' action requires argument for root output folder, " + 
-                "ngen catchments netcdf, geopackage and config json: [root output folder path, " + 
-                "catchments netcdf, geopackage, config json, optional template output folder, 'template']")
+                raise ValueError("'template' action requires following arguments: " + 
+                "[root output folder path, catchments netcdf, geopackage, " + 
+                "config json, optional template output folder, 'template']")
             root_output_folder = args_list[0]
             ngen_catchments_netcdf = args_list[1]
             ngen_geopackage = args_list[2]
@@ -136,11 +143,12 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_templates_folder)
 
         case "output":
-            if len(args_list) < 10:
-                raise ValueError("'output' action requires argument for root output folder, " + 
-                "ngen catchments netcdf, geopackage troute outputs and config json: [root output folder path, " + 
-                "catchments netcdf, geopackage, troute output, troute lakeout, config json, " +
-                "optional template output folder, 'output']")
+            if len(args_list) < 11:
+                raise ValueError("'output' action requires following arguments: " + 
+                " [root output folder path, catchments netcdf, geopackage, " + 
+                "troute output, troute lakeout, config json, " +
+                "optional template output folder, output cycle hour, output cycle type, " +
+                "output_cycle_domain, 'output']")
             root_output_folder = args_list[0]
             ngen_catchments_netcdf = args_list[1]
             ngen_geopackage = args_list[2]
@@ -150,17 +158,19 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             output_templates_folder = args_list[6]
             output_cycle_hour = int(args_list[7])
             output_cycle_type = args_list[8]
+            output_cycle_domain = args_list[9]
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
             create_nwm_products_for_gpkg(root_output_folder, troute_output_netcdf, troute_lakeout_netcdf, 
-                                         config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type)
+                                         config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type, output_cycle_domain)
 
         case "all":
-            if len(args_list) < 8:
-                raise ValueError("'output' action requires argument for root output folder, " + 
-                "ngen catchments netcdf, geopackage and config json: [root output folder path, " + 
-                "catchments netcdf, geopackage, troute output, troute lakeout, config json, " +
-                "optional template output folder, 'all']")
+            if len(args_list) < 11:
+                raise ValueError("'all' action requires following arguments: " + 
+                "[root output folder path, catchments netcdf, geopackage, " + 
+                "troute output, troute lakeout, config json, " +
+                "optional template output folder, output cycle hour, output cycle type, " +
+                "output_cycle_domain, 'all']")
             root_output_folder = args_list[0]
             ngen_catchments_netcdf = args_list[1]
             ngen_geopackage = args_list[2]
@@ -170,12 +180,28 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             output_templates_folder = args_list[6]
             output_cycle_hour = int(args_list[7])
             output_cycle_type = args_list[8]
+            output_cycle_domain = args_list[9]
 
             config_json_file = download_netcdf_from_nomads(root_output_folder)
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
             create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_templates_folder)
             create_nwm_products_for_gpkg(root_output_folder, troute_output_netcdf, troute_lakeout_netcdf, 
-                                         config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type)
+                                         config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type, output_cycle_domain)
             
+        case "mosaic":
+            if len(args_list) < 6:
+                raise ValueError("'mosaic' action requires following arguments: " + 
+                "[output folder path containing ngen NWM products, " + 
+                "coutput folder to save mosaics, config json, " +
+                "output cycle hour, output cycle type, output cycle domain, 'mosaic']")
+            ngen_nwm_products_folder = args_list[0]
+            mosaic_products_folder = args_list[1]
+            config_json_file = args_list[2]
+            output_cycle_hour = int(args_list[3])
+            output_cycle_type = args_list[4]
+            output_cycle_domain = args_list[5]
+            combine_basin_products(ngen_nwm_products_folder, mosaic_products_folder, config_json_file, 
+                            output_cycle_hour, output_cycle_type, output_cycle_domain)
+
     print("NetCDF Production workflow completed Successfully")

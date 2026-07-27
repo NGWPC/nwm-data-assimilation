@@ -45,15 +45,18 @@ def convert_csv_to_netcdf(csv_folder: str):
     # python netcdf_production_sample.py convert-csv-to-netcdf sample_data/medium_range_mem2
     utils.convert_csvs_to_netcdf(csv_folder)
 
-def combine_basin_grids(reference_grid: str, netcdf_folder: str, output_folder: str):
+def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
+                            output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
     #Usage:
-    # python netcdf_production_sample.py create-combined-basin-grid sample_data/nwm_output/analysis_assim/nwm.t00z.analysis_assim.land.tm00.conus.nc sample_data/sample_netcdf/sample_output/merge_test sample_data/sample_netcdf/sample_output/merge_test
-    utils.create_combined_basin_netcdf_products(reference_grid, netcdf_folder, output_folder)
+    # 
+    utils.create_combined_basin_netcdf_products(netcdf_folder, output_folder, config_json, output_cycle_hr, 
+                                                output_cycle_type, output_cycle_domain)
 
 def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, output_folder: str,
-                            troute_output_file: str = '', troute_lakeout_file: str = ''):
+                            troute_output_file: str, troute_lakeout_file: str, 
+                            output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
     #Usage
-    # python netcdf_production_sample.py test-overall-workflow sample_data/outputs_0629/ngen_outputs/catchment_output_sr_01123000.nc sample_data/sample_gpkg/gauge_01123000.gpkg sample_data/outputs_0629
+    # 
     download = False
     create_config = False
     if download:
@@ -77,44 +80,32 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
     # print('Read output variables info from config')
 
     # Begin data processing
-    # reader = DataReader(ngen_netcdf_output_file)
-    # randomized_nc_name = 'ngen_randomvals_' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.nc'
-    # ngen_netcdf_output_file = os.path.join(output_folder, randomized_nc_name)
-    # reader.add_missing_variables(ngen_netcdf_output_file)
-    # reader.assign_random_values(ngen_netcdf_output_file)
-
     start_time = time.perf_counter()
 
-    
     processor = DataProcessor(ngen_netcdf_output_file, ngen_gpkg_file)
+    log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_prostprocessing_' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
+    processor.log_file  =log_file
     ngen_template_nc_folder = os.path.join(output_folder, consts.NWM_NGEN_TEMPLATE_FOLDER)
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
-        if mdata.output_class == 'analysis_assim' and mdata.category =='channel_rt' and not troute_output_file:
-            raise ValueError("T-Route output file is not specified")
-        if mdata.output_class == 'analysis_assim' and mdata.category =='reservoir' and not troute_lakeout_file:
-            raise ValueError("T-Route lakeout file is not specified")
-        
-        # if mdata.output_class == 'medium_range' and mdata.category =='land_1' and mdata.domain == 'conus':
-        if mdata.output_class == 'analysis_assim' and mdata.category =='land' and mdata.domain == 'conus':
-        # if mdata.output_class == 'medium_range_blend' and mdata.category =='terrain_rt' and mdata.domain == 'conus':
-        # if mdata.output_class == 'long_range' and mdata.category =='land_4' and mdata.domain == 'conus':
-            log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_' + mdata.output_class +  '.' + mdata.category + 
-                                    '.' + mdata.domain + '.' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
-            processor.log_file = log_file
+        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
+            if mdata.output_class == 'analysis_assim' and mdata.category =='channel_rt' and not troute_output_file:
+                raise ValueError("T-Route output file is not specified")
+            if mdata.output_class == 'analysis_assim' and mdata.category =='reservoir' and not troute_lakeout_file:
+                raise ValueError("T-Route lakeout file is not specified")
+            processor.nwm_output_class = mdata.output_class
+            processor.nwm_category = mdata.category
+            processor.nwm_domain = mdata.domain
             processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
             if mdata.category == 'channel_rt':
                 processor.set_troute_netcdf(troute_output_file)
             if mdata.category == 'reservoir':
                 processor.set_troute_lakeout_netcdf(troute_lakeout_file)
-            # processor.produce_nwm_output_product(mdata, nwm_output_folder)
-        # print(f"Ready to process: {mdata.output_class}, {mdata.category}, {mdata.domain}")
-        # if any(cat.lower() in mdata.category.lower() for cat in ['channel_rt', 'reservoir', 'total_water']):
-        #     print(f"----The requested category - {mdata.category} - is not a gridded netcdf. The functionality is not implemented yet")
-        #     continue
-            end_time = time.perf_counter()
-            duration_minutes = (end_time - start_time) / 60
-            print(f"----Function execution time: {duration_minutes:.2f} minutes")
+            processor.produce_nwm_output_product(mdata, nwm_output_folder, output_cycle_hr)
+
+    end_time = time.perf_counter()
+    duration_minutes = (end_time - start_time) / 60
+    print(f"Function execution time: {duration_minutes:.2f} minutes")
 
 def main() -> None:
 
@@ -154,11 +145,14 @@ def main() -> None:
     parser_csv_to_nc = subparsers.add_parser("convert-csv-to-netcdf")
     parser_csv_to_nc.add_argument("csv_folder_path")
 
-    #create basin level netcdf using timestep netcdfs
-    parser_basin_grids = subparsers.add_parser("create-combined-basin-grid")
-    parser_basin_grids.add_argument("reference_grid")
-    parser_basin_grids.add_argument("timestep_grids_folder")
+    #create combined netcdf using timestep netcdfs
+    parser_basin_grids = subparsers.add_parser("create-combined-basin-products")
+    parser_basin_grids.add_argument("netcdf_folder")
     parser_basin_grids.add_argument("output_basin_grids_folder")
+    parser_basin_grids.add_argument("json_config_file")
+    parser_basin_grids.add_argument("output_cycle_hr")
+    parser_basin_grids.add_argument("output_cycle_type")
+    parser_basin_grids.add_argument("output_cycle_domain")
     
     #overall netcdf workflow
     overall_workflow = subparsers.add_parser("test-overall-workflow")
@@ -167,7 +161,9 @@ def main() -> None:
     overall_workflow.add_argument("output_folder")
     overall_workflow.add_argument("troute_out_file")
     overall_workflow.add_argument("troute_lakeout_file")
-    
+    overall_workflow.add_argument("output_cycle_hr")
+    overall_workflow.add_argument("output_cycle_type")
+    overall_workflow.add_argument("output_cycle_domain")
     args = parser.parse_args()
 
     if args.command == "randomize":
@@ -182,11 +178,13 @@ def main() -> None:
         extract_netcdf_metadata(args.local_folder_path)
     elif args.command == "convert-csv-to-netcdf":
         convert_csv_to_netcdf(args.csv_folder_path)
-    elif args.command == "create-combined-basin-grid":
-        combine_basin_grids(args.reference_grid, args.timestep_grids_folder, args.output_basin_grids_folder)
+    elif args.command == "create-combined-basin-products":
+        combine_basin_products(args.netcdf_folder, args.output_basin_grids_folder, args.json_config_file,
+                            args.output_cycle_hr, args.output_cycle_type, args.output_cycle_domain)
     elif args.command == "test-overall-workflow":
         overall_netcdf_workflow(args.ngen_netcdf_output_file, args.ngen_gpkg_file, args.output_folder, 
-                                args.troute_out_file, args.troute_lakeout_file)
+                                args.troute_out_file, args.troute_lakeout_file, args.output_cycle_hr,
+                                args.output_cycle_type, args.output_cycle_domain)
     else:
         parser.print_help()
     
