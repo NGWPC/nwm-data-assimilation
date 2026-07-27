@@ -187,7 +187,7 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             config_json_file = download_netcdf_from_nomads(root_output_folder)
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
-            create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_templates_folder)
+            create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_cycle_domain, output_templates_folder)
             create_nwm_products_for_gpkg(root_output_folder, troute_output_netcdf, troute_lakeout_netcdf, 
                                          config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type, output_cycle_domain)
             
