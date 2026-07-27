@@ -148,6 +148,16 @@ def convert_csvs_to_netcdf(csv_folder: str):
     combined_ds.to_netcdf(output_netcdf_path)
     print("Process complete!")
 
+def get_file_timestep_prefix(cycle_run):
+    match cycle_run:
+        case 'analysis_assim':
+            return 'tm'
+        case 'short_range':
+            return 'f'
+        case "long_range":
+            return "to do"
+        case _:
+            return "Unknown"  # This is the default 'else' case
 # endregion
 
 # region data download

@@ -74,7 +74,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     # To do: Update this to include only conus for demo?
     template_files_dict = {}
     for mdata in netcdf_metadata_list:
-        if mdata.output_class == output_cycle_type:
+        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
             template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
             template_nc_file = os.path.join(ngen_template_nc_folder, template_nc_name + '.nc')
             if os.path.isfile(template_nc_file):
