@@ -450,7 +450,7 @@ class DataProcessor(DataReader):
                                         x_dim: str, y_dim: str
     ) -> Tuple[xr.Dataset, xr.DataArray]:
         """
-        Transfer entity-indexed variables from a source xarray Dataset
+        Transfer catchment-indexed variables from a source xarray Dataset
         to a spatial grid defined by a template Dataset.
         """
         ds_data = ds
@@ -527,17 +527,14 @@ class DataProcessor(DataReader):
             output = output.drop_dims(consts.DIM_TIME)
         output = output.assign_coords({consts.DIM_TIME: ds_data[consts.DIM_TIME]})
 
-        # ------------------------------------------------------------------
-        # 10. Map each entity variable to the target grid
-        # ------------------------------------------------------------------
-
+        # Map each catchment variable to the target grid
         for name in variables_to_transfer:
             source_da = ds_data[name]
             template_da = ds_template[name]
 
             if consts.DIM_CATCHMENTS not in source_da.dims:
                 raise ValueError(
-                    f"Variable {name!r} does not contain "
+                    f"Variable {name} does not contain "
                     f"the catchments dimension."
                 )
 
@@ -585,7 +582,7 @@ class DataProcessor(DataReader):
             mapped.encoding = template_da.encoding.copy() # Preserve template encoding that got stripped
             output[name] = mapped
 
-        # copy source variables without entity dimensions
+        # copy source variables without catchment dimensions
         for name in ds_template.data_vars:
 
             if name not in ds_data.data_vars:
@@ -678,8 +675,6 @@ class DataProcessor(DataReader):
                 "valid_min": time_value_min,
                 "valid_max": time_value_max
             })
-            # ds_t[consts.DIM_TIME].attrs["valid_min"] = time_value_min
-            # ds_t[consts.DIM_TIME].attrs["valid_max"] = time_value_max
 
             # Output filename and save
             formatted_t = f"{time_step:02d}"
@@ -873,7 +868,7 @@ class DataProcessor(DataReader):
                     ds[var_name].attrs.pop("missing_value", None)
         return ds
 
-#region data validation
+# region data validation
     def find_positive_variables(self, ds: xr.Dataset, time_index: int) -> List[str]:
         positive_vars = []
         for var in ds.data_vars:
@@ -990,7 +985,7 @@ class DataProcessor(DataReader):
                 print(f"Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
                 if len(failures) > 0:
                     print(f"Failures for {var}: {failures}")
-#endregion
+# endregion
 
     def close_log(self):
         """Restores the original terminal output and closes the file."""
