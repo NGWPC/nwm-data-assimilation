@@ -696,6 +696,10 @@ class DataProcessor(DataReader):
             time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
         elif mdata.category == 'channel_rt':
             troute_source_ds = self._troute_netcdf_ds
+            # troute output has a variable called flow which should be streamflow in the NWM product.
+            # adopting to quickly rename the variable in the troute output for now.
+            # To do: Have a variables mapping of these outputs with NWM products and do that
+            troute_source_ds = troute_source_ds.rename({"flow": "streamflow"})
             units_attr_val = troute_source_ds[consts.DIM_TIME].encoding.get('units')
             time_str = units_attr_val.split("since ")[1].strip()
             base_datetime = np.datetime64(time_str)
@@ -741,7 +745,7 @@ class DataProcessor(DataReader):
                 if not in_snapshot and not in_populated:
                     print(f"{var_name} is missing from both troute and output datasets.")
                     continue
-                elif not in_snapshot:
+                elif not in_snapshot and var_name.lower() != 'qbucket':
                     if self._template_netcdf_ds[var_name].ndim == 0: # Scalar variables not in the data, but in template
                         populated_ds[var_name] = xr.DataArray(self._template_netcdf_ds[var_name].values.item())
                         print(f"Found a scalar variable - {var_name} that is not in the data, but present in the template.Template value has been copied over.")
