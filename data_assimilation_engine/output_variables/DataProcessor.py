@@ -821,7 +821,7 @@ class DataProcessor(DataReader):
             prefix = get_file_timestep_prefix(self._output_class)
             formatted_t = f"{prefix}{time_step:02d}"
             cycle_hr = output_cycle_hr.zfill(2)
-            output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.tm{formatted_t}.{self._domain}.nc")
+            output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
             populated_ds.to_netcdf(output_file)
 
     def attribute_fill_missing_values(self, ds: xr.Dataset) -> xr.Dataset:
