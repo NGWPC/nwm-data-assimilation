@@ -11,6 +11,7 @@ template_inputs = [
     "sample_data/ngen_netcdfs/catchment_output_3n.nc",
     "sample_data/sample_gpkg/vpu_3n.gpkg",
     "sample_data/outputs_root/configs/metadata_config.json",
+    "conus",
     None,
     "template",
 ]
