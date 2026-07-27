@@ -13,7 +13,7 @@ import shapely
 from pyproj import CRS
 from typing import List, Tuple, Optional
 from .DataReader import DataReader
-from .utils import NetCDFMetadata
+from .utils import NetCDFMetadata, get_file_timestep_prefix
 from . import consts
 
 class DataProcessor(DataReader):
@@ -369,26 +369,6 @@ class DataProcessor(DataReader):
             stacked_ds = stacked_ds.drop_vars(matching_vars)
         return stacked_ds
     
-    def create_4D_grid(self, var_4D_dict, dims_list, fill_value, valid_indices, valid_mask, 
-                       layer_dim_name: str, num_time_steps: int, 
-                       nx: int, ny: int) -> xr.Dataset:
-        
-        var_4D_list = list(var_4D_dict.values())
-        stacked_var = xr.concat(var_4D_list, dim = layer_dim_name)
-        num_layers = len(var_4D_list)
-        var_spatial_4D_array = np.full((num_time_steps, ny, num_layers, nx), fill_value, dtype=stacked_var.dtype)
-        data_values = stacked_var.isel(**{consts.DIM_CATCHMENTS: valid_indices}).values
-
-        for t in range(num_time_steps):
-            for l in range(num_layers):
-                var_spatial_4D_array[t, valid_mask.values, l, :] = data_values[t, l, :]
-
-        rain_da = xr.DataArray(
-            data = var_spatial_4D_array,
-            dims = dims_list,
-        )
-        ds_grid_rain = xr.Dataset(data_vars={"rain_data_all": rain_da})
-
     def build_catchment_id_grid(self, x_dim_name: str, y_dim_name: str) -> xr.DataArray:
         """
         Returns a DataArray (y, x) where each cell in the basin-level grid contains a catchment ID.
@@ -677,9 +657,10 @@ class DataProcessor(DataReader):
             })
 
             # Output filename and save
-            formatted_t = f"{time_step:02d}"
+            prefix = get_file_timestep_prefix(self._output_class)
+            formatted_t = f"{prefix}{time_step:02d}"
             cycle_hr = output_cycle_hr.zfill(2)
-            output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.tm{formatted_t}.{self._domain}.nc")
+            output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
             ds_t.to_netcdf(output_file)
 
     def produce_channel_reservoir_nwm_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str):
@@ -732,7 +713,7 @@ class DataProcessor(DataReader):
             consts.DIM_REF_TIME: [ref_time_val]
         }
 
-        # Create one netcdf each for tm00, tm01 and tm02
+        # Create one netcdf each for each time step
         for time_step, snapshot_time_val in enumerate(sorted_times):
             populated_ds = self._template_netcdf_ds.reindex(**re_index_args, fill_value = np.nan)
             time_args = {consts.DIM_TIME: [snapshot_time_val]}
@@ -837,7 +818,8 @@ class DataProcessor(DataReader):
 
             # Output filename and save
             os.makedirs(output_dir, exist_ok=True)
-            formatted_t = f"{time_step:02d}"
+            prefix = get_file_timestep_prefix(self._output_class)
+            formatted_t = f"{prefix}{time_step:02d}"
             cycle_hr = output_cycle_hr.zfill(2)
             output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.tm{formatted_t}.{self._domain}.nc")
             populated_ds.to_netcdf(output_file)
