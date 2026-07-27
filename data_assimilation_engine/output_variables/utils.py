@@ -114,7 +114,7 @@ def convert_csvs_to_netcdf(csv_folder: str):
             }
         )
 
-        # Expand the dataset to include 'entity' as a dimension axis
+        # Expand the dataset to include catchments as a dimension axis
         catchment_ds = catchment_ds.expand_dims(consts.DIM_CATCHMENTS)
         catchment_nc_data.append(catchment_ds)
 
@@ -124,7 +124,7 @@ def convert_csvs_to_netcdf(csv_folder: str):
 
     print(" Combining and aligning all catchments")
     
-    # Merge all separate entities together along the 'entity' dimension
+    # Merge all separate catchments together along the catchments dimension
     combined_ds = xr.combine_by_coords(catchment_nc_data)
 
     # Enforce structural array coordinates to be 64-bit long integers
