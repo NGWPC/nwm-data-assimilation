@@ -25,7 +25,7 @@ def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = Fal
     return utils.download_nwm_data_from_server(root_output_folder, re_download)
 
 def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gpkg_file: str, 
-                                   config_json: str, output_templates_folder: str | None):
+                                   config_json: str, output_cycle_domain: str, output_templates_folder: str | None):
     
     if not os.path.isfile(netcdf_file):
         raise ValueError("Specified ngen output cathments netcdf file does not exist")
@@ -50,7 +50,8 @@ def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gp
 
     # Create templates.
     for mdata in netcdf_metadata_list:
-        _processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
+        if mdata.domain == output_cycle_domain:
+            _processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
 
 def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: str, troute_lakeout_netcdf: str, 
                                    config_json: str, output_templates_folder: str | None, 
@@ -129,18 +130,19 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
             return config_json_file
 
         case "template":
-            if len(args_list) < 6:
+            if len(args_list) < 7:
                 raise ValueError("'template' action requires following arguments: " + 
                 "[root output folder path, catchments netcdf, geopackage, " + 
-                "config json, optional template output folder, 'template']")
+                "config json, output cycle domain, optional template output folder, 'template']")
             root_output_folder = args_list[0]
             ngen_catchments_netcdf = args_list[1]
             ngen_geopackage = args_list[2]
             config_json_file = args_list[3]
-            output_templates_folder = args_list[4]
+            output_cycle_domain = args_list[4]
+            output_templates_folder = args_list[5]
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
-            create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_templates_folder)
+            create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_cycle_domain, output_templates_folder)
 
         case "output":
             if len(args_list) < 11:
