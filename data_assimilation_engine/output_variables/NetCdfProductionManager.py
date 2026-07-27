@@ -71,7 +71,6 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
         raise ValueError("Specified config file does not exist")
     
     # Confirm that template files exist for the cycle type. Gather a dictionary as well
-    # To do: Update this to include only conus for demo?
     template_files_dict = {}
     for mdata in netcdf_metadata_list:
         if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
