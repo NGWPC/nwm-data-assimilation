@@ -105,15 +105,21 @@ def copy_from_s3_or_local(src: str, dst: str | Path) -> bool:
 
         if ls.returncode != 0:
             err = (ls.stderr or "").strip()
-            if "ExpiredToken" in err or "InvalidToken" in err or "AccessDenied" in err or "Bad Request" in err:
+            if any(x in err for x in ("ExpiredToken", "InvalidToken", "AccessDenied", "Bad Request")):
                 raise RuntimeError(f"S3 access/auth failure while checking {src}: {err}")
             return False
 
         cp = subprocess.run(cp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
+        if cp.returncode < 0:
+            raise RuntimeError(
+                f"AWS CLI crashed while downloading {src}: returncode={cp.returncode}; "
+                f"stderr={(cp.stderr or '').strip()}"
+            )
+
         if cp.returncode != 0:
             err = (cp.stderr or "").strip()
-            if "ExpiredToken" in err or "InvalidToken" in err or "AccessDenied" in err or "Bad Request" in err:
+            if any(x in err for x in ("ExpiredToken", "InvalidToken", "AccessDenied", "Bad Request")):
                 raise RuntimeError(f"S3 access/auth failure while downloading {src}: {err}")
             print(f"WARNING: failed to download SNODAS file: {src}; {err}")
             return False
@@ -125,7 +131,6 @@ def copy_from_s3_or_local(src: str, dst: str | Path) -> bool:
         return True
 
     return False
-
 
 def build_snodas_candidates(prefix: str, date: datetime) -> list[str]:
     prefix = prefix.rstrip("/")
@@ -316,11 +321,18 @@ class SNODASNHFGageProcessor:
 
         try:
             gage_gdf = self.read_gage_geometry(gpkg_file)
-            bounds = gage_gdf.total_bounds  # minx, miny, maxx, maxy
-            geom_union = gage_gdf.union_all() if hasattr(gage_gdf, "union_all") else gage_gdf.unary_union
+            bounds = gage_gdf.total_bounds
+            geom_union = (
+                gage_gdf.union_all()
+                if hasattr(gage_gdf, "union_all")
+                else gage_gdf.unary_union
+            )
+
             rows = []
             missing_nc = 0
             no_overlap = 0
+            failed_days = 0
+
             for day_index, date in enumerate(self.dates, start=1):
                 if day_index == 1 or day_index % 30 == 0 or day_index == len(self.dates):
                     print(
@@ -329,69 +341,106 @@ class SNODASNHFGageProcessor:
                         flush=True,
                     )
 
-                local_nc = self.download_snodas(date)
+                local_nc = None
                 delete_local_nc = False
 
-                if local_nc is None:
-                    missing_nc += 1
-                    rows.append({"timestamp": date.strftime("%Y-%m-%d %H:%M:%S"), "basin_avg_swe": np.nan})
-                    continue
-
-                # Keep scratch small during long historical runs.
-                if is_s3_path(self.snodas_nc_prefix):
-                    delete_local_nc = True
-
                 try:
+                    local_nc = self.download_snodas(date)
+
+                    if local_nc is None:
+                        missing_nc += 1
+                        rows.append({
+                            "timestamp": (date + pd.Timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S"),
+                            "basin_avg_swe": np.nan,
+                        })
+                        continue
+
+                    if is_s3_path(self.snodas_nc_prefix):
+                        delete_local_nc = True
+
                     with xr.open_dataset(local_nc) as ds:
                         var_name = choose_dataset_name(ds, self.dataset_name)
                         x_name, y_name = find_coord_names(ds)
 
-                        # Subset by gage bounds.  Handles ascending or descending latitude/y coordinates.
                         xvals = ds[x_name].values
                         yvals = ds[y_name].values
-                        x_slice = slice(bounds[0], bounds[2]) if xvals[0] <= xvals[-1] else slice(bounds[2], bounds[0])
-                        y_slice = slice(bounds[1], bounds[3]) if yvals[0] <= yvals[-1] else slice(bounds[3], bounds[1])
+
+                        x_slice = (
+                            slice(bounds[0], bounds[2])
+                            if xvals[0] <= xvals[-1]
+                            else slice(bounds[2], bounds[0])
+                        )
+                        y_slice = (
+                            slice(bounds[1], bounds[3])
+                            if yvals[0] <= yvals[-1]
+                            else slice(bounds[3], bounds[1])
+                        )
+
                         subset = ds.sel({x_name: x_slice, y_name: y_slice})
+
                         if subset.sizes.get(x_name, 0) == 0 or subset.sizes.get(y_name, 0) == 0:
                             no_overlap += 1
-                            rows.append({"timestamp": date.strftime("%Y-%m-%d %H:%M:%S"), "basin_avg_swe": np.nan})
+                            rows.append({
+                                "timestamp": (date + pd.Timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S"),
+                                "basin_avg_swe": np.nan,
+                            })
                             continue
 
                         da = subset[var_name]
                         values = da.values
+
                         if values.ndim > 2:
                             values = np.squeeze(values)
-                        values = convert_units(np.asarray(values), self.source_units, self.output_units)
+
+                        values = convert_units(
+                            np.asarray(values),
+                            self.source_units,
+                            self.output_units,
+                        )
 
                         xs = subset[x_name].values
                         ys = subset[y_name].values
+
                         if len(xs) < 1 or len(ys) < 1:
                             no_overlap += 1
-                            rows.append({"timestamp": date.strftime("%Y-%m-%d %H:%M:%S"), "basin_avg_swe": np.nan})
+                            rows.append({
+                                "timestamp": (date + pd.Timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S"),
+                                "basin_avg_swe": np.nan,
+                            })
                             continue
 
-                        # Estimate cell boundaries from coordinate centers.
                         dx = float(np.nanmedian(np.abs(np.diff(xs)))) if len(xs) > 1 else 0.01
                         dy = float(np.nanmedian(np.abs(np.diff(ys)))) if len(ys) > 1 else 0.01
+
                         records = []
+                        dims = da.squeeze().dims
+
                         for iy, y in enumerate(ys):
                             for ix, x in enumerate(xs):
-                                # xarray order can be (lat, lon) or (y, x).  Use dimension order to index safely.
-                                dims = da.squeeze().dims
                                 if len(dims) != 2:
                                     continue
+
                                 if dims[0] == y_name and dims[1] == x_name:
                                     value = values[iy, ix]
                                 elif dims[0] == x_name and dims[1] == y_name:
                                     value = values[ix, iy]
                                 else:
                                     value = values[iy, ix]
-                                cell = box(float(x) - dx / 2, float(y) - dy / 2, float(x) + dx / 2, float(y) + dy / 2)
+
+                                cell = box(
+                                    float(x) - dx / 2,
+                                    float(y) - dy / 2,
+                                    float(x) + dx / 2,
+                                    float(y) + dy / 2,
+                                )
+
                                 if not cell.intersects(geom_union):
                                     continue
+
                                 inter = cell.intersection(geom_union)
                                 if inter.is_empty:
                                     continue
+
                                 records.append((float(value), float(inter.area)))
 
                         if not records:
@@ -402,12 +451,36 @@ class SNODASNHFGageProcessor:
                             weights = np.array([r[1] for r in records], dtype=float)
                             mean_swe = safe_weighted_average(vals, weights)
 
-                        rows.append({"timestamp": date.strftime("%Y-%m-%d %H:%M:%S"), "basin_avg_swe": mean_swe})
-                except Exception as exc:  # noqa: BLE001
-                    rows.append({"timestamp": date.strftime("%Y-%m-%d %H:%M:%S"), "basin_avg_swe": np.nan})
-                    print(f"WARNING: failed processing {gage_id} {date:%Y-%m-%d}: {exc}")
+                        rows.append({
+                            "timestamp": (date + pd.Timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S"),
+                            "basin_avg_swe": mean_swe,
+                        })
+
+                except Exception as exc:
+                    msg = repr(exc)
+
+                    # Fatal infrastructure/auth errors should stop this gage immediately.
+                    if (
+                        "S3 access/auth failure" in msg
+                        or "AWS CLI crashed" in msg
+                        or "ExpiredToken" in msg
+                        or "InvalidToken" in msg
+                        or "AccessDenied" in msg
+                        or "Bad Request" in msg
+                    ):
+                        raise RuntimeError(
+                            f"fatal download/S3 failure for {gage_id} on {date:%Y-%m-%d}: {exc}"
+                        ) from exc
+
+                    failed_days += 1
+                    rows.append({
+                        "timestamp": (date + pd.Timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S"),
+                        "basin_avg_swe": np.nan,
+                    })
+                    print(f"WARNING: failed processing {gage_id} {date:%Y-%m-%d}: {exc}", flush=True)
+
                 finally:
-                    if delete_local_nc:
+                    if delete_local_nc and local_nc is not None:
                         try:
                             Path(local_nc).unlink(missing_ok=True)
                         except Exception:
@@ -418,21 +491,13 @@ class SNODASNHFGageProcessor:
             df = df.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
             df.to_csv(local_output, index=False, date_format="%Y-%m-%d %H:%M:%S")
 
-            upload_failed = False
-            upload_error = ""
-            try:
-                copy_to_s3_or_local(local_output, dest_file)
-            except Exception as exc:
-                upload_failed = True
-                upload_error = repr(exc)
-
-
             valid_values = int(df["basin_avg_swe"].notna().sum())
 
             if valid_values == 0:
                 note = (
                     f"missing_nc_days={missing_nc}; "
                     f"no_overlap_days={no_overlap}; "
+                    f"failed_days={failed_days}; "
                     f"local_output={local_output}"
                 )
                 return GageResult(
@@ -445,23 +510,47 @@ class SNODASNHFGageProcessor:
                     note,
                 )
 
-            copy_to_s3_or_local(local_output, dest_file)
+            upload_failed = False
+            upload_error = ""
 
-            if valid_values == 0:
-                status = "no_valid_swe_pixels"
-            elif missing_nc > 0 or no_overlap > 0:
-                status = "partial"
-            else:
-                status = "processed"
-            note = f"missing_nc_days={missing_nc}; no_overlap_days={no_overlap}"
+            try:
+                copy_to_s3_or_local(local_output, dest_file)
+            except Exception as exc:
+                upload_failed = True
+                upload_error = repr(exc)
+
+            status = "partial" if (missing_nc > 0 or no_overlap > 0 or failed_days > 0) else "processed"
+            note = (
+                f"missing_nc_days={missing_nc}; "
+                f"no_overlap_days={no_overlap}; "
+                f"failed_days={failed_days}; "
+                f"local_output={local_output}"
+            )
 
             if upload_failed:
                 status = "upload_failed"
-                note = f"{note}; local_output={local_output}; upload_error={upload_error}"
+                note = f"{note}; upload_error={upload_error}"
 
-            return GageResult(gage_id, self.domain, status, dest_file, len(df), valid_values, note)
-        except Exception as exc:  # noqa: BLE001
-            return GageResult(gage_id, self.domain, "failed", dest_file, 0, 0, repr(exc))
+            return GageResult(
+                gage_id,
+                self.domain,
+                status,
+                dest_file,
+                len(df),
+                valid_values,
+                note,
+            )
+
+        except Exception as exc:
+            return GageResult(
+                gage_id,
+                self.domain,
+                "failed",
+                dest_file,
+                0,
+                0,
+                repr(exc),
+            )
 
     def write_manifest(self, results: Iterable[GageResult]) -> None:
         rows = list(results)
