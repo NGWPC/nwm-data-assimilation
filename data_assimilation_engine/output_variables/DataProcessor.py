@@ -471,7 +471,7 @@ class DataProcessor(DataReader):
         # Sanity check to confirm that the lat-lon are aligned after masking.
         grid_index = grid_index.transpose(y_dim, x_dim)
         valid_mask = grid_index >= 0
-        if not grid_index.has_same_coords(valid_mask):
+        if not grid_index.coords.equals(valid_mask.coords):
             print("----grid_index and valid_mask coordinates are shifted or some corodinates are lost.")
             raise ValueError("grid_index and valid_mask coordinates do not match.")
 
