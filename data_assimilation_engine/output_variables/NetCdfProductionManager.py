@@ -24,6 +24,9 @@ def create_dataprocessor(root_output_folder: str, netcdf_file: str, gpkg_file: s
 def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = False) -> str:
     return utils.download_nwm_data_from_server(root_output_folder, re_download)
 
+def extract_netcdf_metadata(root_output_folder: str):
+    return utils.obtain_metadata_information(root_output_folder)
+
 def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gpkg_file: str, 
                                    config_json: str, output_cycle_domain: str, output_templates_folder: str | None):
     
@@ -73,7 +76,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     # Confirm that template files exist for the cycle type. Gather a dictionary as well
     template_files_dict = {}
     for mdata in netcdf_metadata_list:
-        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
+        if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
             template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
             template_nc_file = os.path.join(ngen_template_nc_folder, template_nc_name + '.nc')
             if os.path.isfile(template_nc_file):
@@ -89,7 +92,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     formatted_hr = f"{output_cycle_hour:02d}"
 
     for mdata in netcdf_metadata_list:
-        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
+        if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
             _processor.nwm_output_class = mdata.output_class
             _processor.nwm_category = mdata.category
             _processor.nwm_domain = mdata.domain
@@ -126,6 +129,13 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
                 raise ValueError("'download' action requires argument for: [root output folder path, 'download']")
             root_output_folder = args_list[0]
             config_json_file = download_netcdf_from_nomads(root_output_folder)
+            return config_json_file
+
+        case "config":
+            if len(args_list) < 2:
+                raise ValueError("'config' action requires argument for: [root output folder path, 'config']")
+            root_output_folder = args_list[0]
+            config_json_file = extract_netcdf_metadata(root_output_folder)
             return config_json_file
 
         case "template":

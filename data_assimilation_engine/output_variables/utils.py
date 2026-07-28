@@ -6,7 +6,6 @@ import csv
 import pandas as pd
 import numpy as np
 import json
-import logging
 from pathlib import Path
 from . import consts
 from urllib.parse import urljoin
@@ -156,36 +155,39 @@ def get_file_timestep_prefix(cycle_run: str) -> str:
 
 def get_file_timestep_list(cycle_run: str, category: str) -> List[str]:
     timesteps = []
+    prefix = get_file_timestep_prefix(cycle_run)
     match cycle_run:
-        case 'analysis_assim':
-            return generate_formatted_string_list(0, 2, 1, 2)
+        case 'analysis_assim' | 'analysis_assim_no_da':
+            return generate_formatted_string_list(0, 3, 1, 2, prefix)
+        case 'analysis_assim_long':
+            return generate_formatted_string_list(0, 12, 1, 2, prefix)
         case 'short_range':
-            return generate_formatted_string_list(1, 18, 1, 3)
+            return generate_formatted_string_list(1, 19, 1, 3, prefix)
         case 'long_range':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return generate_formatted_string_list(6, 720, 6, 3)
+                return generate_formatted_string_list(6, 721, 6, 3, prefix)
             elif category.startswith('land'):
-                return generate_formatted_string_list(24, 720, 24, 3)
+                return generate_formatted_string_list(24, 721, 24, 3, prefix)
         case 'medium_range' | 'medium_range_blend':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return generate_formatted_string_list(1, 240, 1, 3)
+                return generate_formatted_string_list(1, 241, 1, 3, prefix)
             elif category.startswith('land') or category.startswith('terrain'):
-                return generate_formatted_string_list(3, 240, 3, 3)
+                return generate_formatted_string_list(3, 241, 3, 3, prefix)
         case _:
             return "Unknown"  # This is the default 'else' case
     return timesteps
 
-def generate_formatted_string_list(start: int, end: int, 
-                                   interval: int, width: int) -> List[str]:
+def generate_formatted_string_list(start: int, end: int, interval: int, 
+                                   width: int, prefix: str) -> List[str]:
     ret_list = []
     for i in range(start, end, interval):
-        ts = f"{i:0{width}d}"
+        ts = f"{prefix}{i:0{width}d}"
         ret_list.append(ts)
     return ret_list
 
 def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, category: str) -> str:
     match cycle_run:
-        case 'analysis_assim':
+        case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long':
             return f"{time_step:02d}"
         case 'short_range':
             formatted = (time_step+1)
@@ -326,6 +328,7 @@ class NetCDFMetadata:
         dimensions: str, 
         scalar_variables: Dict[str, List[str]], 
         data_variables_dim: Dict[str, Union[int, float, str]],
+        output_cycle: str,
         output_class: str,
         category: str,
         domain: str,
@@ -342,6 +345,7 @@ class NetCDFMetadata:
         self.scalar_variables = scalar_variables
         self.data_variables_dim = data_variables_dim
         self.crs_wkt = wkt
+        self.output_cycle = output_cycle
         self.output_class = output_class
         self.category = category
         self.domain = domain
@@ -395,6 +399,7 @@ def extract_netcdf_metadata_from_netcdf(file_path: str) -> NetCDFMetadata:
 
     filename = os.path.basename(file_path)
     output_class, category, domain = parse_filename_metadata(filename)
+    output_cycle = Path(file_path).parent.name
     res_x = -9999
     res_y = -9999
     origin_x = -9999
@@ -437,7 +442,7 @@ def extract_netcdf_metadata_from_netcdf(file_path: str) -> NetCDFMetadata:
             vars_in_netcdf.append(nwm_var)
     nwm_variables = ", ".join(vars_in_netcdf)
     return NetCDFMetadata(file_path, res_x, res_y, origin_x, origin_y, x_loc_name, y_loc_name, proj_wkt, 
-                          nwm_variables, dimensions, scalar_dict, data_dict, output_class, category, domain)
+                          nwm_variables, dimensions, scalar_dict, data_dict, output_cycle, output_class, category, domain)
 
 def compute_resolution(coords: np.ndarray) -> float:
     """
@@ -473,6 +478,7 @@ def write_metadata_to_csv(metadata_list: List[NetCDFMetadata], output_csv: str) 
         "y_name",
         "crs_wkt",
         "variables",
+        "cycle",
         "class",
         "category",
         "domain",
@@ -495,6 +501,7 @@ def write_metadata_to_csv(metadata_list: List[NetCDFMetadata], output_csv: str) 
                     "y_name": metadata.y_name,
                     "crs_wkt": metadata.crs_wkt if metadata.crs_wkt is not None else "Not Available",
                     "variables": metadata.nwm_variables,
+                    "cycle": metadata.output_cycle or "",
                     "class": metadata.output_class or "",
                     "category": metadata.category or "",
                     "domain": metadata.domain or "",
@@ -530,6 +537,7 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
             consts.JSON_DIMENSION: mdata.nwm_dimensions,
             consts.JSON_SCALAR_VAR: mdata.scalar_variables,
             consts.JSON_VAR_DIM_MAP: mdata.data_variables_dim,
+            consts.JSON_OUTPUT_CYCLE: mdata.output_cycle,
             consts.JSON_CLASS: mdata.output_class,
             consts.JSON_CATEGORY: mdata.category,
             consts.JSON_DOMAIN: mdata.domain
@@ -543,70 +551,6 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
         json.dump(config, f, indent = 2)
 
     print(f"Config JSON written to: {output_json}")
-
-def debug_netcdf_structure_in_folder(folder_path: str) -> None:
-    """
-    Recursively scans a folder for NetCDF files and prints their structure.
-    """
-    # This function is used for testing purposes. 
-    # It also uses a local logging to save all information into a file.
-    nc_files: List[str] = []
-    data_variables_list = []
-    logging.basicConfig(filename='app.log', level=logging.INFO, format='%(message)s')
-    for root, _, files in os.walk(folder_path):
-        for file in files:
-            if file.endswith(".nc"):
-                nc_files.append(os.path.join(root, file))
-
-    if not nc_files:
-        print(f"No NetCDF files found in: {folder_path}")
-        return
-    logging.info(f"Found {len(nc_files)} NetCDF files within the folder")
-
-    for file_path in nc_files:
-        logging.info("-" * 80)
-        logging.info(f"FILE: {file_path}")
-
-        try:
-            with xr.open_dataset(file_path) as ds:
-                # Variables
-                logging.info("--Variables:")
-                for var_name, var in ds.data_vars.items():
-                    logging.info(f"----  {var_name}: shape={var.shape}, dtype={var.dtype}")
-                    output_class, category, domain = parse_filename_metadata(file_path)
-                    data_variables_list.append(var_name + ";" + output_class + ";" + category + ";" + domain)
-
-                # Dimensions
-                logging.info("--Dimensions:")
-                for dim_name, dim_size  in ds.sizes.items():
-                    logging.info(f"----  {dim_name}: size={dim_size}")
-
-                # CRS-specific attributes if present
-                is_crs_present = False 
-                is_sref_present = False 
-                for crs_name in ["crs", "CRS", "spatial_ref"]:
-                    if crs_name in ds.variables:
-                        logging.info(f"--CRS Variable: {crs_name}")
-                        is_crs_present = True
-                        crs_var = ds.variables[crs_name]
-                        if 'spatial_ref' in crs_var.attrs:
-                            spatial_ref_raw = ds.variables[crs_name].attrs['spatial_ref']
-                            is_sref_present = True
-                            logging.info(f"----{spatial_ref_raw}")
-                logging.info(f"-- CRS Available: {is_crs_present}; Spatial_ref Available: {is_sref_present}")
-            
-            # The snippet below is use to write variables along with the class, category and domain
-            # This produces an additional csv with just basic variables information.
-            with open('variables_ccategories.csv', 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Variable", "Class", "Category", "Domain"])
-                for var in data_variables_list:
-                    if not var.startswith('crs'):
-                        row = var.split(";")
-                        writer.writerow(row)
-        except Exception as e:
-            print(f"\n Failed to read file: {file_path}")
-            print(f"Error: {e}")
 
 def read_output_variables_info_from_config(json_file: str) -> List[NetCDFMetadata]:
     """
@@ -631,6 +575,7 @@ def read_output_variables_info_from_config(json_file: str) -> List[NetCDFMetadat
                 dimensions = item.get(consts.JSON_DIMENSION, ''),
                 scalar_variables = item.get(consts.JSON_SCALAR_VAR, {}),
                 data_variables_dim = item.get(consts.JSON_VAR_DIM_MAP, {}),
+                output_cycle = item.get(consts.JSON_OUTPUT_CYCLE, ''),
                 output_class = item.get(consts.JSON_CLASS, ''),
                 category = item.get(consts.JSON_CATEGORY, ''),
                 domain = item.get(consts.JSON_DOMAIN, '')
@@ -653,9 +598,11 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
 
     netcdf_metadata_list = read_output_variables_info_from_config(config_json)
     product_categories = {}
+    output_class = ''
     for mdata in netcdf_metadata_list:
-        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
+        if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
             product_categories[mdata.category] = mdata.file_path
+            output_class = mdata.output_class
     
     is_gridded = True
     for category, ref_file in product_categories.items():
@@ -664,9 +611,9 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
         elif category.startswith('land') or category.startswith('terrain_rt'):
             is_gridded = True
         
-        time_list = get_file_timestep_list(output_cycle_type, category)
+        time_list = get_file_timestep_list(output_class, category)
         for tm in time_list:
-            keywords_list = [cycle_hr, output_cycle_type, category, tm, output_cycle_domain]
+            keywords_list = [cycle_hr, output_class, category, tm, output_cycle_domain]
             matching_files = [str(full_file_path)
                 for full_file_path in Path(netcdf_folder).glob("*.nc")
                 if all(keyword in full_file_path.name for keyword in keywords_list)
@@ -678,10 +625,10 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
                     # print(f"File category: {category}; Feature ID present: {has_featureid}")
                     merged_ds, encoding = combined_non_gridded_netcdfs(matching_files, True)
                 # Write dataset to disk
-                output_file = os.path.join(output_folder, f"nwm.{cycle_hr}.{output_cycle_type}.{category}.{tm}.{output_cycle_domain}.nc")
+                output_file = os.path.join(output_folder, f"nwm.{cycle_hr}.{output_class}.{category}.{tm}.{output_cycle_domain}.nc")
                 merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
             else:
-                print(f"Warning: No matching files to combine for {output_cycle_type}, {category}, {output_cycle_domain}")
+                print(f"Warning: No matching files to combine for {output_cycle_type}, {output_class}, {category}, {output_cycle_domain}")
 
 def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variables_of_interest: list[str] = None, 
                               tolerance: float = 1.0, check_crs: bool = True 
