@@ -39,7 +39,6 @@ class DataProcessor(DataReader):
         gpkg_gdf = gpd.read_file(gpkg_file, layer=consts.GPKG_DIVIDES_LYR)
         if gpkg_gdf.empty:
             raise ValueError("No polygon geometries found in GeoPackage")
-        gpkg_gdf["geometry"] = gpkg_gdf["geometry"].make_valid()
 
         # Check schema and assign catchment ID field.
         if is_new_NHF_schema:
@@ -173,6 +172,7 @@ class DataProcessor(DataReader):
             target_crs = CRS.from_user_input(wkt) 
             
             gdf = self._gpkg_gdf.to_crs(target_crs)
+            gdf["geometry"] = gdf["geometry"].make_valid()
             union_geom = shapely.ops.unary_union(gdf.geometry) 
             
             # Get bounding box and snap to origin in the national reference grid
@@ -404,6 +404,7 @@ class DataProcessor(DataReader):
             # Spatial join with catchments for grid point to catchment association
             # To do: Using sjoin here. For larger areas, we may need to revisit if computing efficiency drops.
             gdf_poly = self._gpkg_gdf.to_crs(crs)
+            gdf_poly["geometry"] = gdf_poly["geometry"].make_valid()
             joined = gpd.sjoin(
                 gdf_ncgrid_points,
                 gdf_poly[[self._catchment_field, "geometry"]],
