@@ -910,11 +910,12 @@ class DataProcessor(DataReader):
         # Get the indices of catchments that are mapped (grid_index >=0)
         mapped_catchment_indices = np.unique(grid_index.values[grid_index.values >= 0])
 
+        print("--Validation for gridded NetCDF output")
         for var in variables:
             passed = 0
             failed = 0
             failures = []
-            print(f"--Validating: {var} using a catchments sample size of {sample_size} for time slice index {time_index}")
+            print(f"----Validating: {var} using a catchments sample size of {sample_size} for time slice index {time_index}")
             src = source[var].isel(
                 {time_dim: time_index}
             )
@@ -924,14 +925,14 @@ class DataProcessor(DataReader):
                 active_catchments = ((src > 0).any(dim=reduce_dims))
                 nonzero_catchment_indices = np.where(active_catchments.values)[0] # those catchments where non-zero values are found
                 if nonzero_catchment_indices.size == 0:
-                    print("----No non-zero values found")
+                    print("--------No non-zero values found")
                     continue
                 
                 # Intersect the mapped and non-zero catchment indices and find the common ones in them.
                 # We will use the intersection output to sample catchments for validation.
                 validation_catchment_indices = np.intersect1d(mapped_catchment_indices, nonzero_catchment_indices)
                 if len(validation_catchment_indices) == 0:
-                    print(f"----No mapped non-zero values for {var}")
+                    print(f"--------No mapped non-zero values for {var}")
                     continue
 
                 sample_catchments_indices = np.random.choice(
@@ -988,9 +989,9 @@ class DataProcessor(DataReader):
                             "message": str(e),
                         }
                     )
-                print(f"--Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
+                print(f"----Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
                 if len(failures) > 0:
-                    print(f"--Failures for {var}: {failures}")
+                    print(f"----Failures for {var}: {failures}")
 # endregion
 
     def close_log(self):
