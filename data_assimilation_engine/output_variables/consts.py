@@ -16,7 +16,8 @@ NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.con
                      'medium_range.land_3.conus', 'medium_range.terrain_rt_3.conus',
                      'medium_range.land_4.conus', 'medium_range.terrain_rt_4.conus',
                      'long_range.land_1.conus', 'long_range.land_2.conus', 'long_range.land_3.conus', 'long_range.land_4.conus', 
-                     'short_range.land.conus', 'short_range.terrain_rt.conus']
+                     'short_range.land.conus', 'short_range.terrain_rt.conus',
+                     'short_range.channel_rt.conus', 'short_range.reservoir.conus']
 
 NOMADS_BASE_URL = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/prod'
 NWM_DATA_LOCAL_FOLDER = 'nwm_ref_files'
