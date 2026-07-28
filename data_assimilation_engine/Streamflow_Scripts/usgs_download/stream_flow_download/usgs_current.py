@@ -163,7 +163,7 @@ def fetch_full_site_data(site_id, odir, site_name):
 
         os.chmod(output_path, 0o664)
 
-        logger.info(f"SUCCESS: Downloaded and saved data for site {site_id}.")
+        logger.info(f"SUCCESS: Downloaded and saved data for site {site_id} - {output_path}.")
         return True
 
     except requests.exceptions.RequestException as e:
