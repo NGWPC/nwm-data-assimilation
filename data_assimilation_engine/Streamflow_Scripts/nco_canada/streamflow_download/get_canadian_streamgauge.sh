@@ -44,7 +44,7 @@ for i in `seq $nstations`
   curl_str=$(echo ${url_start}${station}${url_end})
   local_filename=${station}"_hydrometric.csv"
 
-  output=`curl -w "%{size_download}\n" -s -o ${DATADIR}/${local_filename} ${curl_str}`
+  output=`curl -w "%{size_download}\n" -k -s -o ${DATADIR}/${local_filename} ${curl_str}`
   # options: w=output file size, s=silent/no output to terminal, o=specify local file name
   # removed option: R=use upstream file timestamp. The same as local since URL-generated file 
 
