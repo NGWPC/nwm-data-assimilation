@@ -6,6 +6,12 @@ download_inputs = [
 ]
 netcdf_production_workflow(download_inputs)  # download and metadata_config.json creation.
 
+build_config_inputs = [
+    "sample_data/outputs_root",
+    "config"
+]
+netcdf_production_workflow(build_config_inputs)  # metadata_config.json creation.
+
 template_inputs = [
     "sample_data/outputs_root",
     "sample_data/ngen_netcdfs/catchment_output_3n.nc",

@@ -131,8 +131,6 @@ class DataProcessor(DataReader):
         self._output_class = mdata.output_class
         self._category = mdata.category
         self._domain = mdata.domain
-        origin_x = mdata.origin_x
-        origin_y = mdata.origin_y
         res_x = mdata.resolution_x
         res_y = mdata.resolution_y
         wkt = mdata.crs_wkt

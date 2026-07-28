@@ -38,7 +38,6 @@ def extract_netcdf_metadata(netcdf_root_folder: str):
     #Usage:
     # python netcdf_production_sample.py obtain-netcdf-metadata sample_data/nwm_output metadata
     utils.obtain_metadata_information(netcdf_root_folder)
-    #utils.debug_netcdf_structure_in_folder(netcdf_root_folder)
 
 def convert_csv_to_netcdf(csv_folder: str):
     #Usage:
@@ -91,10 +90,10 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
     ngen_template_nc_folder = os.path.join(output_folder, consts.NWM_NGEN_TEMPLATE_FOLDER)
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
-        if mdata.output_class == output_cycle_type and mdata.domain == output_cycle_domain:
-            if mdata.output_class == 'analysis_assim' and mdata.category =='channel_rt' and not troute_output_file:
+        if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
+            if mdata.category =='channel_rt' and not troute_output_file:
                 raise ValueError("T-Route output file is not specified")
-            if mdata.output_class == 'analysis_assim' and mdata.category =='reservoir' and not troute_lakeout_file:
+            if mdata.category =='reservoir' and not troute_lakeout_file:
                 raise ValueError("T-Route lakeout file is not specified")
             # if mdata.category == 'channel_rt':
             processor.nwm_output_class = mdata.output_class

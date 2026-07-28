@@ -10,6 +10,9 @@ NWM_VARS_IGNORE_LIST = ['ACCET', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'CANWAT', 'SO
 
 NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.conus', 
                      'analysis_assim.channel_rt.conus', 'analysis_assim.reservoir.conus',
+                     'analysis_assim_long.land.conus', 'analysis_assim_long.terrain_rt.conus', 
+                     'analysis_assim_long.channel_rt.conus', 'analysis_assim_long.reservoir.conus',
+                     'analysis_assim_no_da.channel_rt.conus',
                      'medium_range_blend.land.conus', 'medium_range_blend.terrain_rt.conus',
                      'medium_range.land_1.conus', 'medium_range.terrain_rt_1.conus',
                      'medium_range.land_2.conus', 'medium_range.terrain_rt_2.conus',
@@ -57,6 +60,7 @@ JSON_NWM_VAR = 'nwm_variables'
 JSON_DIMENSION = 'nwm_dimensions'
 JSON_VAR_DIM_MAP = 'nwm_var_dimensions'
 JSON_SCALAR_VAR = 'nwm_scalar_variables'
+JSON_OUTPUT_CYCLE = 'output_cycle'
 JSON_CLASS = 'class'
 JSON_CATEGORY = 'category'
 JSON_DOMAIN = 'domain'
