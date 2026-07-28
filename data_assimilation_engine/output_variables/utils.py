@@ -168,7 +168,7 @@ def get_file_timestep_list(cycle_run: str, category: str) -> List[str]:
                 return generate_formatted_string_list(6, 721, 6, 3, prefix)
             elif category.startswith('land'):
                 return generate_formatted_string_list(24, 721, 24, 3, prefix)
-        case 'medium_range' | 'medium_range_blend':
+        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
                 return generate_formatted_string_list(1, 241, 1, 3, prefix)
             elif category.startswith('land') or category.startswith('terrain'):
@@ -199,11 +199,15 @@ def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, cat
             elif category.startswith('land'):
                 formatted = (time_step+1) * 24
                 return f"{(formatted):03d}"
-        case 'medium_range' | 'medium_range_blend':
+        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
                 formatted = (time_step+1)
                 return f"{(formatted):03d}"
             elif category.startswith('land') or category.startswith('terrain'):
+                formatted = (time_step+1) * 3
+                return f"{(formatted):03d}"
+        case 'medium_range_no_da':
+            if category.startswith('channel_rt'):
                 formatted = (time_step+1) * 3
                 return f"{(formatted):03d}"
         case _:
