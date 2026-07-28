@@ -203,7 +203,7 @@ def netcdf_production_workflow(args_list) -> Optional[Any]:
                                          config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type, output_cycle_domain)
             
         case "mosaic":
-            if len(args_list) < 6:
+            if len(args_list) < 7:
                 raise ValueError("'mosaic' action requires following arguments: " + 
                 "[output folder path containing ngen NWM products, " + 
                 "coutput folder to save mosaics, config json, " +
