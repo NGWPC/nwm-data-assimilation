@@ -148,16 +148,65 @@ def convert_csvs_to_netcdf(csv_folder: str):
     combined_ds.to_netcdf(output_netcdf_path)
     print("Process complete!")
 
-def get_file_timestep_prefix(cycle_run):
+def get_file_timestep_prefix(cycle_run: str) -> str:
+    if cycle_run.startswith('analysis_assim'):
+        return 'tm'
+    else:
+        return 'f'
+
+def get_file_timestep_list(cycle_run: str, category: str) -> List[str]:
+    timesteps = []
     match cycle_run:
         case 'analysis_assim':
-            return 'tm'
+            return generate_formatted_string_list(0, 2, 1, 2)
         case 'short_range':
-            return 'f'
-        case "long_range":
-            return "to do"
+            return generate_formatted_string_list(1, 18, 1, 3)
+        case 'long_range':
+            if category.startswith('channel_rt') or category.startswith('reservoir'):
+                return generate_formatted_string_list(6, 720, 6, 3)
+            elif category.startswith('land'):
+                return generate_formatted_string_list(24, 720, 24, 3)
+        case 'medium_range' | 'medium_range_blend':
+            if category.startswith('channel_rt') or category.startswith('reservoir'):
+                return generate_formatted_string_list(1, 240, 1, 3)
+            elif category.startswith('land') or category.startswith('terrain'):
+                return generate_formatted_string_list(3, 240, 3, 3)
         case _:
             return "Unknown"  # This is the default 'else' case
+    return timesteps
+
+def generate_formatted_string_list(start: int, end: int, 
+                                   interval: int, width: int) -> List[str]:
+    ret_list = []
+    for i in range(start, end, interval):
+        ts = f"{i:0{width}d}"
+        ret_list.append(ts)
+    return ret_list
+
+def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, category: str) -> str:
+    match cycle_run:
+        case 'analysis_assim':
+            return f"{time_step:02d}"
+        case 'short_range':
+            formatted = (time_step+1)
+            return f"{(formatted):03d}"
+        case 'long_range':
+            if category.startswith('channel_rt') or category.startswith('reservoir'):
+                formatted = (time_step+1) * 6
+                return f"{(formatted):03d}"
+            elif category.startswith('land'):
+                formatted = (time_step+1) * 24
+                return f"{(formatted):03d}"
+        case 'medium_range' | 'medium_range_blend':
+            if category.startswith('channel_rt') or category.startswith('reservoir'):
+                formatted = (time_step+1)
+                return f"{(formatted):03d}"
+            elif category.startswith('land') or category.startswith('terrain'):
+                formatted = (time_step+1) * 3
+                return f"{(formatted):03d}"
+        case _:
+            return "Unknown"  # This is the default 'else' case
+
 # endregion
 
 # region data download
@@ -600,8 +649,8 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
     Main calling function to create a combined basins product
     """
     os.makedirs(output_folder, exist_ok=True)
-    cycle_hr = f"t{output_cycle_hr.zfill(2)}z"
-    time_list = ['tm00', 'tm01', 'tm02']
+    cycle_hr = f"t{str(output_cycle_hr).zfill(2)}z"
+
     netcdf_metadata_list = read_output_variables_info_from_config(config_json)
     product_categories = {}
     for mdata in netcdf_metadata_list:
@@ -615,6 +664,7 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
         elif category.startswith('land') or category.startswith('terrain_rt'):
             is_gridded = True
         
+        time_list = get_file_timestep_list(output_cycle_type, category)
         for tm in time_list:
             keywords_list = [cycle_hr, output_cycle_type, category, tm, output_cycle_domain]
             matching_files = [str(full_file_path)
@@ -631,7 +681,7 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
                 output_file = os.path.join(output_folder, f"nwm.{cycle_hr}.{output_cycle_type}.{category}.{tm}.{output_cycle_domain}.nc")
                 merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
             else:
-                print(f"No matching files to combine for {output_cycle_type}, {category}, {output_cycle_domain}")
+                print(f"Warning: No matching files to combine for {output_cycle_type}, {category}, {output_cycle_domain}")
 
 def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variables_of_interest: list[str] = None, 
                               tolerance: float = 1.0, check_crs: bool = True 

@@ -13,7 +13,7 @@ import shapely
 from pyproj import CRS
 from typing import List, Tuple, Optional
 from .DataReader import DataReader
-from .utils import NetCDFMetadata, get_file_timestep_prefix
+from .utils import NetCDFMetadata, get_file_timestep_prefix, generate_formatted_timestring_for_naming
 from . import consts
 
 class DataProcessor(DataReader):
@@ -141,13 +141,13 @@ class DataProcessor(DataReader):
         x_name = mdata.x_name
         y_name = mdata.y_name
 
-        print(f"Start creating template netcdf covering geopackage extent for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+        print(f"--Start creating template netcdf covering geopackage extent for {mdata.output_class}.{mdata.category}.{mdata.domain}")
 
         # Check if the template file already exists for this request
         template_nc_name = self._geo_id + '_' + self._output_class + '_' + self._category + '_' + self._domain + '.nc'
         template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
         if os.path.isfile(template_nc_file):
-            print(f"Reusing existing template file found here: {template_nc_file}")
+            print(f"----Reusing existing template file found here: {template_nc_file}")
         elif mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):  # indicates that it is non-geospatial. For example, channel_rt
             ds = xr.open_dataset(file_name)
 
@@ -166,6 +166,7 @@ class DataProcessor(DataReader):
 
             # Save to nc file
             ds_template.to_netcdf(template_nc_file)
+            print(f"----Template netcdf saved to: {template_nc_file}")
         else:
             ds = xr.open_dataset(file_name)
             # To do: Have to figure out a workflow when CRS is "Not Available"
@@ -264,16 +265,16 @@ class DataProcessor(DataReader):
 
             # Save to nc file
             ds_clipped.to_netcdf(template_nc_file, engine = "netcdf4", encoding = encoding_dict)
+            print(f"----Template netcdf saved to: {template_nc_file}")
 
-        self._template_netcdf_ds = xr.open_dataset(template_nc_file)
-        print(f"Template netcdf saved to: {template_nc_file}")
+        self._template_netcdf_ds = xr.open_dataset(template_nc_file) # assign to class variable.
 
     def produce_nwm_output_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> None:
         produce_output = False
         is_gridded = True
         ds_modified = self._catchment_ds
 
-        print(f"Started nwm output product generation for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+        print(f"--Started nwm output product generation for {mdata.output_class}.{mdata.category}.{mdata.domain}")
 
         # # if the output needs to have SOIL_M or SOIL_T, we need to
         # # stack the ngen output into the layers.
@@ -304,7 +305,7 @@ class DataProcessor(DataReader):
             # You can remove variables that are in the ignore variables as well.
             target_variables = [var.strip() for var in mdata.nwm_variables.split(",")]
             removed_items = list(set(target_variables).intersection(set(consts.NWM_VARS_IGNORE_LIST))) # for logging
-            print(f"NWM Variables ignored: {removed_items}")
+            print(f"----NWM Variables ignored for {mdata.category}: {removed_items}")
             ignore_set = set(consts.NWM_VARS_IGNORE_LIST)
             pruned_variables = [item for item in target_variables if item not in ignore_set]
             variables_to_drop = [var for var in ds_modified.data_vars if var not in pruned_variables and len(ds_modified[var].dims) > 0]
@@ -316,7 +317,7 @@ class DataProcessor(DataReader):
                     continue # the variable exists in ngen output. We don't need to do anything
                 else:
                     # If not in ngen output
-                    print(f"'{var_name}' is missing in ngen output")
+                    print(f"----'{var_name}' is missing in ngen output")
 
             catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
             mapped_grid, grid_index = self.transfer_catchment_data_to_grid(ds_filtered, catchment_grid, mdata.x_name, mdata.y_name)
@@ -340,12 +341,12 @@ class DataProcessor(DataReader):
                 )
 
             self.write_netcdf_per_timestep(mapped_grid, output_dir, output_cycle_hr)
-            print(f"NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+            print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
         elif produce_output and not is_gridded:
             self.produce_channel_reservoir_nwm_product(mdata, output_dir, output_cycle_hr)
-            print(f"NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+            print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
         else:
-            print(f"Production skipped for {cat_class_domain}")
+            print(f"----Production skipped for {cat_class_domain}")
         
     def stack_soil_variables(self, var_prefix_list: List[str]) -> xr.Dataset:
         stacked_ds = self._catchment_ds.copy()
@@ -451,13 +452,15 @@ class DataProcessor(DataReader):
         )
         # confirm that grid index is a dataarray
         if not isinstance(grid_index, xr.DataArray): 
-            raise TypeError(
-                f"'grid_index' must be an xarray.DataArray"
-            )
+            print("----Indexing the catchments grid to indices is not a DataArray")
+            raise TypeError(f"grid_index must be an xarray.DataArray")
 
         # Validate grid_index dimensions
         expected_grid_dims = {y_dim, x_dim}
         if set(grid_index.dims) != expected_grid_dims:
+            print(f"----grid_index must have exactly the dimensions "
+                f"({y_dim}, {x_dim}). "
+                f"Got dimensions: {grid_index.dims}")
             raise ValueError(
                 "grid_index must have exactly the dimensions "
                 f"({y_dim}, {x_dim}). "
@@ -465,32 +468,17 @@ class DataProcessor(DataReader):
             )
 
         # Put dimensions in canonical order.
+        # Sanity check to confirm that the lat-lon are aligned after masking.
         grid_index = grid_index.transpose(y_dim, x_dim)
         valid_mask = grid_index >= 0
-        if not grid_index.coords.equals(valid_mask.coords):
-            raise ValueError(
-            "grid_index and valid_mask coordinates do not match."
-        )
+        if not grid_index.has_same_coords(valid_mask):
+            print("----grid_index and valid_mask coordinates are shifted or some corodinates are lost.")
+            raise ValueError("grid_index and valid_mask coordinates do not match.")
 
         ds_template = self._template_netcdf_ds
         catchment_dim = consts.DIM_CATCHMENTS
-        num_catchments = ds_data.sizes[catchment_dim]
-
-        # The invalid cell is subsequently masked out.
+        # The invalid cells are subsequently masked out.
         safe_index = (grid_index.where(valid_mask, 0).astype(np.int64))
-
-        #  Validate index range
-        valid_indices = safe_index.where(valid_mask)
-        max_index = valid_indices.max(skipna=True).item()
-        if max_index is not None and np.isfinite(max_index):
-            if max_index >= num_catchments:
-                raise ValueError(
-                    "grid_index contains a catchment ID index outside the "
-                    f"source catchments dimension. Maximum index is "
-                    f"{max_index}, but source has {num_catchments} catchments "
-                    f"(valid range: 0..{num_catchments - 1})."
-                )
-
         variables_to_transfer = [
             name
             for name in ds_template.data_vars
@@ -513,10 +501,8 @@ class DataProcessor(DataReader):
             template_da = ds_template[name]
 
             if consts.DIM_CATCHMENTS not in source_da.dims:
-                raise ValueError(
-                    f"Variable {name} does not contain "
-                    f"the catchments dimension."
-                )
+                print(f"----Variable {name} does not contain the catchments dimension.")
+                raise ValueError(f"Variable {name} does not contain the catchments dimension.")
 
             source_non_catchment_dims = [
                 dim
@@ -531,8 +517,9 @@ class DataProcessor(DataReader):
             ]
 
             if missing_dims:
-                raise ValueError(
-                    f"Variable {name} contains dimensions "
+                print(f"----Variable {name} contains dimensions "
+                    f"{missing_dims} that are not present in the template.")
+                raise ValueError(f"Variable {name} contains dimensions "
                     f"{missing_dims} that are not present in the template."
                 )
             mapped = source_da.isel({catchment_dim: safe_index})
@@ -564,7 +551,6 @@ class DataProcessor(DataReader):
 
         # copy source variables without catchment dimensions
         for name in ds_template.data_vars:
-
             if name not in ds_data.data_vars:
                 continue
 
@@ -572,13 +558,14 @@ class DataProcessor(DataReader):
                 continue
 
             source_da = ds_data[name]
-
             if catchment_dim in source_da.dims:
                 continue
 
             # Verify dimensions are compatible.
             for dim in source_da.dims:
                 if dim not in ds_template.dims:
+                    print(f"----Cannot copy variable {name}: dimension "
+                        f"{dim} does not exist in template.")
                     raise ValueError(
                         f"Cannot copy variable {name}: dimension "
                         f"{dim} does not exist in template."
@@ -616,9 +603,9 @@ class DataProcessor(DataReader):
             # Rebuild CRS info and mapping.
             if "crs" in ds_t:
                 ds_t = ds_t.drop_vars("crs")
-            # ds_t["crs"] = xr.DataArray(0, dims=())
+
             ds_t["crs"] = np.array(b"", dtype="S1")
-            ds_t["crs"].attrs = mapped_grid["crs"].attrs.copy()
+            ds_t["crs"].attrs = self._template_netcdf_ds["crs"].attrs.copy()
             for var in ds_t.data_vars:
                 if not var == "crs":
                     ds_t[var].attrs["grid_mapping"] = "crs"
@@ -658,7 +645,8 @@ class DataProcessor(DataReader):
 
             # Output filename and save
             prefix = get_file_timestep_prefix(self._output_class)
-            formatted_t = f"{prefix}{time_step:02d}"
+            sim_time_hr = generate_formatted_timestring_for_naming(time_step, self._output_class, self._category)
+            formatted_t = f"{prefix}{sim_time_hr}"
             cycle_hr = output_cycle_hr.zfill(2)
             output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
             ds_t.to_netcdf(output_file)
@@ -698,11 +686,8 @@ class DataProcessor(DataReader):
             troute_source_ds = self._troute_netcdf_ds
             # troute output has a variable called flow which should be streamflow in the NWM product.
             # adopting to quickly rename the variable in the troute output for now.
-            # To do: Have a variables mapping of these outputs with NWM products and do that
+            # To do: Have a variables mapping of these outputs with NWM products and do that without hardcoding here
             troute_source_ds = troute_source_ds.rename({"flow": "streamflow"})
-            units_attr_val = troute_source_ds[consts.DIM_TIME].encoding.get('units')
-            time_str = units_attr_val.split("since ")[1].strip()
-            base_datetime = np.datetime64(time_str)
             source_ds_times = troute_source_ds[consts.DIM_TIME].values
             source_ds_minutes = (source_ds_times - reference_epoch).astype("timedelta64[m]").astype(int)
             sorted_times = np.sort(source_ds_minutes)[::-1] # sort and reverse slice
@@ -748,25 +733,58 @@ class DataProcessor(DataReader):
                 elif not in_snapshot and var_name.lower() != 'qbucket':
                     if self._template_netcdf_ds[var_name].ndim == 0: # Scalar variables not in the data, but in template
                         populated_ds[var_name] = xr.DataArray(self._template_netcdf_ds[var_name].values.item())
-                        print(f"Found a scalar variable - {var_name} that is not in the data, but present in the template.Template value has been copied over.")
+                        print(f"----Found a scalar variable - {var_name} that is not in the data, but present in the template.Template value has been copied over.")
                     else:
-                        print(f"Found a data variable - {var_name} that is not in the data, but present in the template. It is filled with NaN.")
+                        print(f"----Found a data variable - {var_name} that is not in the data, but present in the template. It is filled with NaN.")
                     continue
                 elif not in_populated:
-                    print(f"{var_name} is in the template but not found in the output dataset.")
+                    print(f"----{var_name} is in the template but not found in the output dataset.")
                     continue
                 elif var_name.lower() == 'qbucket' and not in_ngenout:
-                    print(f"{var_name} is in the template but not found in the catchment output dataset.")
+                    print(f"----{var_name} is in the template but not found in the catchment output dataset.")
                     continue
                 
                 # Get the time slice data for this variable, if time is one of the dimensions.
                 # Otherwise, get the full variable (typically 1D based on feature_id dimension)
                 template_var = self._template_netcdf_ds[var_name]
                 if var_name.lower() == 'qbucket':
+                    # the ngen variable may or may not have the same catchments as in the troute. 
+                    # We use troute as the authoritative source and reindex ngen variable
+
+                    # ngen uses 'catchments', while troute uses 'feature_id'. So, we rename first.
+                    ngen_ds = self._catchment_ds.rename({consts.DIM_CATCHMENTS: consts.DIM_FEATURE_ID})
+                    
                     # get time slice data from ngen catchment output. 
-                    # Convert time (mins) to secs to match ngen catchment output.
-                    snapshot_time_val_sec = int(snapshot_time_val * 60)
-                    source_var = self._catchment_ds[var_name].sel(time = snapshot_time_val_sec) #expecting parameter name: 'time'
+                    # Convert time to match ngen catchment output.
+                    dt_minutes = np.datetime64(int(snapshot_time_val), 'm')
+                    # Cast to nanosecond precision to match ngen source values.
+                    dt_ns = dt_minutes.astype('datetime64[ns]')
+                    source_var = ngen_ds[var_name].sel({consts.DIM_TIME: dt_ns})
+                    
+                    # Log differences between the two datasets
+                    ngen_feature_ids = source_var[consts.DIM_FEATURE_ID].values
+                    troute_feature_ids = troute_source_ds[consts.DIM_FEATURE_ID].values
+                    common = np.intersect1d(ngen_feature_ids, troute_feature_ids)
+                    only_in_ngen = np.setdiff1d(ngen_feature_ids, troute_feature_ids)
+                    only_in_troute = np.setdiff1d(ngen_feature_ids, troute_feature_ids)
+                    if len(common) == 0:
+                            print("----No matching catchments found between ngen and troute.")
+                            raise ValueError("No matching catchments found between ngen and troute.")
+                    if len(only_in_ngen) > 0:
+                        print(f"----Warning: Missing catchments in troute: {len(only_in_ngen)}")
+                    if len(only_in_troute) > 0:
+                        print(f"----Warning: Missing in ngen output: {only_in_troute}")
+
+                    #reindex ngen variable
+                    troute_feature_ids = troute_source_ds[consts.DIM_FEATURE_ID]
+                    if consts.DIM_FEATURE_ID in source_var.dims:
+                        if consts.DIM_FEATURE_ID not in source_var.coords:
+                            source_var = source_var.assign_coords(
+                                {consts.DIM_FEATURE_ID: source_var[consts.DIM_FEATURE_ID]}
+                            )
+                        source_var = source_var.reindex({consts.DIM_FEATURE_ID: troute_feature_ids})
+                    else:
+                        print(f"{var_name} does not have {consts.DIM_FEATURE_ID} in its dimensions: {source_var.dims}")
                 else:
                     troute_unsliced_var = troute_source_ds[var_name]
                     if consts.DIM_TIME in troute_unsliced_var.dims:
@@ -774,24 +792,25 @@ class DataProcessor(DataReader):
                         # recalculate time index.
                         total_timesteps = troute_unsliced_var.sizes[consts.DIM_TIME]
                         inverted_time_index = total_timesteps - 1 - time_step
-                        source_var = troute_unsliced_var.isel(time = inverted_time_index) #expecting parameter name: 'time' 
+                        source_var = troute_unsliced_var.isel({consts.DIM_TIME: inverted_time_index})
                     else:
                         source_var = troute_unsliced_var
                 
                 tgt_shape = populated_ds[var_name].shape
-
                 if source_var.ndim == len(tgt_shape):
                     data_values = source_var.values
                     # Verify the types because the lakeout variables such as inflow and outflow are float
                         # But, they are int in the template. So, we are casting from float to int.
                     if np.issubdtype(template_var.dtype, np.integer):
                         if np.issubdtype(data_values.dtype, np.floating):
-                            data_values = np.nan_to_num(data_values, nan=0)
+                            # data_values = np.nan_to_num(data_values, nan=0)
                             # Use np.array().astype() to ensure scalars cast works as well.
-                            data_values = np.array(data_values).astype(template_var.dtype)
-                    populated_ds[var_name].values = data_values # populate the values.
+                            # data_values = np.array(data_values).astype(template_var.dtype)
+                            source_var = source_var.fillna(0).astype(np.int32)
+                    # populated_ds[var_name].values = data_values # populate the values.
+                    populated_ds[var_name] = source_var
                 else:
-                    print(f"The dimensions don't match between template ({template_var.dims}) and snapshot ({source_var.dims}) for {var_name}")
+                    print(f"----The dimensions don't match between template ({template_var.dims}) and snapshot ({source_var.dims}) for {var_name}")
                 
             # Transfer fill and missing value from template
             populated_ds = self.attribute_fill_missing_values(populated_ds)
@@ -823,7 +842,8 @@ class DataProcessor(DataReader):
             # Output filename and save
             os.makedirs(output_dir, exist_ok=True)
             prefix = get_file_timestep_prefix(self._output_class)
-            formatted_t = f"{prefix}{time_step:02d}"
+            sim_time_hr = generate_formatted_timestring_for_naming(time_step, self._output_class, self._category)
+            formatted_t = f"{prefix}{sim_time_hr}"
             cycle_hr = output_cycle_hr.zfill(2)
             output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
             populated_ds.to_netcdf(output_file)
@@ -894,7 +914,7 @@ class DataProcessor(DataReader):
             passed = 0
             failed = 0
             failures = []
-            print(f"Validating: {var} using a catchments sample size of {sample_size} for time slice index {time_index}")
+            print(f"--Validating: {var} using a catchments sample size of {sample_size} for time slice index {time_index}")
             src = source[var].isel(
                 {time_dim: time_index}
             )
@@ -904,14 +924,14 @@ class DataProcessor(DataReader):
                 active_catchments = ((src > 0).any(dim=reduce_dims))
                 nonzero_catchment_indices = np.where(active_catchments.values)[0] # those catchments where non-zero values are found
                 if nonzero_catchment_indices.size == 0:
-                    print("No non-zero values found")
+                    print("----No non-zero values found")
                     continue
                 
                 # Intersect the mapped and non-zero catchment indices and find the common ones in them.
                 # We will use the intersection output to sample catchments for validation.
                 validation_catchment_indices = np.intersect1d(mapped_catchment_indices, nonzero_catchment_indices)
                 if len(validation_catchment_indices) == 0:
-                    print(f"No mapped non-zero values for {var}")
+                    print(f"----No mapped non-zero values for {var}")
                     continue
 
                 sample_catchments_indices = np.random.choice(
@@ -968,9 +988,9 @@ class DataProcessor(DataReader):
                             "message": str(e),
                         }
                     )
-                print(f"Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
+                print(f"--Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
                 if len(failures) > 0:
-                    print(f"Failures for {var}: {failures}")
+                    print(f"--Failures for {var}: {failures}")
 # endregion
 
     def close_log(self):
