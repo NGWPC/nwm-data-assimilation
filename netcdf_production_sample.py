@@ -85,6 +85,9 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
     processor = DataProcessor(ngen_netcdf_output_file, ngen_gpkg_file)
     log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_prostprocessing_' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
     processor.log_file  =log_file
+
+    gpkg_name, extension = os.path.splitext(os.path.basename(ngen_gpkg_file))
+    print(f"Post-processing started for: {gpkg_name}")
     ngen_template_nc_folder = os.path.join(output_folder, consts.NWM_NGEN_TEMPLATE_FOLDER)
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
@@ -93,6 +96,7 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
                 raise ValueError("T-Route output file is not specified")
             if mdata.output_class == 'analysis_assim' and mdata.category =='reservoir' and not troute_lakeout_file:
                 raise ValueError("T-Route lakeout file is not specified")
+            # if mdata.category == 'channel_rt':
             processor.nwm_output_class = mdata.output_class
             processor.nwm_category = mdata.category
             processor.nwm_domain = mdata.domain
