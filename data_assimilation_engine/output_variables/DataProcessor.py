@@ -705,8 +705,6 @@ class DataProcessor(DataReader):
             troute_source_ds = self._troute_lakeout_netcdf_ds
             source_ds_times = troute_source_ds[consts.DIM_TIME].values
             sorted_times = np.sort(source_ds_times)[::-1] # sort and reverse slice
-            time_value_min = sorted_times[-1]
-            time_value_max = sorted_times[0]
             time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
             time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
         elif mdata.category.startswith('channel_rt'):
@@ -716,10 +714,9 @@ class DataProcessor(DataReader):
             # To do: Have a variables mapping of these outputs with NWM products and do that without hardcoding here
             troute_source_ds = troute_source_ds.rename({"flow": "streamflow"})
             source_ds_times = troute_source_ds[consts.DIM_TIME].values
-            source_ds_minutes = (source_ds_times - reference_epoch).astype("timedelta64[m]").astype(int)
-            sorted_times = np.sort(source_ds_minutes)[::-1] # sort and reverse slice
-            time_value_min = sorted_times[-1]
-            time_value_max = sorted_times[0]
+            sorted_times = np.sort(source_ds_times)[::-1]  # sort and reverse slice
+            time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m"))
+            time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m"))
         else:
             raise ValueError(f"Unexpected category for channel/reservoir product: {mdata.category!r}")
 
@@ -800,10 +797,8 @@ class DataProcessor(DataReader):
                     ngen_ds = self._catchment_ds.rename({consts.DIM_CATCHMENTS: consts.DIM_FEATURE_ID})
                     
                     # get time slice data from ngen catchment output. 
-                    # Convert time to match ngen catchment output.
-                    dt_minutes = np.datetime64(int(snapshot_time_val), 'm')
                     # Cast to nanosecond precision to match ngen source values.
-                    dt_ns = dt_minutes.astype('datetime64[ns]')
+                    dt_ns = np.datetime64(snapshot_time_val).astype('datetime64[ns]')
                     source_var = ngen_ds[var_name].sel({consts.DIM_TIME: dt_ns})
                     
                     # Log differences between the two datasets
