@@ -213,6 +213,27 @@ def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, cat
         case _:
             return "Unknown"  # This is the default 'else' case
 
+def get_output_interval_hours(cycle_run: str, category: str) -> int | None:
+    """
+    Output interval (hours) for a given output cycle/category. None means no files should be 
+    produced for that combination
+    """
+    match cycle_run:
+        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
+            if category.startswith('channel_rt') or category.startswith('reservoir'):
+                return 1
+            elif category.startswith('land') or category.startswith('terrain'):
+                return 3
+        case 'long_range':
+            if category.startswith('channel_rt') or category.startswith('reservoir'):
+                return 6
+            elif category.startswith('land'):
+                return 24
+            elif category.startswith('terrain'):
+                return None
+    return 1  # Covers all other cycles, should be updated with oCONUS regions if necessary
+
+
 # endregion
 
 # region data download
