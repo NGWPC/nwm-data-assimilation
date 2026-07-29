@@ -657,14 +657,14 @@ class DataProcessor(DataReader):
         """
         if not self._template_netcdf_ds:
             raise ValueError("Template netcdf not set")
-        
-        if mdata.category == 'channel_rt' and not self._catchment_ds:
+
+        if mdata.category.startswith('channel_rt') and not self._catchment_ds:
             raise ValueError("ngen catchment netcdf not set")
-        
-        if mdata.category == 'channel_rt' and not self._troute_netcdf_ds:
+
+        if mdata.category.startswith('channel_rt') and not self._troute_netcdf_ds:
             raise ValueError("troute output netcdf not set")
 
-        if mdata.category == 'reservoir' and not self._troute_lakeout_netcdf_ds:
+        if mdata.category.startswith('reservoir') and not self._troute_lakeout_netcdf_ds:
             raise ValueError("troute lakeout netcdf not set")
 
         reference_epoch = np.datetime64("1970-01-01T00:00:00") # set reference epoch
@@ -673,7 +673,7 @@ class DataProcessor(DataReader):
         # ngen catchment output reports in seconds since reference_epoch.
         # troute output reports in offset seconds since the model initialization time.
         # troute lakeout (waterbody) reports in minutes since reference epoch.
-        if mdata.category == 'reservoir':
+        if mdata.category.startswith('reservoir'):
             troute_source_ds = self._troute_lakeout_netcdf_ds
             source_ds_times = troute_source_ds[consts.DIM_TIME].values
             sorted_times = np.sort(source_ds_times)[::-1] # sort and reverse slice
@@ -681,7 +681,7 @@ class DataProcessor(DataReader):
             time_value_max = sorted_times[0]
             time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
             time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-        elif mdata.category == 'channel_rt':
+        elif mdata.category.startswith('channel_rt'):
             troute_source_ds = self._troute_netcdf_ds
             # troute output has a variable called flow which should be streamflow in the NWM product.
             # adopting to quickly rename the variable in the troute output for now.
@@ -692,6 +692,8 @@ class DataProcessor(DataReader):
             sorted_times = np.sort(source_ds_minutes)[::-1] # sort and reverse slice
             time_value_min = sorted_times[-1]
             time_value_max = sorted_times[0]
+        else:
+            raise ValueError(f"Unexpected category for channel/reservoir product: {mdata.category!r}")
 
         # Get reference time for output
         ref_time_val = time_value_min - 60 # 60 mins less than the smallest time.
