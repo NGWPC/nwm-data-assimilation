@@ -658,13 +658,13 @@ class DataProcessor(DataReader):
         if not self._template_netcdf_ds:
             raise ValueError("Template netcdf not set")
 
-        if mdata.category.startswith('channel_rt') and not self._catchment_ds:
+        if mdata.category.startswith('channel_rt') and self._catchment_ds is None:
             raise ValueError("ngen catchment netcdf not set")
 
-        if mdata.category.startswith('channel_rt') and not self._troute_netcdf_ds:
+        if mdata.category.startswith('channel_rt') and self._troute_netcdf_ds is None:
             raise ValueError("troute output netcdf not set")
 
-        if mdata.category.startswith('reservoir') and not self._troute_lakeout_netcdf_ds:
+        if mdata.category.startswith('reservoir') and self._troute_lakeout_netcdf_ds is None:
             raise ValueError("troute lakeout netcdf not set")
 
         reference_epoch = np.datetime64("1970-01-01T00:00:00") # set reference epoch
