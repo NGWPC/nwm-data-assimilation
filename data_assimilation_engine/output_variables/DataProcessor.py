@@ -438,17 +438,25 @@ class DataProcessor(DataReader):
         # Convert catchment IDs to index positions
         catchment_ids = ds_data[consts.DIM_CATCHMENTS].values
 
-        # Build mapping: catchment_id -> index
-        id_to_index = {cid: i for i, cid in enumerate(catchment_ids)}
+        # Sort catchment_ids for vectorized lookup
+        sort_order = np.argsort(catchment_ids)
+        sorted_ids = catchment_ids[sort_order]
 
-        # Convert grid IDs to indices
-        grid_index = xr.apply_ufunc(
-            np.vectorize(lambda x: id_to_index.get(x, -1)),
-            catchment_grid,
-            vectorize=True,
-            dask="parallelized",
-            output_dtypes=[int]
+        # Perform vectorized lookup
+        flat_grid = catchment_grid.values.ravel()
+        pos = np.searchsorted(sorted_ids, flat_grid)
+        pos_clipped = np.clip(pos, 0, len(sorted_ids) - 1)
+        matched = sorted_ids[pos_clipped] == flat_grid
+
+        flat_index = np.where(matched, sort_order[pos_clipped], -1)
+        grid_index_values = flat_index.reshape(catchment_grid.shape)
+
+        grid_index = xr.DataArray(
+            grid_index_values,
+            dims=catchment_grid.dims,
+            coords=catchment_grid.coords
         )
+
         # confirm that grid index is a dataarray
         if not isinstance(grid_index, xr.DataArray): 
             print("----Indexing the catchments grid to indices is not a DataArray")
