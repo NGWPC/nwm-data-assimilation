@@ -13,7 +13,12 @@ import shapely
 from pyproj import CRS
 from typing import List, Tuple, Optional
 from .DataReader import DataReader
-from .utils import NetCDFMetadata, get_file_timestep_prefix, generate_formatted_timestring_for_naming
+from .utils import (
+    NetCDFMetadata,
+    get_file_timestep_prefix,
+    generate_formatted_timestring_for_naming,
+    get_output_interval_hours,
+)
 from . import consts
 
 class DataProcessor(DataReader):
@@ -601,6 +606,21 @@ class DataProcessor(DataReader):
         time_value_max = np.int32(np.datetime64(sorted_times[0]).astype("datetime64[m]"))
         reference_time = np.int32(time_value_min - 60) # mins.
 
+        # Filter times by output interval
+        interval = get_output_interval_hours(self._output_class, self._category)
+        if interval is None:
+            print(f"----No output files produced for {self._output_class}.{self._category}")
+            return
+
+        if self._output_class.startswith('analysis_assim'):
+            # AnA numbers tm00 (most recent) -> tmNN (oldest)
+            # Keep native descending order from above
+            pass
+        elif interval > 1:
+            # Keep every Nth entry
+            sorted_times = sorted_times[0::interval][::-1]
+        else:
+            sorted_times = sorted_times[::-1]
 
         for time_step, snapshot_time_val in enumerate(sorted_times):
             ds_t = mapped_grid.sel({consts.DIM_TIME: snapshot_time_val}).copy()
