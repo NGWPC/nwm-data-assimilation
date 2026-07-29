@@ -8,13 +8,13 @@ NWM_VARS_IGNORE_LIST = ['ACCET', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'CANWAT', 'SO
                         'EDIR', 'FSA', 'GRDFLX', 'ISNOW', 'UGDRNOFF', 'zwattablrt',
                         'qBtmVertRunoff', 'qSfcLatRunoff']
 
-NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.conus', 
+NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.conus',
                      'analysis_assim.channel_rt.conus', 'analysis_assim.reservoir.conus',
-                     'analysis_assim_long.land.conus', 'analysis_assim_long.terrain_rt.conus', 
+                     'analysis_assim_long.land.conus', 'analysis_assim_long.terrain_rt.conus',
                      'analysis_assim_long.channel_rt.conus', 'analysis_assim_long.reservoir.conus',
-                     'analysis_assim_no_da.channel_rt.conus', 'medium_range_no_da.channel_rt.conus'
+                     'analysis_assim_no_da.channel_rt.conus', 'medium_range_no_da.channel_rt.conus',
                      'medium_range_blend.land.conus', 'medium_range_blend.terrain_rt.conus',
-                     'medium_range_blend.channel_rt.conus', 'medium_range_blend.reservoir.conus'
+                     'medium_range_blend.channel_rt.conus', 'medium_range_blend.reservoir.conus',
                      'medium_range.land_1.conus', 'medium_range.terrain_rt_1.conus',
                      'medium_range.land_2.conus', 'medium_range.terrain_rt_2.conus',
                      'medium_range.land_3.conus', 'medium_range.terrain_rt_3.conus',
@@ -32,7 +32,7 @@ NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.con
                      'long_range.channel_rt_1.conus', 'long_range.channel_rt_2.conus',
                      'long_range.channel_rt_3.conus', 'long_range.channel_rt_4.conus',
                      'long_range.reservoir_1.conus', 'long_range.reservoir_2.conus',
-                     'long_range.reservoir_3.conus', 'long_range.reservoir_4.conus', 
+                     'long_range.reservoir_3.conus', 'long_range.reservoir_4.conus',
                      'short_range.land.conus', 'short_range.terrain_rt.conus',
                      'short_range.channel_rt.conus', 'short_range.reservoir.conus']
 
