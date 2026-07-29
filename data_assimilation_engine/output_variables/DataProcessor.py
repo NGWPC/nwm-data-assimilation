@@ -723,9 +723,25 @@ class DataProcessor(DataReader):
         else:
             raise ValueError(f"Unexpected category for channel/reservoir product: {mdata.category!r}")
 
+        # Filter times by output interval
+        interval = get_output_interval_hours(self._output_class, self._category)
+        if interval is None:
+            print(f"----No output files produced for {self._output_class}.{self._category}")
+            return
+
+        if self._output_class.startswith('analysis_assim'):
+            # AnA numbers tm00 (most recent) -> tmNN (oldest)
+            # Keep native descending order from above
+            pass
+        elif interval > 1:
+            # Keep every Nth entry
+            sorted_times = sorted_times[0::interval][::-1]
+        else:
+            sorted_times = sorted_times[::-1]
+
         # Get reference time for output
         ref_time_val = time_value_min - 60 # 60 mins less than the smallest time.
-        
+
         re_index_args = {
             consts.DIM_FEATURE_ID: troute_source_ds[consts.DIM_FEATURE_ID].values,
             consts.DIM_REF_TIME: [ref_time_val]
