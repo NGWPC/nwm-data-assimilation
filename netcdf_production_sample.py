@@ -7,28 +7,6 @@ from data_assimilation_engine.output_variables.DataProcessor import DataProcesso
 import data_assimilation_engine.output_variables.utils as utils
 import data_assimilation_engine.output_variables.consts as consts
 
-def randomize_values(netcdf_file: str, output_file: str) -> None:
-    #Usage:
-    # python netcdf_production_sample.py randomize sample_data/sample_netcdf/catchment_output_CNF.nc sample_data/sample_netcdf/catchment_randomvals_cnf.nc
-
-    reader = DataReader(netcdf_file)
-    reader.assign_random_values(output_file)
-
-def create_template_grid_for_gpkg(netcdf_file: str, gpkg_file: str, template_grid_file: str):
-    #Usage
-    # python netcdf_production_sample.py create-template-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
-    #processor = DataProcessor(netcdf_file, gpkg_file, config_json_file, 'analysis_assim', 'land', 'conus')
-    processor = DataProcessor(netcdf_file, gpkg_file)
-    processor.create_template_netcdf_using_config(template_grid_file)
-
-def create_nwm_grid(netcdf_file: str, gpkg_file: str, template_grid_file: str, config_json_file: str):
-    #Usage:
-    # python netcdf_production_sample.py create-nwm-grid sample_data/sample_netcdf/final_test/catchment_randomvals.nc sample_data/sample_gpkg/gages-01123000.gpkg sample_data/sample_netcdf/final_test/new_grid_template.nc sample_data/nwm_output/metadata_config.json
-    processor = DataProcessor(netcdf_file, gpkg_file, config_json_file, 'analysis_assim', 'land', 'conus')
-    processor.set_template_netcdf(template_grid_file)
-    output_dir = 'sample_data/sample_netcdf/sample_output/new_test'
-    processor.produce_nwm_output_grid(output_dir)
-
 def download_netcdf_from_nomads(output_folder: str, re_download: bool = False):
     #Usage:
     # python netcdf_production_sample.py download-nwm-outputs sample_data
@@ -54,8 +32,7 @@ def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: 
 def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, output_folder: str,
                             troute_output_file: str, troute_lakeout_file: str, 
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
-    #Usage
-    # 
+
     download = False
     create_config = False
     if download:
@@ -76,13 +53,12 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
         netcdf_metadata_list = utils.read_output_variables_info_from_config(json_file)
     else:
         raise ValueError("Specified config file does not exist")
-    # print('Read output variables info from config')
 
     # Begin data processing
     start_time = time.perf_counter()
 
     processor = DataProcessor(ngen_netcdf_output_file, ngen_gpkg_file)
-    log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_prostprocessing_' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
+    log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_postprocessing_' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
     processor.log_file  =log_file
 
     gpkg_name, extension = os.path.splitext(os.path.basename(ngen_gpkg_file))
@@ -91,20 +67,20 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
         if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
-            if mdata.category =='channel_rt' and not troute_output_file:
+            if mdata.category.startswith('channel_rt') and troute_output_file is None:
                 raise ValueError("T-Route output file is not specified")
-            if mdata.category =='reservoir' and not troute_lakeout_file:
+            if mdata.category.startswith('reservoir') and troute_lakeout_file is None:
                 raise ValueError("T-Route lakeout file is not specified")
-            # if mdata.category == 'channel_rt':
-            processor.nwm_output_class = mdata.output_class
-            processor.nwm_category = mdata.category
-            processor.nwm_domain = mdata.domain
-            processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
-            if mdata.category == 'channel_rt':
-                processor.set_troute_netcdf(troute_output_file)
             if mdata.category == 'reservoir':
-                processor.set_troute_lakeout_netcdf(troute_lakeout_file)
-            processor.produce_nwm_output_product(mdata, nwm_output_folder, output_cycle_hr)
+                processor.nwm_output_class = mdata.output_class
+                processor.nwm_category = mdata.category
+                processor.nwm_domain = mdata.domain
+                processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
+                if mdata.category.startswith('channel_rt'):
+                    processor.set_troute_netcdf(troute_output_file)
+                if mdata.category.startswith('reservoir'):
+                    processor.set_troute_lakeout_netcdf(troute_lakeout_file)
+                processor.produce_nwm_output_product(mdata, nwm_output_folder, output_cycle_hr)
 
     end_time = time.perf_counter()
     duration_minutes = (end_time - start_time) / 60
@@ -115,25 +91,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="NetCDF Data Tool")
 
     subparsers = parser.add_subparsers(dest="command")
-
-    #random values
-    parser_randomize = subparsers.add_parser("randomize")
-    parser_randomize.add_argument("input_file")
-    parser_randomize.add_argument("output_file")
-
-    #create template grid
-    parser_template_grid = subparsers.add_parser("create-template-grid")
-    parser_template_grid.add_argument("catchment_netcdf_file")
-    parser_template_grid.add_argument("catchment_gpkg_file")
-    parser_template_grid.add_argument("template_grid_file")
-    parser_template_grid.add_argument("config_json_file")
-    
-    #create nwm grid
-    parser_nwm_grid = subparsers.add_parser("create-nwm-grid")
-    parser_nwm_grid.add_argument("catchment_netcdf_file")
-    parser_nwm_grid.add_argument("catchment_gpkg_file")
-    parser_nwm_grid.add_argument("template_grid_file")
-    parser_nwm_grid.add_argument("config_json_file")
 
     #download current NWM output netcdfs from nomads server
     parser_nwm_download = subparsers.add_parser("download-nwm-outputs")
@@ -169,13 +126,7 @@ def main() -> None:
     overall_workflow.add_argument("output_cycle_domain")
     args = parser.parse_args()
 
-    if args.command == "randomize":
-        randomize_values(args.input_file, args.output_file)
-    elif args.command == "create-template-grid":
-        create_template_grid_for_gpkg(args.catchment_netcdf_file, args.catchment_gpkg_file, args.template_grid_file)
-    elif args.command == "create-nwm-grid":
-        create_nwm_grid(args.catchment_netcdf_file, args.catchment_gpkg_file, args.template_grid_file, args.config_json_file)
-    elif args.command == "download-nwm-outputs":
+    if args.command == "download-nwm-outputs":
         download_netcdf_from_nomads(args.download_url, args.output_folder_path)
     elif args.command == "obtain-netcdf-metadata":
         extract_netcdf_metadata(args.local_folder_path)

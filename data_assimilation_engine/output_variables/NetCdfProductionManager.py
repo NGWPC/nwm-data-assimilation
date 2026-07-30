@@ -2,15 +2,30 @@ import sys
 import os
 from datetime import datetime
 import time
-from typing import List, Any, Optional
+from typing import Any
 from data_assimilation_engine.output_variables.DataReader import DataReader
 from data_assimilation_engine.output_variables.DataProcessor import DataProcessor
 import data_assimilation_engine.output_variables.utils as utils
 import data_assimilation_engine.output_variables.consts as consts
 
-_processor: Optional[DataProcessor] = None # Shared instance of DataProcessor
+_processor: DataProcessor | None = None # Shared instance of DataProcessor
 
 def create_dataprocessor(root_output_folder: str, netcdf_file: str, gpkg_file: str) -> DataProcessor:
+    """
+        Creates a DataProcessor instance to be used for various production actions
+
+        Args:
+            root_output_folder: str
+                The root folder where all intermediate and final datasets in post-processing are saved.
+            netcdf_file : str
+                The absolute or relative path to the ngen output NetCDF file.
+            gpkg_file : str
+                The absolute or relative path to the geopackage file that was used for ngen run.
+
+        Returns:
+            DataProcessor
+                An instance of DataProcessor class.
+        """
     global _processor
     if _processor is None:
         _processor = DataProcessor(netcdf_file, gpkg_file)
@@ -22,14 +37,58 @@ def create_dataprocessor(root_output_folder: str, netcdf_file: str, gpkg_file: s
     return _processor
 
 def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = False) -> str:
+    """
+        Downloads one reference files per combination of NWM cycle, class, category and domain from the NOMADS server.
+        It also creates a config file with the gathred metadata from the downloaded files.
+
+        Args:
+            root_output_folder: str
+                The root folder where all intermediate and final datasets in post-processing are saved.
+            re_download : bool
+                This gives an option for the user to re-download the NOMADS data. Defaults to False.
+
+        Returns:
+            str
+                A string representing the full file path of the created config json file.
+        """
     return utils.download_nwm_data_from_server(root_output_folder, re_download)
 
 def extract_netcdf_metadata(root_output_folder: str):
+    """
+       Creates a config file with the gathered metadata from the downloaded national reference files from NOMADS
+
+        Args:
+            root_output_folder: str
+                The root folder where all intermediate and final datasets in post-processing are saved.
+
+        Returns:
+            str
+                A string representing the full file path of the created config json file.
+        """
     return utils.obtain_metadata_information(root_output_folder)
 
 def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gpkg_file: str, 
                                    config_json: str, output_cycle_domain: str, output_templates_folder: str | None):
-    
+    """
+       Creates template netcdf files that covers the extent of the divides in the geopackage and updates
+       all the variables to have a value of zero.
+
+        Args:
+            root_output_folder: str
+                The root folder where all intermediate and final datasets in post-processing are saved.
+            netcdf_file : str
+                The absolute or relative path to the ngen output NetCDF file.
+            gpkg_file : str
+                The absolute or relative path to the geopackage file that was used for ngen run.
+            output_cycle_domain: str
+                The domain for the output products. For example, conus, hawaii, alaska
+            output_templates_folder: str | None
+                The folder path to where the output templates need to be stored. 
+                If None provided, it defaults to a subfolder with the `root_output_folder`
+
+        Raises:
+            ValueError if any of the input file paths do not exist.
+    """
     if not os.path.isfile(netcdf_file):
         raise ValueError("Specified ngen output cathments netcdf file does not exist")
 
@@ -60,7 +119,32 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
                                    config_json: str, output_templates_folder: str | None, 
                                    output_cycle_hour: int, output_cycle_type: str, 
                                    output_cycle_domain: str):
-    
+    """
+       Creates output NWM products using the template files. These output products span the extent of the diviides layer
+       in the geopackage. 
+
+        Args:
+            root_output_folder: str
+                The root folder where all intermediate and final datasets in post-processing are saved.
+            troute_output_netcdf : str
+                The absolute or relative path to the troute output NetCDF file.
+            troute_lakeout_netcdf : str
+                The absolute or relative path to the troute lakeout (waterbody) output NetCDF file.
+            config_json: str
+                The full or relative file path to config json file.
+            output_templates_folder: str | None
+                The folder path to where the output templates need to be stored. 
+                If None provided, it defaults to a subfolder with the `root_output_folder`
+            output_cycle_hr: str
+                The hour in a day (0-23) for which the outputs are produced after simulations are run.
+            output_cycle_type: str
+                The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
+            output_cycle_domain: str
+                The domain for the output products. For example, conus, hawaii, alaska
+
+        Raises:
+            ValueError if any of the input file paths do not exist.
+    """
     if output_templates_folder is None or output_templates_folder == '':
         # If no folder is specified, we will assume it as a subfolder within the root as defined in consts.py.
         ngen_template_nc_folder = os.path.join(root_output_folder, consts.NWM_NGEN_TEMPLATE_FOLDER)
@@ -105,14 +189,42 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
 def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
 
+    """
+    Function to create mosaiced or combined netcdf products.
+    
+    Args:
+        netcdf_folder: str
+            Folder containing the netcdf products after all post-processing runs.
+        output_folder: str
+            Output folder to save all the combined/mosaiced netcdf outputs.
+        config_json: str
+            Full or relative path to the config json file
+        output_cycle_hr: str
+            The hour in a day (0-23) for which the outputs are produced after simulations are run.
+        output_cycle_type: str
+            The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
+        output_cycle_domain: str
+            The domain for the output products. For example, conus, hawaii, alaska
+    """
     utils.create_combined_basin_netcdf_products(netcdf_folder, output_folder, config_json, output_cycle_hr, 
                                                 output_cycle_type, output_cycle_domain)
 
 # Postprocessing Entrypoint
-def netcdf_production_workflow(args_list) -> Optional[Any]:
+def netcdf_production_workflow(args_list: str) -> Any | None:
     """
     Main entrypoint function. Parses the args list and handles action
-    based on user preferences.
+    based on user preferences to perform post-processing on simulation outputs
+
+    Args:
+        args_list : str
+            List of string arguments that are needed to run post-processing routines.
+
+    Returns:
+        Any | None
+            "download" and "config" actions return the path to the config file. Others return None
+
+    Raises:
+        ValueError if the list is empty or do not have the correct number of arguments for each action.
     """
 
     global _processor
