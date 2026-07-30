@@ -133,11 +133,11 @@ class DataProcessor(DataReader):
         self._log_file = open(log_file_path, "a", encoding="utf-8", buffering=1)
         sys.stdout = self._log_file
 
-    def set_template_netcdf(self, template_grid_path: str):
+    def set_template_netcdf(self, template_file_path: str):
         """
         Set the template netcdf file to produce NWM products
         """
-        self._template_netcdf_ds = xr.open_dataset(template_grid_path)
+        self._template_netcdf_ds = xr.open_dataset(template_file_path)
 
     def set_troute_netcdf(self, troute_outpath: str):
         """
@@ -201,7 +201,7 @@ class DataProcessor(DataReader):
         template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
         if os.path.isfile(template_nc_file):
             print(f"----Reusing existing template file found here: {template_nc_file}")
-        elif mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):  # indicates that it is non-geospatial. For example, channel_rt
+        elif mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):  # these are non-gridded products
             ds = xr.open_dataset(file_name)
 
             # Delete any variable that is in the ignore list. Zero the valid min and max attribute in the time dimension
@@ -220,7 +220,7 @@ class DataProcessor(DataReader):
             # Save to nc file
             ds_template.to_netcdf(template_nc_file)
             print(f"----Template netcdf saved to: {template_nc_file}")
-        else:
+        else: # gridded products - land and terrain_rt
             ds = xr.open_dataset(file_name)
             # To do: Have to figure out a workflow when CRS is "Not Available"
             target_crs = CRS.from_user_input(wkt) 
@@ -250,7 +250,7 @@ class DataProcessor(DataReader):
             y_subset_1D = ds_subset[y_name].values
             xx, yy = np.meshgrid(x_subset_1D, y_subset_1D)
 
-            shapely.prepare(union_geom) # for faster processing, just in case.
+            shapely.prepare(union_geom) # for faster processing.
             flat_mask = shapely.intersects_xy(union_geom, xx.ravel(), yy.ravel())
             grid_mask = flat_mask.reshape(len(y_subset_1D), len(x_subset_1D))
             
@@ -290,7 +290,7 @@ class DataProcessor(DataReader):
             else:
                 ds_clipped = ds_masked.copy()
 
-            # For land category, we are reducing the snow_layers from 3 to 1.
+            # For land category, we are reducing the snow_layers from 3 (in current product) to 1.
             # We can remove the additional layers and retain the first layer in template
             if consts.DIM_SNOW_LYR in ds_clipped.dims:
                 ds_clipped = ds_clipped.isel(**{consts.DIM_SNOW_LYR: [0]})
@@ -384,6 +384,7 @@ class DataProcessor(DataReader):
             mapped_grid, grid_index = self.transfer_catchment_data_to_grid(ds_filtered, catchment_grid, mdata.x_name, mdata.y_name)
 
             # Data validation:
+            # consider making this optional
             mapped_ds_times = mapped_grid[consts.DIM_TIME].values
             for time_index, time_val in enumerate(mapped_ds_times):
                 positive_variables = self.find_positive_variables(ds_filtered, time_index)
@@ -397,7 +398,6 @@ class DataProcessor(DataReader):
                     catchments_dim=consts.DIM_CATCHMENTS,
                     time_dim=consts.DIM_TIME
                 )
-
             self.write_netcdf_per_timestep(mapped_grid, output_dir, output_cycle_hr)
             print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
         elif produce_output and not is_gridded:
