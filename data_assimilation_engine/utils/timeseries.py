@@ -188,19 +188,10 @@ class S3Loader:
             s3_uri = (
                 f"s3://{self.obs_prefix}/gages-{self.basin_id}_{self.variable_name}.csv"
             )
-            try:
-                fs = fsspec.filesystem("s3")
-                if fs.exists(s3_uri):
-                    return s3_uri
-                else:
-                    raise FileNotFoundError(f"Could not find S3 csv file: {s3_uri}")
-            except FileNotFoundError:
-                raise
-            except Exception as e:
-                raise PermissionError(
-                    f"Unable to access S3 csv file {s3_uri}: "
-                    f"{type(e).__name__}: {e}"
-                ) from e
+            if fs.exists(s3_uri):
+                return s3_uri
+            else:
+                raise FileNotFoundError(f"Could not find S3 csv file: {s3_uri}")
 
     @property
     @lru_cache

@@ -1,54 +1,68 @@
 import fsspec
 import xarray as xr
 import numpy as np
-
+from . import consts
 
 class DataReader:
+    """
+    Handles reading ngen catchment netcdf output for further data processing.
+    """
     def __init__(self, netcdf_file: str, chunk_size: int = 100) -> None:
-        self.netcdf_file: str = netcdf_file
-        self.chunk_size: int = chunk_size
-        self.dataset: xr.Dataset = self._load_dataset()
-        self.catchment_dim, self.catchment_coord = self._infer_catchment()
+        """
+        Args:
+            netcdf_file : str
+                The absolute or relative path to the ngen output NetCDF file.
+            chunk_size : int
+                The size to break larger datasets into smaller memory blocks. Defaults to 100
+
+        Attributes:
+            _netcdf_file (str): full or relative path to ngen NetCDF output.
+            _chunk_size (int): chunk size for reading netcdf data.
+            _dataset (xr.Dataset): ngen NetCDF xarray Dataset
+            __catchment_dim (str): Name of the catchment dimension
+            _catchment_coord (str): Name of the catchment coordinate variable
+
+
+        Raises:
+
+        """
+        self._netcdf_file: str = netcdf_file
+        self._chunk_size: int = chunk_size
+        self._dataset: xr.Dataset = self._load_dataset()
+        self._catchment_dim, self._catchment_coord = self._infer_catchment()
 
     def _load_dataset(self) -> xr.Dataset:
-        """Load NetCDF using fsspec with chunking."""
-        with fsspec.open(self.netcdf_file, mode="rb") as f:
+        """
+        Load NetCDF using fsspec with chunking.
+
+        Returns:
+            xr.Dataset
+                The xarray dataset of the netcdf file being read.
+        """
+        with fsspec.open(self._netcdf_file, mode="rb") as f:
             ds: xr.Dataset = xr.open_dataset(
                 f,
                 chunks={
-                    "time": 1,
-                    "catchment": self.chunk_size
+                    consts.DIM_TIME: 1,
+                    consts.DIM_CATCHMENTS: self._chunk_size
                 }
             )
             return ds.load()
         
-    def _infer_catchment(self):
-        """Read NetCDF and find string type coordinate for catchment."""
-        ds = self.dataset
+    def _infer_catchment(self) -> tuple[str, str]:
+        """
+        Read NetCDF and find long integer type coordinate for catchment.
+        
+        Returns:
+            tuple[str, str]
+                A tuple containing catchment dimension name and catchmetn coordinate variable name
+        """
+        ds = self._dataset
 
         # Find coordinate with IDs
         for coord_name in ds.coords:
             coord = ds[coord_name]
-            if coord.dtype.kind in {"U", "S", "O"} and coord.ndim == 1: #assumes catchments are string type.
+            if coord.dtype.kind in {"i", "u"} and coord.dtype.itemsize == 8 and coord.ndim == 1: #assumes catchments are the only long type.
                 return coord.dims[0], coord_name
 
         raise ValueError("Could not find catchment IDs")
-    
-    def assign_random_values(self, output_file: str) -> None:
-        """
-        Assign random values between 1 and 10 to all data variables.
-        This function can be deleted once we address the catchment netcdf writing issue.
-        """
-
-        with fsspec.open(self.netcdf_file, mode="rb") as f:
-            ds = xr.open_dataset(f)
-
-        for var_name in ds.data_vars:
-            print(f"Assigning random values to {var_name}")
-            random_values = np.random.uniform(
-                1.0, 10.0, size=ds[var_name].shape
-            )
-            ds[var_name].values = random_values
-
-        ds.to_netcdf(output_file)
-        print(f"Saved updated dataset to {output_file}")
