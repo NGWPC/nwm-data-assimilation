@@ -12,14 +12,25 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pyproj import CRS
-from typing import List, Set, Tuple, Dict, Union, Any, Optional
+from typing import Any, Optional
 from functools import reduce
 
 
 # region common
-def parse_filename_metadata(filename: str) -> Tuple[str, str, str]:
+def parse_filename_metadata(filename: str) -> tuple[str, str, str]:
     """
     Extract output_class, category and domain from filename.
+
+    Args:
+        filename: str
+            The filename input that is in the same format as found in the NOMADS server
+    
+    Returns:
+        tuple[str, str, str]
+            Tuple of class, category and domain. For example: analysis_assim, terrain_rt, conus
+    
+    Raises:
+        Exception if the filename format does not conform to the format on the NOMADS.
     """
     components = filename.split(".")
 
@@ -31,10 +42,18 @@ def parse_filename_metadata(filename: str) -> Tuple[str, str, str]:
     domain = components[5]
     return output_class, category, domain
 
-def convert_csvs_to_netcdf(csv_folder: str):
+def convert_csvs_to_netcdf(csv_folder: str) -> None:
     """
     Takes a directory for ngen output CSVs, automatically discovers NWM variables,
     analyzes their native data types, and converts them to netcdf.
+
+    Args:
+    csv_folder: str
+        The folder containing all the ngen output CSV files.
+
+    
+    Raises:
+        FileNotFoundError if csv folder is empty or no files in it.
     """
     # Find all CSV files in the target directory
     csv_files = []
@@ -44,7 +63,7 @@ def convert_csvs_to_netcdf(csv_folder: str):
                 if entry.is_file() and entry.name.lower().endswith('.csv'):
                     csv_files.append(entry.path)
     except FileNotFoundError:
-        print(f"The directory '{csv_folder}' does not exist.")
+        print(f"The directory '{csv_folder}' does not exist or has no csv files in it.")
         return
     
     if not csv_files:
@@ -136,11 +155,9 @@ def convert_csvs_to_netcdf(csv_folder: str):
     
     for var in nwm_variables:
         # Do we need to have a dictionary of variable name, mapping and units for attributes?
-        type_label = combined_ds[var].dtype.name
         combined_ds[var].attrs = {"long_name": f"{var}"}
         combined_ds[var].attrs["_FillValue"] = -1.0
         combined_ds[var].attrs["missing_value"] = -1.0
-
 
     output_netcdf_path = os.path.join(csv_folder, 'catchment_output.nc')
     print(f"Saving unified NetCDF to: {output_netcdf_path}")
@@ -148,12 +165,38 @@ def convert_csvs_to_netcdf(csv_folder: str):
     print("Process complete!")
 
 def get_file_timestep_prefix(cycle_run: str) -> str:
+    """
+    Function to retrieve file name prefix for NWM products. For example:
+    "nwm.t00z.medium_range.channel_rt_1.f001.alaska.nc" --> returns 'f'
+
+    Args:
+        cycle_run: str
+            The run cycle for NWM product. For example, medium_range_mem2.
+
+    Returns:
+        str
+            The prefix before the timestep number in a standard NWM product file name.
+    """
     if cycle_run.startswith('analysis_assim'):
         return 'tm'
     else:
         return 'f'
 
-def get_file_timestep_list(cycle_run: str, category: str) -> List[str]:
+def get_file_timestep_list(cycle_run: str, category: str) -> list[str]:
+    """
+    Function to retrieve all the file name prefix for timesteps in NWM products. For example:
+    analysis_assim --> returns ['tm00', 'tm01', 'tm02']
+
+    Args:
+        cycle_run: str
+            The run cycle for NWM product. For example, medium_range_mem2.
+        category: str
+            The product category For example: channel_rt, land
+
+    Returns:
+        list[str]
+            A list containing all the file name prefixes at each timestep in a run.
+    """
     timesteps = []
     prefix = get_file_timestep_prefix(cycle_run)
     match cycle_run:
@@ -178,7 +221,26 @@ def get_file_timestep_list(cycle_run: str, category: str) -> List[str]:
     return timesteps
 
 def generate_formatted_string_list(start: int, end: int, interval: int, 
-                                   width: int, prefix: str) -> List[str]:
+                                   width: int, prefix: str) -> list[str]:
+    """
+    Function to generate all the file name prefixes for timesteps in NWM products.
+
+    Args:
+        start: int
+            The first number in the file list for a given product.
+        end: int
+            The last number in the file list for a given product.
+        interval: int
+            The skip interval for the file list
+        width: int
+            The number of characters of the file number. "0" padding done as needed.
+        prefix: str
+            the prefix character(s) before the formatted file number.
+
+    Returns:
+        list[str]
+            A list containing all the file name prefixes in a run.
+    """
     ret_list = []
     for i in range(start, end, interval):
         ts = f"{prefix}{i:0{width}d}"
@@ -186,6 +248,21 @@ def generate_formatted_string_list(start: int, end: int, interval: int,
     return ret_list
 
 def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, category: str) -> str:
+    """
+    Function to generate the file name prefix for a given timestep and given NWM product.
+
+    Args:
+        time_step: int
+            The timestep of simulation run for a given product.
+        cycle_run: str
+            The run cycle for NWM product. For example, medium_range_mem2.
+        category: str
+            The product category For example: channel_rt, land
+
+    Returns:
+        str
+            A string representing the file name prefix. For example, 'f024', 'tm02' etc.
+    """
     match cycle_run:
         case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long':
             return f"{time_step:02d}"
@@ -217,6 +294,16 @@ def get_output_interval_hours(cycle_run: str, category: str) -> int | None:
     """
     Output interval (hours) for a given output cycle/category. None means no files should be 
     produced for that combination
+
+    Args:
+        cycle_run: str
+            The run cycle for NWM product. For example, medium_range_mem2.
+        category: str
+            The product category For example: channel_rt, land
+
+    Returns:
+        int | None
+        The integer number that represents the output interval hours in the file name of a product.
     """
     match cycle_run:
         case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
@@ -232,8 +319,6 @@ def get_output_interval_hours(cycle_run: str, category: str) -> int | None:
             elif category.startswith('terrain'):
                 return None
     return 1  # Covers all other cycles, should be updated with oCONUS regions if necessary
-
-
 # endregion
 
 # region data download
@@ -241,12 +326,17 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
     """
     Main function to download a unique set of output files from the NWM server.
     The root URL and the subfolder where the content is downloaded is dictated through 
-    variables in consts.py
+    variables in consts.py. This also creates the metadata config
 
     Args:
-        local_root (str): The root folder for outputs. 
-        re_download (bool): argument indicating that we need to redownload the data.
-        Defaults to False.
+        local_root: str
+            The root folder for postprocessing outputs. 
+        re_download: bool
+            Argument indicating if the data exists and need to be redownloaded.
+            Defaults to False.
+    Returns:
+        str
+            The full file path of the metadata_config.json file.
     """
     os.makedirs(local_root, exist_ok = True)
     nwm_data_folder = os.path.join(local_root, consts.NWM_DATA_LOCAL_FOLDER)
@@ -270,11 +360,18 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
     return config_json
 
 def download_nwm_data_recursive(download_url: str, local_path: str, 
-    existing_keys: Set[Tuple[str, str, str]]
+    existing_keys: set[tuple[str, str, str]]
 ) -> None:
     """
     Recursively download a unique set of output files from the server
     and create a mirrored folder structure locally
+    Args:
+        download_url: str
+            The download URL for NMW data. 
+        local_path: str
+            Folder path where the downloaded data needs to be saved
+        existing_keys: set[tuple[str, str, str]]
+            A unique combination key of NWM class, category and domain.
     """
     response = requests.get(download_url)
     if response.status_code != 200:
@@ -312,6 +409,12 @@ def download_nwm_data_recursive(download_url: str, local_path: str,
 def download_file(url: str, save_path: str) -> None:
     """
     Downloads a file from a URL and saves it locally.
+
+    Args:
+        url: str
+            The URL to download a specific NWM product
+        save_path: str
+            The folder path where the downloaded files are saved.
     """
     response = requests.get(url)
     if response.status_code == 200:
@@ -321,10 +424,20 @@ def download_file(url: str, save_path: str) -> None:
     else:
         print(f"Failed to download: {url}, HTTP status code {response.status_code}")
 
-def build_existing_keys(local_root: str) -> Set[Tuple[str, str, str]]:
+def build_existing_keys(local_root: str) -> set[tuple[str, str, str]]:
     """
     Builds file keys in local folder. These keys are used when function is re-run 
     and enables the capability to not download a file again.
+
+    Recursively download a unique set of output files from the server
+    and create a mirrored folder structure locally
+    Args:
+        local_root: str
+            The root folder path where all the reference files, intermediate and final products are getting saved
+    
+    Returns:
+        set[tuple[str, str, str]]
+            A unique combination key of NWM class, category and domain.
     """
     keys = set()
     for root, _, files in os.walk(local_root):
@@ -339,6 +452,60 @@ def build_existing_keys(local_root: str) -> Set[Tuple[str, str, str]]:
 
 # region metadata extraction
 class NetCDFMetadata:
+    """
+    Custom class to hold metadata found in NWM reference files downloaded by `download_nwm_data_from_server`
+    Sample json format produced by `obtain_metadata_information` showing the metadata attributes
+        {
+        "file_path": "sample_data/outputs/nwm_ref_files/analysis_assim/nwm.t00z.analysis_assim.terrain_rt.tm00.conus.nc",
+        "resolution": {
+            "x": 250.0,
+            "y": 250.0
+        },
+        "origin": {
+            "x": -2303874.17655,
+            "y": -1919875.33671
+        },
+        "location_name": {
+            "x": "x",
+            "y": "y"
+        },
+        "crs_wkt": "PROJCS[\"Lambert_Conformal_Conic\",GEOGCS[\"GCS_Sphere\",DATUM[\"D_Sphere\",SPHEROID[\"Sphere\",6370000.0,0.0]],PRIMEM[\"Greenwich\",0.0],UNIT[\"Degree\",0.0174532925199433]],PROJECTION[\"Lambert_Conformal_Conic_2SP\"],PARAMETER[\"false_easting\",0.0],PARAMETER[\"false_northing\",0.0],PARAMETER[\"central_meridian\",-97.0],PARAMETER[\"standard_parallel_1\",30.0],PARAMETER[\"standard_parallel_2\",60.0],PARAMETER[\"latitude_of_origin\",40.0],UNIT[\"Meter\",1.0]];-35691800 -29075200 10000;-100000 10000;-100000 10000;0.001;0.001;0.001;IsHighPrecision",
+        "nwm_variables": "zwattablrt, sfcheadsubrt",
+        "nwm_dimensions": "time, y, x, reference_time",
+        "nwm_scalar_variables": {
+            "crs": ""
+        },
+        "nwm_var_dimensions": {
+            "zwattablrt": [
+            "time",
+            "y",
+            "x"
+            ],
+            "sfcheadsubrt": [
+            "time",
+            "y",
+            "x"
+            ],
+            "time": [
+            "time"
+            ],
+            "reference_time": [
+            "reference_time"
+            ],
+            "x": [
+            "x"
+            ],
+            "y": [
+            "y"
+            ]
+        },
+        "output_cycle": "analysis_assim",
+        "class": "analysis_assim",
+        "category": "terrain_rt",
+        "domain": "conus"
+        }
+
+    """
     def __init__(
         self,
         file_path: str,
@@ -348,11 +515,11 @@ class NetCDFMetadata:
         origin_y: float,
         x_loc: str,
         y_loc: str,
-        wkt: Optional[str],
+        wkt: str | None,
         variables: str,
         dimensions: str, 
-        scalar_variables: Dict[str, List[str]], 
-        data_variables_dim: Dict[str, Union[int, float, str]],
+        scalar_variables: dict[str, list[str]], 
+        data_variables_dim: dict[str, int | float | str],
         output_cycle: str,
         output_class: str,
         category: str,
@@ -375,21 +542,19 @@ class NetCDFMetadata:
         self.category = category
         self.domain = domain
 
-    def key(self) -> tuple[str, str, str]: # not used yet.
-        """
-        Unique identifier for duplicate checking
-        """
-        return (self.output_class, self.category, self.domain)
-
-    def __repr__(self) -> str: # for debugging purposes
-        return (
-            f"NetCDFMetadata(file_path={self.file_path}, "
-            f"class={self.output_class}, category={self.category}, domain={self.domain})"
-        )
-
 def obtain_metadata_information(local_root: str) -> str:
     """
-    Parse the metadata information from the downloaded NWM output files and write a CSV and a json
+    Parses the metadata information from the downloaded NWM output files and writes a json
+    Args:
+        local_root: str
+            The root folder for postprocessing outputs. 
+
+    Returns:
+        str
+            The full file path of the metadata_config.json file.
+    
+    Raises:
+        Exception if the root output folder or the downloaded NWM reference files folder doesn't exist
     """
     if not os.path.exists(local_root):
         raise Exception(f"Folder does not exist: {local_root}")
@@ -406,11 +571,19 @@ def obtain_metadata_information(local_root: str) -> str:
     write_metadata_to_config_json(metadata_list, output_json)
     return output_json 
 
-def extract_metadata_from_downloaded_files(local_root: str) -> List[NetCDFMetadata]:
+def extract_metadata_from_downloaded_files(local_root: str) -> list[NetCDFMetadata]:
     """
     Process downloaded files and create a list of metadata objects for config json
+
+    Args:
+        local_root: str
+            The root folder for postprocessing outputs.
+
+    Returns:
+        list[NetCDFMetadata]
+            a list of NetCDFMetadata class objects
     """
-    metadata_list: List[NetCDFMetadata] = []
+    metadata_list = []
 
     for root, _, files in os.walk(local_root):
         for file in files:
@@ -421,7 +594,16 @@ def extract_metadata_from_downloaded_files(local_root: str) -> List[NetCDFMetada
     return metadata_list
 
 def extract_netcdf_metadata_from_netcdf(file_path: str) -> NetCDFMetadata:
-
+    """
+    Extracts the metadata from the netcdf file into a custom `NetCDFMetadata` class object.
+    Args:
+        file_path: str
+            The full or relative file path to the netcdf file
+    
+    Returns:
+        NetCDFMetadata
+            An instance of `NetCDFMetadata` object with all the metadata info for the netcdf file
+    """
     filename = os.path.basename(file_path)
     output_class, category, domain = parse_filename_metadata(filename)
     output_cycle = Path(file_path).parent.name
@@ -472,6 +654,14 @@ def extract_netcdf_metadata_from_netcdf(file_path: str) -> NetCDFMetadata:
 def compute_resolution(coords: np.ndarray) -> float:
     """
     Compute resolution from coordinate array using median spacing.
+
+    Args:
+        coords: np.ndarray
+            A numpy array of X or Y coordinates found in the downloaded NWM ref files
+
+    Returns:
+        float
+            a float value of the resolution for the coordinates.
     """
     if coords.size < 2:
         return 0.0
@@ -479,9 +669,16 @@ def compute_resolution(coords: np.ndarray) -> float:
     diffs = np.diff(coords)
     return float(np.median(np.abs(diffs)))
 
-def extract_wkt_from_crs(crs_var) -> Optional[str]:
+def extract_wkt_from_crs(crs_var: xr.Variable) -> str | None:
     """
     Extract wkt attribute from CRS variable.
+    Args:
+        crs_var: xr.Variable
+            The crs scalar variable found in the NWM netcdf products.
+    
+    Returns:
+        str | None
+            If exists, it returns the wkt string from the crs variable attributes.
     """
     if "spatial_ref" in crs_var.attrs:
         return crs_var.attrs["spatial_ref"]
@@ -489,53 +686,16 @@ def extract_wkt_from_crs(crs_var) -> Optional[str]:
         return crs_var.attrs["esri_pe_string"]
     return None
     
-def write_metadata_to_csv(metadata_list: List[NetCDFMetadata], output_csv: str) -> None:
-    """
-    Writes a list of NetCDFMetadata objects to a CSV file.
-    """
-    fieldnames: List[str] = [
-        "file_path",
-        "resolution_x",
-        "resolution_y",
-        "origin_x",
-        "origin_y",
-        "x_name",
-        "y_name",
-        "crs_wkt",
-        "variables",
-        "cycle",
-        "class",
-        "category",
-        "domain",
-    ]
-
-    with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        writer.writeheader()
-
-        for metadata in metadata_list:
-            writer.writerow(
-                {
-                    "file_path": metadata.file_path,
-                    "resolution_x": metadata.resolution_x,
-                    "resolution_y": metadata.resolution_y,
-                    "origin_x": metadata.origin_x,
-                    "origin_y": metadata.origin_y,
-                    "x_name": metadata.x_name,
-                    "y_name": metadata.y_name,
-                    "crs_wkt": metadata.crs_wkt if metadata.crs_wkt is not None else "Not Available",
-                    "variables": metadata.nwm_variables,
-                    "cycle": metadata.output_cycle or "",
-                    "class": metadata.output_class or "",
-                    "category": metadata.category or "",
-                    "domain": metadata.domain or "",
-                }
-            )
-
-def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_json: str) -> None:
+def write_metadata_to_config_json(metadata_list: list[NetCDFMetadata], output_json: str) -> None:
     """
     Writes NetCDFMetadata objects to config JSON.
+
+    Args:
+        metadata_list: list[NetCDFMetadata]
+            list of  custom `NetCDFMetadata` objects
+    
+        output_json: str
+            Full or relative path to the config json file
     """
     # Delete any existing config file
     if os.path.exists(output_json):
@@ -577,11 +737,22 @@ def write_metadata_to_config_json(metadata_list: List[NetCDFMetadata], output_js
 
     print(f"Config JSON written to: {output_json}")
 
-def read_output_variables_info_from_config(json_file: str) -> List[NetCDFMetadata]:
+def read_output_variables_info_from_config(json_file: str) -> list[NetCDFMetadata]:
     """
-        Parses a multi-element JSON string into a list of NetCDFMetadata objects.
+    Parses a multi-element JSON string into a list of `NetCDFMetadata` objects.
+    
+    Args:
+        output_json: str
+            Full or relative path to the config json file
+    
+    Returns:
+        list[NetCDFMetadata]
+            list of  custom `NetCDFMetadata` objects
+    
+    Raises:
+        ValueError if the specified config json file does not exist.
     """
-    netcdf_metadata_list: List[NetCDFMetadata] = []
+    netcdf_metadata_list = []
     if os.path.isfile(json_file):
         with open(json_file, "r", encoding="utf-8") as file_stream:
             config_data = json.load(file_stream)
@@ -616,7 +787,21 @@ def read_output_variables_info_from_config(json_file: str) -> List[NetCDFMetadat
 def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: str, config_json: str,
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str) -> None:
     """
-    Main calling function to create a combined basins product
+    Main calling function to create mosaiced or combined netcdf products.
+    
+    Args:
+        netcdf_folder: str
+            Folder containing the netcdf products after all post-processing runs.
+        output_folder: str
+            Output folder to save all the combined/mosaiced netcdf outputs.
+        config_json: str
+            Full or relative path to the config json file
+        output_cycle_hr: str
+            The hour in a day (0-23) for which the outputs are produced after simulations are run.
+        output_cycle_type: str
+            The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
+        output_cycle_domain: str
+            The domain for the output products. For example, conus, hawaii, alaska
     """
     os.makedirs(output_folder, exist_ok=True)
     cycle_hr = f"t{str(output_cycle_hr).zfill(2)}z"
@@ -644,6 +829,7 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
                 if all(keyword in full_file_path.name for keyword in keywords_list)
             ]
             if len(matching_files) > 0:
+                print(f"Merging files for {output_class}, {category}, {tm}")
                 if is_gridded:
                     merged_ds, encoding = create_multi_basin_netcdfs(ref_file, matching_files, None, 1.0, True)
                 else:
@@ -655,12 +841,28 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
             else:
                 print(f"Warning: No matching files to combine for {output_cycle_type}, {output_class}, {category}, {output_cycle_domain}")
 
-def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variables_of_interest: list[str] = None, 
+def create_multi_basin_netcdfs(reference_netcdf: str, nc_files: list[str], variables_of_interest: list[str] = None, 
                               tolerance: float = 1.0, check_crs: bool = True 
-) -> Tuple[xr.Dataset, Dict[str, Dict[str, Any]]]:
+) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
     """
     Merge multiple NetCDF subsets.
-    Assumes same grid resolution, same coordinate system and no overlaps
+    Assumes same grid resolution, same coordinate system
+
+    Args:
+        reference_netcdf: str
+            The national reference netcdf file for the given product type, class, domain
+        nc_files: list[str]
+            List of netcdf files to be merged/combined.
+        variables_of_interest: list[str]
+            NWM output variables that need to be merged. Typically None to allow merging all variables in the netcdfs
+        tolerance: float
+            Tolerance distance to snap a point to the reference grid. Default is 1.0m
+        check_crs: bool
+            Boolean variable to check if all the netcdfs have the same crs. Default is True.
+
+    Returns:
+        tuple[xr.Dataset, dict[str, dict[str, Any]]]
+            tuple representing the xarray dataset and the encoding config
     """
     # Check CRS and confirm that they are the same for all the netcdf files
     if check_crs:
@@ -675,7 +877,7 @@ def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variabl
         if len(set(crs_list)) != 1:
             raise ValueError("CRS mismatch between datasets")
 
-    ref_grid = xr.open_dataset(reference_grid)
+    ref_grid = xr.open_dataset(reference_netcdf)
 
     # Gather the time and global attributes from the first dataset
     global_attrs = None
@@ -724,11 +926,25 @@ def create_multi_basin_netcdfs(reference_grid: str, nc_files: list[str], variabl
 
     return ds_combined, encoding_config
 
-def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> Tuple[xr.Dataset, Dict[str, Dict[str, Any]]]:
+def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
+    """
+    Merge multiple NetCDF files that are not gridded. This is specific for channel_rt and reservoir NWM products
 
+    Args:
+        nc_files: list[str]
+            List of netcdf files to be merged/combined.
+
+        has_featureid: bool
+            Boolean variable indicating that the feature_id dimension exists. Default is True.
+
+    Returns:
+        tuple[xr.Dataset, dict[str, dict[str, Any]]]
+            tuple representing the xarray dataset and the encoding config
+    """
     if has_featureid:
         combined = xr.open_mfdataset(
         nc_files,
+        data_vars="all",
         combine="nested",
         concat_dim=consts.DIM_FEATURE_ID,
         preprocess=preprocess_sort,
@@ -759,10 +975,17 @@ def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> Tu
     return combined, encoding
 
 def preprocess_sort(ds: xr.Dataset) -> xr.Dataset:
-    # This sorts the dataset sequentially. 
-    
-    # It is necessary to avoid the following error:
-    # ValueError: Resulting object does not have monotonic global indexes along dimension feature_id
+    """
+    Sort the feature_id in the xarray dataset before combining. It avoids the following error
+    ValueError: Resulting object does not have monotonic global indexes along dimension feature_id
+
+    Args:
+        ds: xr.Dataset
+            xarray NetCDF dataset whose feature ids need to be sorted.
+    Returns:
+        ds: xr.Dataset
+            xarray NetCDF dataset with sorted feature ids.
+    """
     if consts.DIM_FEATURE_ID in ds.dims and consts.DIM_FEATURE_ID in ds.coords:
         if not ds.indexes[consts.DIM_FEATURE_ID].is_monotonic_increasing:
             ds = ds.sortby(consts.DIM_FEATURE_ID)

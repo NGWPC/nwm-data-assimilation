@@ -10,8 +10,10 @@ import time
 import math
 import re
 import shapely
+import warnings
+import inspect
 from pyproj import CRS
-from typing import List, Tuple, Optional
+# from typing import List, Tuple, Optional
 from .DataReader import DataReader
 from .utils import (
     NetCDFMetadata,
@@ -26,10 +28,33 @@ class DataProcessor(DataReader):
     Handles ngen and troute outputs and produces NWM products.
     """
     def __init__(self, catchment_netcdf_file: str, gpkg_file: str, chunk_size: int = 100) -> None:
-        
+        """
+        Args:
+            catchment_netcdf_file : str
+                The absolute or relative path to the ngen output NetCDF file.
+            gpkg_file : str
+                The absolute or relative path to the geopackage file that was used for ngen run.
+            chunk_size : int
+                The size to break larger datasets into smaller memory blocks. Defaults to 100
+
+        Attributes:
+            _catchment_ds (xr.Dataset): ngen NetCDF dataset
+            _gpkg_file (str): full or relative path to geopackage file
+            _output_class (str): NWM product class. For example, analysis_assim or  short_range
+            _category (str): NWM product category. For example, terrain_rt, land, reservoir
+            _domain (str): NWM product domain. For example, conus, hawaii, alaska
+            _geo_id (str): Identifier for the geopackage extracted from the file name
+            _gpkg_gdf (GeoDataFrame): Geopandas Dataframe for the geopackage divides. 
+            _log_file (str): Full or relative path to the log file
+
+        Raises:
+            ValueError: If any of the following conditions occur:
+                - Geopackage has an empty divides layer
+                - Number of catchments in `catchment_netcdf_file` does not match features in `gpkg_file` divides
+        """
         super().__init__(catchment_netcdf_file, chunk_size)
 
-        self._catchment_ds: xr.Dataset = self.dataset
+        self._catchment_ds: xr.Dataset = self._dataset
         self._gpkg_file = gpkg_file
         self._output_class = None
         self._category = None
@@ -37,7 +62,7 @@ class DataProcessor(DataReader):
         filename = os.path.basename(gpkg_file)
         self._geo_id = filename.replace(consts.GPKG_FILE_PREFIX, '').replace('.gpkg', '')
         
-        nc_catchments = self._catchment_ds[self.catchment_coord].values
+        nc_catchments = self._catchment_ds[self._catchment_coord].values
         
         # Read geopackage, determine schema and "divides" layer
         is_new_NHF_schema: bool = self._is_new_NHF_schema(gpkg_file, consts.NHF_REF_OBJECT)
@@ -109,17 +134,36 @@ class DataProcessor(DataReader):
         sys.stdout = self._log_file
 
     def set_template_netcdf(self, template_grid_path: str):
+        """
+        Set the template netcdf file to produce NWM products
+        """
         self._template_netcdf_ds = xr.open_dataset(template_grid_path)
 
     def set_troute_netcdf(self, troute_outpath: str):
+        """
+        Set the troute output netcdf file to produce NWM products
+        """
         self._troute_netcdf_ds = xr.open_dataset(troute_outpath)
 
     def set_troute_lakeout_netcdf(self, troute_lakeoutpath: str):
+        """
+        Set the troute lakeout (waterbody) netcdf file to produce NWM products
+        """
         self._troute_lakeout_netcdf_ds = xr.open_dataset(troute_lakeoutpath)
 
     def _is_new_NHF_schema(self, geopackage_path: str, layer_name: str) -> bool:
         """
-        Check the data schema in the geopackage for the new NHF format
+        Check the data schema in the geopackage and determine if it is in the new NHF format
+
+        Args:
+            geopackage_path : str
+                The absolute or relative path to the geopackage file.
+            layer_name : str
+                The name of the layer in the geopackage file.
+
+        Returns:
+            bool
+                True/False indicating the presence of the layer in the geopackage.
         """
         layers = gpd.list_layers(geopackage_path)
         tabular_layers = layers[layers[consts.GPKG_GEOMETRY_TYPE_IDENTIFIER].isna()]
@@ -127,8 +171,15 @@ class DataProcessor(DataReader):
     
     def create_template_netcdf_using_config(self, mdata: NetCDFMetadata, template_netcdf_folder: str) -> None:
         """
-        Create a template grid aligned to a reference grid defined in config.json.
-        The output template grid covers the extents of the divides in the geopackage.
+        Create a template netcdf file that aligns to a national reference grid defined in the metadata config.
+        For gridded NWM products, the output template grid covers the extents of the divides in the geopackage.
+        For non-gridded NWM products, the ouptut template contains metadata of the national reference grid with values zeroed.
+
+        Args:
+            mdata : utils.NetCDFMetadata
+                The instance of the custom class that captures the metadata of NWM products from the config
+            template_netcdf_folder : str
+                The folder where the template will be saved or retrived from if it exists.
         """
         
         os.makedirs(template_netcdf_folder, exist_ok = True)
@@ -180,11 +231,6 @@ class DataProcessor(DataReader):
             
             # Get bounding box and snap to origin in the national reference grid
             minx, miny, maxx, maxy = gdf.total_bounds
-
-            # snapped_minx = self._snap_to_grid(minx, origin_x, res_x, np.floor)
-            # snapped_maxx = self._snap_to_grid(maxx, origin_x, res_x, np.ceil)
-            # snapped_miny = self._snap_to_grid(miny, origin_y, res_y, np.floor)
-            # snapped_maxy = self._snap_to_grid(maxy, origin_y, res_y, np.ceil)
 
             snapped_minx = np.floor(minx / res_x) * res_x
             snapped_miny = np.floor(miny / res_y) * res_y
@@ -273,6 +319,18 @@ class DataProcessor(DataReader):
         self._template_netcdf_ds = xr.open_dataset(template_nc_file) # assign to class variable.
 
     def produce_nwm_output_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> None:
+        """
+        Produces NWM output products for land, terrain, channel and reservoir categories depending on the
+        NWM `nwm_output_class`. The product uses the template from `create_template_netcdf_using_config`
+
+        Args:
+            mdata : utils.NetCDFMetadata
+                The instance of the custom class that captures the metadata of NWM products from the config
+            output_dir : str
+                The folder where the output product will be saved or overwritten if it exists.
+            output_cycle_hr : str
+                The hour in a day (0-23) for which the outputs are produced after simulations are run.
+        """
         produce_output = False
         is_gridded = True
         ds_modified = self._catchment_ds
@@ -325,9 +383,6 @@ class DataProcessor(DataReader):
             catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
             mapped_grid, grid_index = self.transfer_catchment_data_to_grid(ds_filtered, catchment_grid, mdata.x_name, mdata.y_name)
 
-            # m_file = os.path.join(output_dir, "mapped.nc")
-            # mapped_grid.to_netcdf(m_file)
-
             # Data validation:
             mapped_ds_times = mapped_grid[consts.DIM_TIME].values
             for time_index, time_val in enumerate(mapped_ds_times):
@@ -351,7 +406,22 @@ class DataProcessor(DataReader):
         else:
             print(f"----Production skipped for {cat_class_domain}")
         
-    def stack_soil_variables(self, var_prefix_list: List[str]) -> xr.Dataset:
+    def stack_soil_variables(self, var_prefix_list: list[str]) -> xr.Dataset:
+        """
+        Combines multiple data arrays (soil-related variables) along a new dimension as required for NWM. 
+        The stacked dimensions are reordered as required for NWM.
+
+        Args:
+            var_prefix_list : list [str]
+                The prefix list to identify the outpu variables that needs to be stacked.
+
+        Returns:
+            xr.Dataset
+                xarray dataset replacing the individual variables with the stacked variable.
+
+        Raises:
+            ValueError: If the netcdf does not contain any variables with the prefix.
+        """
         stacked_ds = self._catchment_ds.copy()
         for var_prefix in var_prefix_list:
             matching_vars = [var for var in stacked_ds.data_vars if var.startswith(var_prefix)]
@@ -375,7 +445,21 @@ class DataProcessor(DataReader):
     
     def build_catchment_id_grid(self, x_dim_name: str, y_dim_name: str) -> xr.DataArray:
         """
-        Returns a DataArray (y, x) where each cell in the basin-level grid contains a catchment ID.
+        The x,y coordinates from the template netcdf created in `create_template_netcdf_using_config` 
+        is mapped to the catchment IDs in the `catchment_netcdf_file`. 
+
+        Args:
+            x_dim_name : str
+                The variable that holds the x coordinates in the netcdf template.
+            y_dim_name : str
+                The variable that holds the y coordinates in the netcdf template.
+
+        Returns:
+            xr.DataArray
+                xarray data array (y, x) where each cell in the netcdf grid contains a catchment ID.
+
+        Raises:
+            RuntimeError if the function crashes during the process.
         """
         try:
             ds = self._template_netcdf_ds
@@ -433,16 +517,35 @@ class DataProcessor(DataReader):
 
     def transfer_catchment_data_to_grid(self, ds: xr.Dataset, catchment_grid: xr.DataArray, 
                                         x_dim: str, y_dim: str
-    ) -> Tuple[xr.Dataset, xr.DataArray]:
+    ) -> tuple[xr.Dataset, xr.DataArray]:
         """
         Transfer catchment-indexed variables from a source xarray Dataset
-        to a spatial grid defined by a template Dataset.
+        to a spatial grid defined by the template dataset.
+
+        Args:
+            ds : xarray.Dataset
+                The netcdf dataset containing the required variables processed and ready to be written to the final product.
+            catchment_grid: xr.DataArray
+                The grid mapping x, y to catchment ID. This is the output from `build_catchment_id_grid`
+            x_dim : str
+            The variable that holds the x coordinates in the netcdf template.
+            y_dim : str
+                The variable that holds the y coordinates in the netcdf template.
+
+        Returns:
+            tuple[xr.Dataset, xr.DataArray]
+                The dataset represents the grid with all timesteps for NWM product generation.
+                The dataarray represents the catchment indices (instead of catchment ID) in each (x,y) for faster processing.
+
+        Raises:
+            ValueErrors during diagnostic validation checks after the grid index dataarray is produced.
         """
         ds_data = ds
 
         # Convert catchment IDs to index positions
         catchment_ids = ds_data[consts.DIM_CATCHMENTS].values
 
+        # Convert grid IDs to indices
         # Sort catchment_ids for vectorized lookup
         sort_order = np.argsort(catchment_ids)
         sorted_ids = catchment_ids[sort_order]
@@ -595,7 +698,16 @@ class DataProcessor(DataReader):
 
     def write_netcdf_per_timestep(self, mapped_grid: xr.Dataset, output_dir: str, output_cycle_hr: str) -> None:
         """
-        Writes one NetCDF per timestep.
+        Writes one NetCDF per timestep for the various NWM cycle runs. It handles the product file naming as well.
+        This is called only for land and terrain_rt NWM products.
+        Args:
+            mapped_grid : xarray.Dataset
+                The netcdf dataset representing the grid with all timesteps for the final NWM product.
+            output_dir : str
+                The folder where the output product will be saved or overwritten if it exists.
+            output_cycle_hr : str
+                The hour in a day (0-23) for which the outputs are produced after simulations are run.
+
         """
         os.makedirs(output_dir, exist_ok=True)
         reference_epoch = np.datetime64("1970-01-01T00:00:00").astype("datetime64[m]")
@@ -678,18 +790,28 @@ class DataProcessor(DataReader):
             output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
             ds_t.to_netcdf(output_file)
 
-    def produce_channel_reservoir_nwm_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str):
+    def produce_channel_reservoir_nwm_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> None:
         """
-        Expands a zeroed NetCDF template and populates it with data from a single
-        time snapshot, including remapping misnamed variables.
+        Expands a zeroed NetCDF template and populates it with data for channel_rt and reservoir NWM products.
+        
+        Args:
+            mdata : utils.NetCDFMetadata
+                The instance of the custom class that captures the metadata of NWM products from the config
+            output_dir : str
+                The folder where the output product will be saved or overwritten if it exists.
+            output_cycle_hr : str
+                The hour in a day (0-23) for which the outputs are produced after simulations are run.
+        
+        Raises:
+            ValueError if the required dataset inputs are not being assigned yet.
         """
         if not self._template_netcdf_ds:
             raise ValueError("Template netcdf not set")
-
-        if mdata.category.startswith('channel_rt') and self._catchment_ds is None:
+        
+        if mdata.category == 'channel_rt' and not self._catchment_ds:
             raise ValueError("ngen catchment netcdf not set")
-
-        if mdata.category.startswith('channel_rt') and self._troute_netcdf_ds is None:
+        
+        if mdata.category == 'channel_rt' and not self._troute_netcdf_ds:
             raise ValueError("troute output netcdf not set")
 
         if mdata.category.startswith('reservoir') and self._troute_lakeout_netcdf_ds is None:
@@ -753,6 +875,7 @@ class DataProcessor(DataReader):
 
             # Populate variables defined in the template using the negen output and troute data
             for var_name in self._template_netcdf_ds.variables:
+                print(f"Processing variable {var_name}")
                 # leave the dimensions out as they (except time) have already been populated.
                 if var_name in self._template_netcdf_ds.dims:
                     continue
@@ -776,8 +899,10 @@ class DataProcessor(DataReader):
                     if self._template_netcdf_ds[var_name].ndim == 0: # Scalar variables not in the data, but in template
                         populated_ds[var_name] = xr.DataArray(self._template_netcdf_ds[var_name].values.item())
                         print(f"----Found a scalar variable - {var_name} that is not in the data, but present in the template.Template value has been copied over.")
+                        #continue
                     else:
                         print(f"----Found a data variable - {var_name} that is not in the data, but present in the template. It is filled with NaN.")
+                        # populated_ds[var_name] = populated_ds[var_name].fillna(0)
                     continue
                 elif not in_populated:
                     print(f"----{var_name} is in the template but not found in the output dataset.")
@@ -889,12 +1014,24 @@ class DataProcessor(DataReader):
             populated_ds.to_netcdf(output_file)
 
     def attribute_fill_missing_values(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        This adjusts/updates the fill and missing values as identified in the template for NWM products.
+        
+        Args:
+            ds: xr.Dataset
+                The input xarray Dataset in which the attributes need to be updated.
+
+        Returns:
+            xarray.Dataset
+                This dataset contains the updated fill and missing values as per the NWM templates
+        """
+
         # Transfer all other attributes from template
         for var_name in self._template_netcdf_ds.variables:
             if var_name in ds.variables:
                 ds[var_name].attrs.update(self._template_netcdf_ds[var_name].attrs)
                 ds[var_name].encoding.update(self._template_netcdf_ds[var_name].encoding)
-
+                
                 # Copy Fill and missing values from the template DS
                 has_missing = 'missing_value' in self._template_netcdf_ds[var_name].encoding
                 has_fill = '_FillValue' in self._template_netcdf_ds[var_name].encoding
@@ -912,10 +1049,32 @@ class DataProcessor(DataReader):
                     ds[var_name].encoding['_FillValue'] = tgt_value
                     ds[var_name].encoding.pop('missing_value', None)
                     ds[var_name].attrs.pop("missing_value", None)
+
+                # For coordinate variables such as x, y, latitude, longtiude
+                # we should not allow NaN fill value. Also update units if present in template
+                if var_name in ds.coords:
+                    if "_FillValue" in ds[var_name].encoding:
+                        ds[var_name].encoding["_FillValue"] = None
+                    if var_name in self._template_netcdf_ds and "units" in self._template_netcdf_ds[var_name].attrs:
+                        ds[var_name].attrs["units"] = self._template_netcdf_ds[var_name].attrs["units"]
+               
         return ds
 
 # region data validation
-    def find_positive_variables(self, ds: xr.Dataset, time_index: int) -> List[str]:
+    def find_positive_variables(self, ds: xr.Dataset, time_index: int) -> list[str]:
+        """
+        This function identifies variables that have at least one positive value in a netcdf timeslice.
+        
+        Args:
+            ds: xr.Dataset
+                The input xarray Dataset in which variables need to be identified.
+            time_index: int
+                The time index for timeslicing the data in the netcdf.
+
+        Returns:
+            list[str]
+                The list of variables that have at least one positive value in the timeslice.
+        """
         positive_vars = []
         for var in ds.data_vars:
             da = ds[var].isel(time=time_index)
@@ -927,18 +1086,12 @@ class DataProcessor(DataReader):
                 positive_vars.append(var)
         return positive_vars
 
-    def data_validation_check(self, 
-        source: xr.Dataset,
-        output: xr.Dataset,
-        grid_index: xr.DataArray,
-        variables: list[str],
-        sample_size: int = 50,
-        time_index: int = 0,
-        catchments_dim: str = "catchments",
-        time_dim: str = "time",
-    ):
+    def data_validation_check(self, source: xr.Dataset, output: xr.Dataset,
+        grid_index: xr.DataArray, variables: list[str], sample_size: int = 50,
+        time_index: int = 0, catchments_dim: str = "catchments", time_dim: str = "time"
+    ) -> None: 
         """
-        Validate catchments-to-grid transformation.
+        Validate catchments-to-grid transformation that is used to produce land and terrain NWM products.
 
         Checks:
         - mapped catchments only
@@ -946,16 +1099,33 @@ class DataProcessor(DataReader):
         - catchment-to-grid index consistency
         - source vs output grid-cell values
         - numerical values within a low tolerance
+        
+        Args:
+            source: xr.Dataset
+                The input xarray Dataset that contains the ngen output data as (time, catchments) arrays. 
+            grid_index: xr.DataArray
+                The dataarray represents the catchment indices (instead of catchment ID) in each (x,y) for faster processing.
+                It is the output from `transfer_catchment_data_to_grid`
+            variables: list[str]
+                List of variables that needs to be validated. If None, all variables in the source dataset is validated.
+            sample_size: int
+                Number of catchments that are drawn as a sample to do spot validation checks. Defaults to 50.
+            time_index: int
+                The time index for timeslicing the data in the netcdf. Defaults to 0
+            catchments_dim: str = "catchments"
+                The name of the dimension that has catchments information
+            time_dim: str = "time"
+                The name of the dimension that has time information
         """
         # Get the indices of catchments that are mapped (grid_index >=0)
         mapped_catchment_indices = np.unique(grid_index.values[grid_index.values >= 0])
 
-        print("--Validation for gridded NetCDF output")
+        print("----Validation for gridded NetCDF output")
         for var in variables:
             passed = 0
             failed = 0
             failures = []
-            print(f"----Validating: {var} using a catchments sample size of {sample_size} for time slice index {time_index}")
+            print(f"------Validating: {var} using a catchments sample size of {sample_size} for time slice index {time_index}")
             src = source[var].isel(
                 {time_dim: time_index}
             )
@@ -965,14 +1135,14 @@ class DataProcessor(DataReader):
                 active_catchments = ((src > 0).any(dim=reduce_dims))
                 nonzero_catchment_indices = np.where(active_catchments.values)[0] # those catchments where non-zero values are found
                 if nonzero_catchment_indices.size == 0:
-                    print("--------No non-zero values found")
+                    print("----------No non-zero values found")
                     continue
                 
                 # Intersect the mapped and non-zero catchment indices and find the common ones in them.
                 # We will use the intersection output to sample catchments for validation.
                 validation_catchment_indices = np.intersect1d(mapped_catchment_indices, nonzero_catchment_indices)
                 if len(validation_catchment_indices) == 0:
-                    print(f"--------No mapped non-zero values for {var}")
+                    print(f"----------No mapped non-zero values for {var}")
                     continue
 
                 sample_catchments_indices = np.random.choice(
@@ -1029,13 +1199,16 @@ class DataProcessor(DataReader):
                             "message": str(e),
                         }
                     )
-                print(f"----Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
+                print(f"------Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
                 if len(failures) > 0:
-                    print(f"----Failures for {var}: {failures}")
+                    print(f"------Failures for {var}: {failures}")
+
 # endregion
 
     def close_log(self):
-        """Restores the original terminal output and closes the file."""
+        """
+        Restores the original terminal output and closes the file.
+        """
         original_stream = getattr(self, "_original_stdout", sys.stdout)
         if sys.stdout != original_stream:
             sys.stdout = original_stream
