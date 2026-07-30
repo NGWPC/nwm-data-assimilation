@@ -71,16 +71,16 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
                 raise ValueError("T-Route output file is not specified")
             if mdata.category.startswith('reservoir') and troute_lakeout_file is None:
                 raise ValueError("T-Route lakeout file is not specified")
-            if mdata.category == 'reservoir':
-                processor.nwm_output_class = mdata.output_class
-                processor.nwm_category = mdata.category
-                processor.nwm_domain = mdata.domain
-                processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
-                if mdata.category.startswith('channel_rt'):
-                    processor.set_troute_netcdf(troute_output_file)
-                if mdata.category.startswith('reservoir'):
-                    processor.set_troute_lakeout_netcdf(troute_lakeout_file)
-                processor.produce_nwm_output_product(mdata, nwm_output_folder, output_cycle_hr)
+
+            processor.nwm_output_class = mdata.output_class
+            processor.nwm_category = mdata.category
+            processor.nwm_domain = mdata.domain
+            processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
+            if mdata.category.startswith('channel_rt'):
+                processor.set_troute_netcdf(troute_output_file)
+            if mdata.category.startswith('reservoir'):
+                processor.set_troute_lakeout_netcdf(troute_lakeout_file)
+            processor.produce_nwm_output_product(mdata, nwm_output_folder, output_cycle_hr)
 
     end_time = time.perf_counter()
     duration_minutes = (end_time - start_time) / 60
