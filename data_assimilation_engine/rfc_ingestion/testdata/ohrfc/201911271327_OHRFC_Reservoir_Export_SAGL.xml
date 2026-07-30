@@ -1,0 +1,479 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TimeSeries xmlns="http://www.wldelft.nl/fews/PI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.wldelft.nl/fews/PI http://fews.wldelft.nl/schemas/version1.0/pi-schemas/pi_timeseries.xsd" version="1.23" xmlns:fs="http://www.wldelft.nl/fews/fs">
+    <timeZone>0.0</timeZone>
+    <series>
+        <header>
+            <type>instantaneous</type>
+            <moduleInstanceId>ADJUSTQ_GHDP1_GHDP1AJ_Forecast</moduleInstanceId>
+            <locationId>GHDP1</locationId>
+            <parameterId>QINE</parameterId>
+            <timeStep unit="second" multiplier="21600"/>
+            <startDate date="2019-11-24" time="12:00:00"/>
+            <endDate date="2019-12-12" time="12:00:00"/>
+            <forecastDate date="2019-11-27" time="12:00:00"/>
+            <missVal>-999</missVal>
+            <stationName>Glen Hazel</stationName>
+            <lat>41.5530555556</lat>
+            <lon>-78.5963888889</lon>
+            <x>-78.5963888889</x>
+            <y>41.5530555556</y>
+            <z>466.344</z>
+            <units>CFS</units>
+            <creationDate>2019-11-27</creationDate>
+            <creationTime>13:25:59</creationTime>
+        </header>
+        <event date="2019-11-24" time="12:00:00" value="28.814987" flag="0"/>
+        <event date="2019-11-24" time="18:00:00" value="27.878525" flag="0"/>
+        <event date="2019-11-25" time="00:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-25" time="06:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-25" time="12:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-25" time="18:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-26" time="00:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-26" time="06:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-26" time="12:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-26" time="18:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-27" time="00:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-27" time="06:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-27" time="12:00:00" value="26.963593" flag="0"/>
+        <event date="2019-11-27" time="18:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-28" time="00:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-28" time="06:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-28" time="12:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-28" time="18:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-29" time="00:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-29" time="06:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-29" time="12:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-29" time="18:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-30" time="00:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-30" time="06:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-30" time="12:00:00" value="29.999016" flag="0"/>
+        <event date="2019-11-30" time="18:00:00" value="29.999016" flag="0"/>
+        <event date="2019-12-01" time="00:00:00" value="29.999016" flag="0"/>
+        <event date="2019-12-01" time="06:00:00" value="29.999016" flag="0"/>
+        <event date="2019-12-01" time="12:00:00" value="29.999016" flag="0"/>
+        <event date="2019-12-01" time="18:00:00" value="29.999016" flag="0"/>
+        <event date="2019-12-02" time="00:00:00" value="29.999016" flag="0"/>
+        <event date="2019-12-02" time="06:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-02" time="12:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-02" time="18:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-03" time="00:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-03" time="06:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-03" time="12:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-03" time="18:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-04" time="00:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-04" time="06:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-04" time="12:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-04" time="18:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-05" time="00:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-05" time="06:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-05" time="12:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-05" time="18:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-06" time="00:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-06" time="06:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-06" time="12:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-06" time="18:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-07" time="00:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-07" time="06:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-07" time="12:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-07" time="18:00:00" value="30.409912" flag="1"/>
+        <event date="2019-12-08" time="00:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-08" time="06:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-08" time="12:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-08" time="18:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-09" time="00:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-09" time="06:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-09" time="12:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-09" time="18:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-10" time="00:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-10" time="06:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-10" time="12:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-10" time="18:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-11" time="00:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-11" time="06:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-11" time="12:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-11" time="18:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-12" time="00:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-12" time="06:00:00" value="30.029789" flag="1"/>
+        <event date="2019-12-12" time="12:00:00" value="30.029789" flag="1"/>
+    </series>
+    <series>
+        <header>
+            <type>instantaneous</type>
+            <moduleInstanceId>ADJUSTQ_MHDP1_MHDP1AJ_Forecast</moduleInstanceId>
+            <locationId>MHDP1</locationId>
+            <parameterId>QINE</parameterId>
+            <timeStep unit="second" multiplier="21600"/>
+            <startDate date="2019-11-24" time="12:00:00"/>
+            <endDate date="2019-12-12" time="12:00:00"/>
+            <forecastDate date="2019-11-27" time="12:00:00"/>
+            <missVal>-999</missVal>
+            <stationName>Mahoning Dam</stationName>
+            <lat>40.9275</lat>
+            <lon>-79.2913888889</lon>
+            <x>-79.2913888889</x>
+            <y>40.9275</y>
+            <z>307.848</z>
+            <units>CFS</units>
+            <creationDate>2019-11-27</creationDate>
+            <creationTime>13:25:59</creationTime>
+        </header>
+        <event date="2019-11-24" time="12:00:00" value="220.82161" flag="0"/>
+        <event date="2019-11-24" time="18:00:00" value="398.84592" flag="0"/>
+        <event date="2019-11-25" time="00:00:00" value="403.24838" flag="0"/>
+        <event date="2019-11-25" time="06:00:00" value="403.24838" flag="0"/>
+        <event date="2019-11-25" time="12:00:00" value="407.64005" flag="0"/>
+        <event date="2019-11-25" time="18:00:00" value="722.0754" flag="0"/>
+        <event date="2019-11-26" time="00:00:00" value="728.0816" flag="0"/>
+        <event date="2019-11-26" time="06:00:00" value="728.0816" flag="0"/>
+        <event date="2019-11-26" time="12:00:00" value="662.07733" flag="0"/>
+        <event date="2019-11-26" time="18:00:00" value="596.06226" flag="0"/>
+        <event date="2019-11-27" time="00:00:00" value="596.06226" flag="0"/>
+        <event date="2019-11-27" time="06:00:00" value="596.06226" flag="0"/>
+        <event date="2019-11-27" time="12:00:00" value="590.0668" flag="0"/>
+        <event date="2019-11-27" time="18:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="00:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="06:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="12:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="18:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="00:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="06:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="12:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="18:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="00:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="06:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="12:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="18:00:00" value="440.05014" flag="0"/>
+        <event date="2019-12-01" time="00:00:00" value="440.05014" flag="0"/>
+        <event date="2019-12-01" time="06:00:00" value="440.05014" flag="0"/>
+        <event date="2019-12-01" time="12:00:00" value="440.05014" flag="0"/>
+        <event date="2019-12-01" time="18:00:00" value="340.04266" flag="0"/>
+        <event date="2019-12-02" time="00:00:00" value="340.04266" flag="0"/>
+        <event date="2019-12-02" time="06:00:00" value="339.45065" flag="1"/>
+        <event date="2019-12-02" time="12:00:00" value="339.45065" flag="1"/>
+        <event date="2019-12-02" time="18:00:00" value="339.45065" flag="1"/>
+        <event date="2019-12-03" time="00:00:00" value="339.83078" flag="1"/>
+        <event date="2019-12-03" time="06:00:00" value="339.83078" flag="1"/>
+        <event date="2019-12-03" time="12:00:00" value="339.83078" flag="1"/>
+        <event date="2019-12-03" time="18:00:00" value="339.83078" flag="1"/>
+        <event date="2019-12-04" time="00:00:00" value="339.83078" flag="1"/>
+        <event date="2019-12-04" time="06:00:00" value="339.83078" flag="1"/>
+        <event date="2019-12-04" time="12:00:00" value="340.2109" flag="1"/>
+        <event date="2019-12-04" time="18:00:00" value="340.2109" flag="1"/>
+        <event date="2019-12-05" time="00:00:00" value="340.2109" flag="1"/>
+        <event date="2019-12-05" time="06:00:00" value="340.2109" flag="1"/>
+        <event date="2019-12-05" time="12:00:00" value="340.2109" flag="1"/>
+        <event date="2019-12-05" time="18:00:00" value="340.591" flag="1"/>
+        <event date="2019-12-06" time="00:00:00" value="340.591" flag="1"/>
+        <event date="2019-12-06" time="06:00:00" value="340.591" flag="1"/>
+        <event date="2019-12-06" time="12:00:00" value="340.591" flag="1"/>
+        <event date="2019-12-06" time="18:00:00" value="340.591" flag="1"/>
+        <event date="2019-12-07" time="00:00:00" value="340.591" flag="1"/>
+        <event date="2019-12-07" time="06:00:00" value="340.97116" flag="1"/>
+        <event date="2019-12-07" time="12:00:00" value="340.97116" flag="1"/>
+        <event date="2019-12-07" time="18:00:00" value="340.97116" flag="1"/>
+        <event date="2019-12-08" time="00:00:00" value="340.97116" flag="1"/>
+        <event date="2019-12-08" time="06:00:00" value="340.97116" flag="1"/>
+        <event date="2019-12-08" time="12:00:00" value="340.97116" flag="1"/>
+        <event date="2019-12-08" time="18:00:00" value="341.3513" flag="1"/>
+        <event date="2019-12-09" time="00:00:00" value="341.3513" flag="1"/>
+        <event date="2019-12-09" time="06:00:00" value="341.3513" flag="1"/>
+        <event date="2019-12-09" time="12:00:00" value="341.3513" flag="1"/>
+        <event date="2019-12-09" time="18:00:00" value="341.3513" flag="1"/>
+        <event date="2019-12-10" time="00:00:00" value="341.3513" flag="1"/>
+        <event date="2019-12-10" time="06:00:00" value="341.7314" flag="1"/>
+        <event date="2019-12-10" time="12:00:00" value="341.7314" flag="1"/>
+        <event date="2019-12-10" time="18:00:00" value="341.7314" flag="1"/>
+        <event date="2019-12-11" time="00:00:00" value="341.7314" flag="1"/>
+        <event date="2019-12-11" time="06:00:00" value="341.7314" flag="1"/>
+        <event date="2019-12-11" time="12:00:00" value="342.11154" flag="1"/>
+        <event date="2019-12-11" time="18:00:00" value="342.11154" flag="1"/>
+        <event date="2019-12-12" time="00:00:00" value="342.11154" flag="1"/>
+        <event date="2019-12-12" time="06:00:00" value="342.11154" flag="1"/>
+        <event date="2019-12-12" time="12:00:00" value="342.11154" flag="1"/>
+    </series>
+    <series>
+        <header>
+            <type>instantaneous</type>
+            <moduleInstanceId>ADJUSTQ_CCDP1_CCDP1AJ_Forecast</moduleInstanceId>
+            <locationId>CCDP1</locationId>
+            <parameterId>QINE</parameterId>
+            <timeStep unit="second" multiplier="21600"/>
+            <startDate date="2019-11-24" time="12:00:00"/>
+            <endDate date="2019-12-12" time="12:00:00"/>
+            <forecastDate date="2019-11-27" time="12:00:00"/>
+            <missVal>-999</missVal>
+            <stationName>Crooked Creek Dam</stationName>
+            <lat>40.7202777778</lat>
+            <lon>-79.5116666667</lon>
+            <x>-79.5116666667</x>
+            <y>40.7202777778</y>
+            <z>251.46</z>
+            <units>CFS</units>
+            <creationDate>2019-11-27</creationDate>
+            <creationTime>13:25:59</creationTime>
+        </header>
+        <event date="2019-11-24" time="12:00:00" value="129.01622" flag="0"/>
+        <event date="2019-11-24" time="18:00:00" value="268.38733" flag="0"/>
+        <event date="2019-11-25" time="00:00:00" value="268.38733" flag="0"/>
+        <event date="2019-11-25" time="06:00:00" value="271.51962" flag="0"/>
+        <event date="2019-11-25" time="12:00:00" value="271.51962" flag="0"/>
+        <event date="2019-11-25" time="18:00:00" value="515.83887" flag="0"/>
+        <event date="2019-11-26" time="00:00:00" value="515.83887" flag="0"/>
+        <event date="2019-11-26" time="06:00:00" value="515.83887" flag="0"/>
+        <event date="2019-11-26" time="12:00:00" value="515.83887" flag="0"/>
+        <event date="2019-11-26" time="18:00:00" value="511.6409" flag="0"/>
+        <event date="2019-11-27" time="00:00:00" value="511.6409" flag="0"/>
+        <event date="2019-11-27" time="06:00:00" value="511.6409" flag="0"/>
+        <event date="2019-11-27" time="12:00:00" value="511.6409" flag="0"/>
+        <event date="2019-11-27" time="18:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="00:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="06:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="12:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-28" time="18:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="00:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="06:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="12:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-29" time="18:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="00:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="06:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="12:00:00" value="500.05893" flag="0"/>
+        <event date="2019-11-30" time="18:00:00" value="500.05893" flag="0"/>
+        <event date="2019-12-01" time="00:00:00" value="500.05893" flag="0"/>
+        <event date="2019-12-01" time="06:00:00" value="500.05893" flag="0"/>
+        <event date="2019-12-01" time="12:00:00" value="500.05893" flag="0"/>
+        <event date="2019-12-01" time="18:00:00" value="400.0407" flag="0"/>
+        <event date="2019-12-02" time="00:00:00" value="400.0407" flag="0"/>
+        <event date="2019-12-02" time="06:00:00" value="401.41086" flag="1"/>
+        <event date="2019-12-02" time="12:00:00" value="401.41086" flag="1"/>
+        <event date="2019-12-02" time="18:00:00" value="401.41086" flag="1"/>
+        <event date="2019-12-03" time="00:00:00" value="401.03073" flag="1"/>
+        <event date="2019-12-03" time="06:00:00" value="401.03073" flag="1"/>
+        <event date="2019-12-03" time="12:00:00" value="401.03073" flag="1"/>
+        <event date="2019-12-03" time="18:00:00" value="401.03073" flag="1"/>
+        <event date="2019-12-04" time="00:00:00" value="401.03073" flag="1"/>
+        <event date="2019-12-04" time="06:00:00" value="401.03073" flag="1"/>
+        <event date="2019-12-04" time="12:00:00" value="400.6506" flag="1"/>
+        <event date="2019-12-04" time="18:00:00" value="400.6506" flag="1"/>
+        <event date="2019-12-05" time="00:00:00" value="400.6506" flag="1"/>
+        <event date="2019-12-05" time="06:00:00" value="400.6506" flag="1"/>
+        <event date="2019-12-05" time="12:00:00" value="400.6506" flag="1"/>
+        <event date="2019-12-05" time="18:00:00" value="400.6506" flag="1"/>
+        <event date="2019-12-06" time="00:00:00" value="400.2705" flag="1"/>
+        <event date="2019-12-06" time="06:00:00" value="400.2705" flag="1"/>
+        <event date="2019-12-06" time="12:00:00" value="400.2705" flag="1"/>
+        <event date="2019-12-06" time="18:00:00" value="400.2705" flag="1"/>
+        <event date="2019-12-07" time="00:00:00" value="400.2705" flag="1"/>
+        <event date="2019-12-07" time="06:00:00" value="400.2705" flag="1"/>
+        <event date="2019-12-07" time="12:00:00" value="399.89038" flag="1"/>
+        <event date="2019-12-07" time="18:00:00" value="399.89038" flag="1"/>
+        <event date="2019-12-08" time="00:00:00" value="399.89038" flag="1"/>
+        <event date="2019-12-08" time="06:00:00" value="399.89038" flag="1"/>
+        <event date="2019-12-08" time="12:00:00" value="399.89038" flag="1"/>
+        <event date="2019-12-08" time="18:00:00" value="399.89038" flag="1"/>
+        <event date="2019-12-09" time="00:00:00" value="399.51022" flag="1"/>
+        <event date="2019-12-09" time="06:00:00" value="399.51022" flag="1"/>
+        <event date="2019-12-09" time="12:00:00" value="399.51022" flag="1"/>
+        <event date="2019-12-09" time="18:00:00" value="399.51022" flag="1"/>
+        <event date="2019-12-10" time="00:00:00" value="399.51022" flag="1"/>
+        <event date="2019-12-10" time="06:00:00" value="399.51022" flag="1"/>
+        <event date="2019-12-10" time="12:00:00" value="399.1301" flag="1"/>
+        <event date="2019-12-10" time="18:00:00" value="399.1301" flag="1"/>
+        <event date="2019-12-11" time="00:00:00" value="399.1301" flag="1"/>
+        <event date="2019-12-11" time="06:00:00" value="399.1301" flag="1"/>
+        <event date="2019-12-11" time="12:00:00" value="399.1301" flag="1"/>
+        <event date="2019-12-11" time="18:00:00" value="398.75" flag="1"/>
+        <event date="2019-12-12" time="00:00:00" value="398.75" flag="1"/>
+        <event date="2019-12-12" time="06:00:00" value="398.75" flag="1"/>
+        <event date="2019-12-12" time="12:00:00" value="398.75" flag="1"/>
+    </series>
+    <series>
+        <header>
+            <type>instantaneous</type>
+            <moduleInstanceId>ADJUSTQ_CMDP1_CMDP1AJ_Forecast</moduleInstanceId>
+            <locationId>CMDP1</locationId>
+            <parameterId>QINE</parameterId>
+            <timeStep unit="second" multiplier="21600"/>
+            <startDate date="2019-11-24" time="12:00:00"/>
+            <endDate date="2019-12-12" time="12:00:00"/>
+            <forecastDate date="2019-11-27" time="12:00:00"/>
+            <missVal>-999</missVal>
+            <stationName>Conemaugh Dam</stationName>
+            <lat>40.4544444444</lat>
+            <lon>-79.3911111111</lon>
+            <x>-79.3911111111</x>
+            <y>40.4544444444</y>
+            <z>262.128</z>
+            <units>CFS</units>
+            <creationDate>2019-11-27</creationDate>
+            <creationTime>13:25:59</creationTime>
+        </header>
+        <event date="2019-11-24" time="12:00:00" value="582.88727" flag="0"/>
+        <event date="2019-11-24" time="18:00:00" value="1100.7928" flag="0"/>
+        <event date="2019-11-25" time="00:00:00" value="1165.7098" flag="0"/>
+        <event date="2019-11-25" time="06:00:00" value="1152.5026" flag="0"/>
+        <event date="2019-11-25" time="12:00:00" value="1165.7098" flag="0"/>
+        <event date="2019-11-25" time="18:00:00" value="1165.7098" flag="0"/>
+        <event date="2019-11-26" time="00:00:00" value="1165.7098" flag="0"/>
+        <event date="2019-11-26" time="06:00:00" value="1179.0248" flag="0"/>
+        <event date="2019-11-26" time="12:00:00" value="1152.5026" flag="0"/>
+        <event date="2019-11-26" time="18:00:00" value="1179.0248" flag="0"/>
+        <event date="2019-11-27" time="00:00:00" value="1179.0248" flag="0"/>
+        <event date="2019-11-27" time="06:00:00" value="1179.0248" flag="0"/>
+        <event date="2019-11-27" time="12:00:00" value="1126.4216" flag="0"/>
+        <event date="2019-11-27" time="18:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-28" time="00:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-28" time="06:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-28" time="12:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-28" time="18:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-29" time="00:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-29" time="06:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-29" time="12:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-29" time="18:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-30" time="00:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-30" time="06:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-30" time="12:00:00" value="1250.142" flag="0"/>
+        <event date="2019-11-30" time="18:00:00" value="1250.142" flag="0"/>
+        <event date="2019-12-01" time="00:00:00" value="1250.142" flag="0"/>
+        <event date="2019-12-01" time="06:00:00" value="1250.142" flag="0"/>
+        <event date="2019-12-01" time="12:00:00" value="1250.142" flag="0"/>
+        <event date="2019-12-01" time="18:00:00" value="1250.142" flag="0"/>
+        <event date="2019-12-02" time="00:00:00" value="1250.142" flag="0"/>
+        <event date="2019-12-02" time="06:00:00" value="1253.2686" flag="1"/>
+        <event date="2019-12-02" time="12:00:00" value="1253.2686" flag="1"/>
+        <event date="2019-12-02" time="18:00:00" value="1252.8884" flag="1"/>
+        <event date="2019-12-03" time="00:00:00" value="1252.8884" flag="1"/>
+        <event date="2019-12-03" time="06:00:00" value="1252.5083" flag="1"/>
+        <event date="2019-12-03" time="12:00:00" value="1252.5083" flag="1"/>
+        <event date="2019-12-03" time="18:00:00" value="1252.5083" flag="1"/>
+        <event date="2019-12-04" time="00:00:00" value="1252.1282" flag="1"/>
+        <event date="2019-12-04" time="06:00:00" value="1252.1282" flag="1"/>
+        <event date="2019-12-04" time="12:00:00" value="1251.748" flag="1"/>
+        <event date="2019-12-04" time="18:00:00" value="1251.748" flag="1"/>
+        <event date="2019-12-05" time="00:00:00" value="1251.368" flag="1"/>
+        <event date="2019-12-05" time="06:00:00" value="1251.368" flag="1"/>
+        <event date="2019-12-05" time="12:00:00" value="1251.368" flag="1"/>
+        <event date="2019-12-05" time="18:00:00" value="1250.9878" flag="1"/>
+        <event date="2019-12-06" time="00:00:00" value="1250.9878" flag="1"/>
+        <event date="2019-12-06" time="06:00:00" value="1250.6077" flag="1"/>
+        <event date="2019-12-06" time="12:00:00" value="1250.6077" flag="1"/>
+        <event date="2019-12-06" time="18:00:00" value="1250.6077" flag="1"/>
+        <event date="2019-12-07" time="00:00:00" value="1250.2277" flag="1"/>
+        <event date="2019-12-07" time="06:00:00" value="1250.2277" flag="1"/>
+        <event date="2019-12-07" time="12:00:00" value="1249.8474" flag="1"/>
+        <event date="2019-12-07" time="18:00:00" value="1249.8474" flag="1"/>
+        <event date="2019-12-08" time="00:00:00" value="1249.8474" flag="1"/>
+        <event date="2019-12-08" time="06:00:00" value="1249.4673" flag="1"/>
+        <event date="2019-12-08" time="12:00:00" value="1249.4673" flag="1"/>
+        <event date="2019-12-08" time="18:00:00" value="1249.0872" flag="1"/>
+        <event date="2019-12-09" time="00:00:00" value="1249.0872" flag="1"/>
+        <event date="2019-12-09" time="06:00:00" value="1248.7072" flag="1"/>
+        <event date="2019-12-09" time="12:00:00" value="1248.7072" flag="1"/>
+        <event date="2019-12-09" time="18:00:00" value="1248.7072" flag="1"/>
+        <event date="2019-12-10" time="00:00:00" value="1248.3269" flag="1"/>
+        <event date="2019-12-10" time="06:00:00" value="1248.3269" flag="1"/>
+        <event date="2019-12-10" time="12:00:00" value="1247.9468" flag="1"/>
+        <event date="2019-12-10" time="18:00:00" value="1247.9468" flag="1"/>
+        <event date="2019-12-11" time="00:00:00" value="1247.9468" flag="1"/>
+        <event date="2019-12-11" time="06:00:00" value="1247.5668" flag="1"/>
+        <event date="2019-12-11" time="12:00:00" value="1247.5668" flag="1"/>
+        <event date="2019-12-11" time="18:00:00" value="1247.1865" flag="1"/>
+        <event date="2019-12-12" time="00:00:00" value="1247.1865" flag="1"/>
+        <event date="2019-12-12" time="06:00:00" value="1247.1865" flag="1"/>
+        <event date="2019-12-12" time="12:00:00" value="1246.8064" flag="1"/>
+    </series>
+    <series>
+        <header>
+            <type>instantaneous</type>
+            <moduleInstanceId>ADJUSTQ_SLTP1_SLTP1AJ_Forecast</moduleInstanceId>
+            <locationId>LHDP1</locationId>
+            <parameterId>QINE</parameterId>
+            <timeStep unit="second" multiplier="21600"/>
+            <startDate date="2019-11-24" time="12:00:00"/>
+            <endDate date="2019-12-12" time="12:00:00"/>
+            <forecastDate date="2019-11-27" time="12:00:00"/>
+            <missVal>-999</missVal>
+            <stationName>Loyalhanna Dam</stationName>
+            <lat>40.4586111111</lat>
+            <lon>-79.4502777778</lon>
+            <x>-79.4502777778</x>
+            <y>40.4586111111</y>
+            <z>301.752</z>
+            <units>CFS</units>
+            <creationDate>2019-11-27</creationDate>
+            <creationTime>13:25:59</creationTime>
+        </header>
+        <event date="2019-11-24" time="12:00:00" value="117.45578" flag="0"/>
+        <event date="2019-11-24" time="18:00:00" value="248.62479" flag="0"/>
+        <event date="2019-11-25" time="00:00:00" value="248.62479" flag="0"/>
+        <event date="2019-11-25" time="06:00:00" value="252.42445" flag="0"/>
+        <event date="2019-11-25" time="12:00:00" value="252.42445" flag="0"/>
+        <event date="2019-11-25" time="18:00:00" value="469.1558" flag="0"/>
+        <event date="2019-11-26" time="00:00:00" value="463.537" flag="0"/>
+        <event date="2019-11-26" time="06:00:00" value="463.537" flag="0"/>
+        <event date="2019-11-26" time="12:00:00" value="463.537" flag="0"/>
+        <event date="2019-11-26" time="18:00:00" value="463.537" flag="0"/>
+        <event date="2019-11-27" time="00:00:00" value="457.96133" flag="0"/>
+        <event date="2019-11-27" time="06:00:00" value="457.96133" flag="0"/>
+        <event date="2019-11-27" time="12:00:00" value="457.96133" flag="0"/>
+        <event date="2019-11-27" time="18:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-28" time="00:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-28" time="06:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-28" time="12:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-28" time="18:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-29" time="00:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-29" time="06:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-29" time="12:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-29" time="18:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-30" time="00:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-30" time="06:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-30" time="12:00:00" value="350.04233" flag="0"/>
+        <event date="2019-11-30" time="18:00:00" value="250.0241" flag="0"/>
+        <event date="2019-12-01" time="00:00:00" value="250.0241" flag="0"/>
+        <event date="2019-12-01" time="06:00:00" value="250.0241" flag="0"/>
+        <event date="2019-12-01" time="12:00:00" value="250.0241" flag="0"/>
+        <event date="2019-12-01" time="18:00:00" value="250.0241" flag="0"/>
+        <event date="2019-12-02" time="00:00:00" value="250.0241" flag="0"/>
+        <event date="2019-12-02" time="06:00:00" value="252.02216" flag="1"/>
+        <event date="2019-12-02" time="12:00:00" value="251.64204" flag="1"/>
+        <event date="2019-12-02" time="18:00:00" value="251.64204" flag="1"/>
+        <event date="2019-12-03" time="00:00:00" value="251.2619" flag="1"/>
+        <event date="2019-12-03" time="06:00:00" value="251.2619" flag="1"/>
+        <event date="2019-12-03" time="12:00:00" value="250.88177" flag="1"/>
+        <event date="2019-12-03" time="18:00:00" value="250.88177" flag="1"/>
+        <event date="2019-12-04" time="00:00:00" value="250.50166" flag="1"/>
+        <event date="2019-12-04" time="06:00:00" value="250.50166" flag="1"/>
+        <event date="2019-12-04" time="12:00:00" value="250.50166" flag="1"/>
+        <event date="2019-12-04" time="18:00:00" value="250.12154" flag="1"/>
+        <event date="2019-12-05" time="00:00:00" value="250.12154" flag="1"/>
+        <event date="2019-12-05" time="06:00:00" value="249.74142" flag="1"/>
+        <event date="2019-12-05" time="12:00:00" value="249.74142" flag="1"/>
+        <event date="2019-12-05" time="18:00:00" value="249.36128" flag="1"/>
+        <event date="2019-12-06" time="00:00:00" value="249.36128" flag="1"/>
+        <event date="2019-12-06" time="06:00:00" value="248.98117" flag="1"/>
+        <event date="2019-12-06" time="12:00:00" value="248.98117" flag="1"/>
+        <event date="2019-12-06" time="18:00:00" value="248.60104" flag="1"/>
+        <event date="2019-12-07" time="00:00:00" value="248.60104" flag="1"/>
+        <event date="2019-12-07" time="06:00:00" value="248.22093" flag="1"/>
+        <event date="2019-12-07" time="12:00:00" value="248.22093" flag="1"/>
+        <event date="2019-12-07" time="18:00:00" value="247.84079" flag="1"/>
+        <event date="2019-12-08" time="00:00:00" value="247.84079" flag="1"/>
+        <event date="2019-12-08" time="06:00:00" value="247.46066" flag="1"/>
+        <event date="2019-12-08" time="12:00:00" value="247.46066" flag="1"/>
+        <event date="2019-12-08" time="18:00:00" value="247.08055" flag="1"/>
+        <event date="2019-12-09" time="00:00:00" value="247.08055" flag="1"/>
+        <event date="2019-12-09" time="06:00:00" value="246.70042" flag="1"/>
+        <event date="2019-12-09" time="12:00:00" value="246.70042" flag="1"/>
+        <event date="2019-12-09" time="18:00:00" value="246.3203" flag="1"/>
+        <event date="2019-12-10" time="00:00:00" value="246.3203" flag="1"/>
+        <event date="2019-12-10" time="06:00:00" value="245.94017" flag="1"/>
+        <event date="2019-12-10" time="12:00:00" value="245.94017" flag="1"/>
+        <event date="2019-12-10" time="18:00:00" value="245.56006" flag="1"/>
+        <event date="2019-12-11" time="00:00:00" value="245.56006" flag="1"/>
+        <event date="2019-12-11" time="06:00:00" value="245.17993" flag="1"/>
+        <event date="2019-12-11" time="12:00:00" value="245.17993" flag="1"/>
+        <event date="2019-12-11" time="18:00:00" value="244.7998" flag="1"/>
+        <event date="2019-12-12" time="00:00:00" value="244.7998" flag="1"/>
+        <event date="2019-12-12" time="06:00:00" value="244.41968" flag="1"/>
+        <event date="2019-12-12" time="12:00:00" value="244.41968" flag="1"/>
+    </series>
+</TimeSeries>
