@@ -185,6 +185,7 @@ class S3Loader:
             else:
                 raise FileNotFoundError(f"Could not find local csv file: {s3_path}")
         else:
+            fs = fsspec.filesystem("s3")
             s3_uri = (
                 f"s3://{self.obs_prefix}/gages-{self.basin_id}_{self.variable_name}.csv"
             )
