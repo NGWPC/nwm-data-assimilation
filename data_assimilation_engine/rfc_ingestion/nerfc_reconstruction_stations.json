@@ -1,0 +1,32 @@
+{
+  "BNGM1": {
+    "name": "Wyman Dam",
+    "reservoir_feature_id": 3318110,
+    "outlet_channel_feature_id": 3319188,
+    "rfc": "NERFC"
+  },
+  "STDM1": {
+    "name": "Sebago Lake",
+    "reservoir_feature_id": 6719717,
+    "outlet_channel_feature_id": 6724973,
+    "rfc": "NERFC"
+  },
+  "RKWM1": {
+    "name": "Moosehead Lake",
+    "reservoir_feature_id": 166195943,
+    "outlet_channel_feature_id": 1022652,
+    "rfc": "NERFC"
+  },
+  "SCIR1": {
+    "name": "Scituate Reservoir",
+    "reservoir_feature_id": 6127281,
+    "outlet_channel_feature_id": 6130387,
+    "rfc": "NERFC"
+  },
+  "STVC3": {
+    "name": "Stevenson Dam",
+    "reservoir_feature_id": 120052268,
+    "outlet_channel_feature_id": 7718286,
+    "rfc": "NERFC"
+  }
+}
