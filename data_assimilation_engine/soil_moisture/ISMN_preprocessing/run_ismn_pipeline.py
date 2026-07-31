@@ -132,6 +132,7 @@ def run_pipeline(
     verbose: bool = False,
     download_first: bool = False,
     staged_raw_dir: str | None = None,
+    allow_single_depth_proxy: bool = False,
 ) -> None:
     configure_logging(verbose=verbose)
 
@@ -195,6 +196,7 @@ def run_pipeline(
         target_depth_m=target_depth_m,
         min_coverage_fraction=min_station_coverage_fraction,
         qc_policy=qc_policy,
+        allow_single_depth_proxy=allow_single_depth_proxy,
     )
     station_top1m_df = top1m_calculator.run(raw_df)
     logger.info("Station top-1m rows: %d", len(station_top1m_df))
@@ -295,6 +297,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Local directory for staged raw ISMN files when --download-first is used",
     )
+    parser.add_argument(
+        "--allow-single-depth-proxy",
+        action="store_true",
+        help="Allow single-depth proxy output when true top-1m integration is not possible",
+    )
 
     return parser
 
@@ -315,6 +322,7 @@ def main() -> None:
         verbose=args.verbose,
         download_first=args.download_first,
         staged_raw_dir=args.staged_raw_dir,
+        allow_single_depth_proxy=args.allow_single_depth_proxy,
     )
 
 

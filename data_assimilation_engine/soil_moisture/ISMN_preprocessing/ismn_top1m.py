@@ -35,12 +35,14 @@ class ISMNTop1MCalculator:
         qc_policy: Optional[QCPolicy] = None,
         resample_rule: str = "3h",
         time_offset_hours: int = 1,
+        allow_single_depth_proxy: bool = False,
     ) -> None:
         self.target_depth_m = target_depth_m
         self.min_coverage_fraction = min_coverage_fraction
         self.qc_policy = qc_policy or QCPolicy()
         self.resample_rule = resample_rule
         self.time_offset_hours = time_offset_hours
+        self.allow_single_depth_proxy = allow_single_depth_proxy
 
     def run(self, raw_df: pd.DataFrame) -> pd.DataFrame:
         """Compute top-1m station soil moisture from normalized raw archive rows."""
@@ -178,12 +180,10 @@ class ISMNTop1MCalculator:
     def compute_group(self, df_group: pd.DataFrame) -> dict | None:
         """Compute one station timestamp top-1m weighted average.
 
-        Strict physical version:
-        1. True depth intervals: depth_from_m < depth_to_m
-        2. Point-depth sensors with multiple nominal station depths:
-           use midpoint-derived representative weights
-        3. Single-depth cases are rejected because they do not support a
-           physically defensible top-1m estimate.
+        Strict behavior by default:
+        - true interval integration is allowed
+        - multi-depth point sensors can be integrated with midpoint weights
+        - single-depth cases are rejected unless allow_single_depth_proxy=True
         """
         overlaps: list[float] = []
         weighted_values: list[float] = []
@@ -211,11 +211,29 @@ class ISMNTop1MCalculator:
 
         # Case 1: point-depth sensors
         if is_point_depth:
-            # Reject single-depth profiles: not enough information for top-1m
+            # Reject single-depth profiles unless explicitly allowed.
             if num_nominal_depths <= 1:
-                return None
+                if not self.allow_single_depth_proxy:
+                    return None
 
-            # Build representative weights from the station's full nominal depth profile
+                values = df_group["soil_moisture_m3m3"].to_numpy(dtype=float)
+                if values.size == 0:
+                    return None
+
+                return {
+                    "gage_id": first["gage_id"],
+                    "network": first["network"],
+                    "station": first["station"],
+                    "station_key": first["station_key"],
+                    "timestamp": first["timestamp"],
+                    "soil_moisture": float(np.mean(values)),
+                    "valid_thickness_m": 0.0,
+                    "coverage_fraction": 0.0,
+                    "n_layers_used": 1,
+                    "method_used": "single_depth_proxy",
+                    "num_depths": 1,
+                }
+
             depth_weights = self._compute_point_depth_weights(
                 np.array(nominal_depths, dtype=float),
                 self.target_depth_m,
@@ -235,6 +253,26 @@ class ISMNTop1MCalculator:
 
             total_overlap = float(np.sum(overlaps))
             coverage_fraction = total_overlap / self.target_depth_m
+
+            # If only one usable depth survives at this timestamp, fall back to proxy
+            # only when explicitly allowed.
+            if num_available_depths == 1:
+                if not self.allow_single_depth_proxy:
+                    return None
+
+                return {
+                    "gage_id": first["gage_id"],
+                    "network": first["network"],
+                    "station": first["station"],
+                    "station_key": first["station_key"],
+                    "timestamp": first["timestamp"],
+                    "soil_moisture": float(np.sum(weighted_values) / total_overlap),
+                    "valid_thickness_m": 0.0,
+                    "coverage_fraction": coverage_fraction,
+                    "n_layers_used": 1,
+                    "method_used": "single_depth_proxy",
+                    "num_depths": num_nominal_depths,
+                }
 
             if coverage_fraction < self.min_coverage_fraction:
                 return None
