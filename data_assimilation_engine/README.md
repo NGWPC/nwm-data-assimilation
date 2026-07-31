@@ -1,39 +1,19 @@
-# Data Assimilation Pipelines
+# Data Assimilation Pipelines: ISMN Soil Moisture and SNODAS SWE Reprocessing
 
-## Executive Summary
+## Overview
 
-This document describes two related data-assimilation workflows used to produce
+This document covers two related data-assimilation pipelines used to produce
 **ngenCERF-ready basin time series**:
 
-1. **ISMN Top-1m Soil Moisture Pipeline**
-2. **SNODAS SWE NHF Reprocessing Workflow**
+1. [ISMN Top-1m Soil Moisture Pipeline](#1-ismn-top-1m-soil-moisture-pipeline)
+2. [SNODAS SWE NHF Reprocessing Workflow](#2-snodas-swe-nhf-reprocessing-workflow)
 
 Both workflows generate standardized basin-level CSV products that are consumed
 by the existing visualization, validation, and data assimilation tools. The
-implementations were designed to preserve backward compatibility with the
-existing processing pipelines while extending support for new observation
-sources.
+implementations preserve backward compatibility with the existing processing
+pipelines while extending support for new observation sources.
 
-The README combines architecture, implementation details, and operational
-instructions. All commands are intended to be executed from the repository root
-unless noted otherwise.
-
----
-
-# Repository Structure
-
-```text
-data_assimilation_engine/
-├── soil_moisture/
-│   ├── ISMN_preprocessing/
-│   ├── timeseries/
-│   └── ...
-├── swe/
-│   ├── SNODAS_preprocessing/
-│   ├── nhf_swe_multi_provider_workflow/
-│   └── ...
-└── utils/
-```
+Run the commands below from the repository root.
 
 ---
 
@@ -42,281 +22,429 @@ data_assimilation_engine/
 ## 1.1 Objective
 
 Construct an ISMN (International Soil Moisture Network) archive and integrate
-it into the existing soil-moisture workflow without changing existing modeled
-or SMAP processing.
+it into the existing soil-moisture workflow, consistent with the modeled and
+SMAP pipelines.
 
-**Key requirement:** represent soil moisture over the **top 1 m (0–1 m)**.
-
-The top-1 m soil column is widely used when comparing land-surface models and
-observation products. Where multiple observation depths exist, thickness-
-weighted averaging is used to produce a representative value.
+The required product is average soil moisture over the top 1 meter (0–1 m).
+When multiple soil depths or intervals are available, the pipeline applies
+depth-overlap and thickness-weighted averaging.
 
 ## 1.2 Design Principles
 
-- Preserve existing SMAP workflow behavior.
-- Preserve backward compatibility.
-- Produce the same basin CSV format expected by existing time-series utilities.
-- Keep ISMN-specific logic isolated from existing code.
+- Preserve the existing modeled and SMAP workflows.
+- Keep ISMN support optional.
+- Produce the same basin-level CSV schema expected by existing time-series
+  utilities.
+- Avoid hard-coded input and output locations.
 
-## 1.3 Existing Workflow
-
-Existing soil moisture supports
-
-- modeled profile soil moisture
-- SMAP basin observations
-
-Expected basin filename
+## 1.3 Pipeline
 
 ```text
-gages-<basin_id>_soil_moisture.csv
+Raw ISMN .stm files
+        │
+        ▼
+Normalization and basin mapping
+        │
+        ▼
+Station-level top-1 m calculation
+        │
+        ▼
+Basin aggregation
+        │
+        ▼
+gages-<gage_id>_soil_moisture.csv
 ```
 
-Schema
+The final schema is:
 
 ```text
 timestamp,basin_avg_soil_moisture
 ```
 
-## 1.4 Pipeline Overview
+## 1.4 Main Modules
 
-```text
-Optional Download
-        │
-Raw .stm Files
-        │
-ISMN Preprocessor
-        │
-Normalized Parquet
-        │
-Top-1m Calculator
-        │
-Station Time Series
-        │
-Basin Aggregation
-        │
-Basin CSV
-```
-
-## 1.5 Core Modules
-
-| Module | Responsibility |
+| Module | Purpose |
 |---|---|
-| ismn_download.py | Optional staging/synchronization |
-| ismn_preprocessor.py | Parse, normalize, basin mapping |
-| ismn_top1m.py | QC and top-1 m computation |
-| ismn_basin_timeseries.py | Basin aggregation |
-| run_ismn_pipeline.py | End-to-end workflow |
-| check_ismn_basin_product.py | Validation |
-| compare_ismn_vs_model_basin.py | Comparison utilities |
+| `ismn_download.py` | Optional staging of raw `.stm` files |
+| `ismn_preprocessor.py` | Parsing, normalization, metadata extraction, and basin mapping |
+| `ismn_top1m.py` | QC and top-1 m computation |
+| `ismn_basin_timeseries.py` | Basin aggregation |
+| `run_ismn_pipeline.py` | End-to-end orchestration |
+| `check_ismn_basin_product.py` | Product validation |
+| `compare_ismn_vs_model_basin.py` | Comparison with modeled soil moisture |
 
-Modified existing modules
+## 1.5 Run the Pipeline
 
-- `soil_moisture/timeseries/timeseries.py`
-- `utils/timeseries.py`
-
-## 1.6 Running the Pipeline
-
-Display supported options
+Inspect the supported arguments:
 
 ```bash
-python -m data_assimilation_engine.soil_moisture.ISMN_preprocessing.run_ismn_pipeline --help
+python -m \
+  data_assimilation_engine.soil_moisture.ISMN_preprocessing.run_ismn_pipeline \
+  --help
 ```
 
-Example
+Set the required paths:
 
 ```bash
 export ISMN_RAW=/path/to/raw_ismn
-export ISMN_GPKG=/path/to/gpkg
-export OUTPUT_ROOT=/path/to/output
-
-python -m data_assimilation_engine.soil_moisture.ISMN_preprocessing.run_ismn_pipeline \
-  --raw-ismn-source "$ISMN_RAW" \
-  --gpkg-source "$ISMN_GPKG" \
-  --output-root "$OUTPUT_ROOT"
+export ISMN_GPKG=/path/to/gpkg_or_gpkg_directory
+export ISMN_OUTPUT=/path/to/output
 ```
 
-Expected outputs
+Run:
+
+```bash
+python -m \
+  data_assimilation_engine.soil_moisture.ISMN_preprocessing.run_ismn_pipeline \
+  --raw-ismn-source "$ISMN_RAW" \
+  --gpkg-source "$ISMN_GPKG" \
+  --output-root "$ISMN_OUTPUT" \
+  --target-depth-m 1.0 \
+  --min-station-coverage-fraction 0.5 \
+  --min-basin-station-count 1 \
+  --basin-aggregation-method mean \
+  --verbose
+```
+
+For a small smoke test:
+
+```bash
+python -m \
+  data_assimilation_engine.soil_moisture.ISMN_preprocessing.run_ismn_pipeline \
+  --raw-ismn-source "$ISMN_RAW" \
+  --gpkg-source "$ISMN_GPKG" \
+  --output-root "$ISMN_OUTPUT" \
+  --limit-files 20 \
+  --verbose
+```
+
+## 1.6 Optional Single-Depth Proxy
+
+Strict processing requires sufficient vertical information for a meaningful
+top-1 m estimate. For exploratory testing only:
+
+```bash
+python -m \
+  data_assimilation_engine.soil_moisture.ISMN_preprocessing.run_ismn_pipeline \
+  --raw-ismn-source "$ISMN_RAW" \
+  --gpkg-source "$ISMN_GPKG" \
+  --output-root "$ISMN_OUTPUT" \
+  --allow-single-depth-proxy \
+  --verbose
+```
+
+The single-depth proxy is an approximation and should not be treated as a
+physically integrated 0–1 m measurement.
+
+## 1.7 Validate One Basin
+
+```bash
+export GAGE_ID=<gage_id>
+
+python -m \
+  data_assimilation_engine.soil_moisture.ISMN_preprocessing.check_ismn_basin_product \
+  --output-root "$ISMN_OUTPUT" \
+  --gage-id "$GAGE_ID" \
+  --verbose
+```
+
+## 1.8 Output Structure
 
 ```text
-output_root/
+<ISMN_OUTPUT>/
+├── ismn_station_index.parquet
 ├── ismn_raw/
 ├── ismn_station_top1m/
 ├── ismn_csv/
+│   └── gages-<gage_id>_soil_moisture.csv
 ├── ismn_csv_metadata/
 └── ismn_basin_summary.csv
 ```
 
 ---
 
-# 2. SNODAS SWE NHF Reprocessing
+# 2. SNODAS SWE NHF Reprocessing Workflow
 
 ## 2.1 Objective
 
-Generate basin-average Snow Water Equivalent CSV products from daily SNODAS
-NetCDF files and NHF GeoPackages.
+Generate one basin-average Snow Water Equivalent CSV per NHF gage using:
 
-Filename
+- a provider gage list;
+- NHF gage GeoPackages;
+- daily SNODAS NetCDF files.
+
+The output filename is:
 
 ```text
 gages-<gage_id>_swe.csv
 ```
 
-Schema
+The output schema is:
 
 ```text
 timestamp,basin_avg_swe
 ```
 
-Daily timestamps are expected at **06:00:00**.
+Daily timestamps must be written at `06:00:00`.
 
-Interpretation
-
-| Value | Meaning |
-|---|---|
-| blank | missing source or invalid processing |
-| 0.0 | valid snow-free observation |
-| positive | valid SWE |
+A blank SWE field means no valid value was available. A numeric `0.0` means
+valid source coverage with zero SWE.
 
 ## 2.2 Workflow
 
 ```text
-NHF GeoPackages
+Provider gage list
         │
-SNODAS NetCDF
+        ▼
+Fetch NHF GeoPackages
         │
-Raster Clipping
+        ▼
+Read daily SNODAS NetCDF files
         │
-Area-weighted Average
+        ▼
+Compute basin-overlap weights
         │
-Basin CSV
+        ▼
+Generate basin SWE CSVs
+        │
+        ▼
+Validate expected outputs
 ```
 
 ## 2.3 Main Modules
 
-| Module | Responsibility |
+| Module | Purpose |
 |---|---|
-| fetch_nhf_gage_gpkgs.py | Download GeoPackages |
-| swe_gage_nhf.py | Compute basin SWE |
-| validate_swe_csv_nhf.py | Validation |
-| snodas_downloader.sh | Download raw SNODAS |
-| snodas_convert.py | Convert raw files |
-| run_nhf_swe_reprocess.sh | End-to-end wrapper |
+| `fetch_nhf_gage_gpkgs.py` | Downloads NHF gage GeoPackages |
+| `nhf_gage_list_utils.py` | Parses provider-specific gage lists |
+| `swe_gage_nhf.py` | Computes daily basin-average SWE |
+| `validate_swe_csv_nhf.py` | Validates expected output files |
+| `snodas_downloader.sh` | Downloads raw SNODAS source data |
+| `snodas_convert.py` | Converts raw SNODAS data to NetCDF |
 
-## 2.4 Running the Workflow
+## 2.4 Required Variables
 
-Show options
-
-```bash
-python -m data_assimilation_engine.swe.SNODAS_preprocessing.swe_gage_nhf --help
-```
-
-Wrapper example
+Set portable paths and run parameters:
 
 ```bash
 export GAGE_LIST=/path/to/gage_list.txt
 export WORK_DIR=/path/to/work
-export SNODAS_NC_PREFIX=/path/to/snodas_nc
-export OUTPUT_PREFIX=/path/to/output
+export OUTPUT_ROOT=/path/to/output
+export SNODAS_NC_PREFIX=/path/or/remote/prefix/to/snodas_nc
 
-GAGE_LIST="$GAGE_LIST" \
-WORK_DIR="$WORK_DIR" \
-SNODAS_NC_PREFIX_CONUS="$SNODAS_NC_PREFIX" \
-S3_OUTPUT_PREFIX="$OUTPUT_PREFIX" \
-REPORT_S3_PREFIX="" \
-bash data_assimilation_engine/swe/nhf_swe_multi_provider_workflow/run_nhf_swe_reprocess.sh
+export DOMAIN=CONUS
+export PROVIDER=<provider>
+export START_DATE=YYYY-MM-DD
+export END_DATE=YYYY-MM-DD
 ```
 
-Expected outputs
+Examples of `PROVIDER` include `USGS`, `CADWR`, and `ENVCA`.
+
+## 2.5 Step 1: Fetch NHF GeoPackages
+
+Inspect the supported arguments:
+
+```bash
+python -m \
+  data_assimilation_engine.swe.SNODAS_preprocessing.fetch_nhf_gage_gpkgs \
+  --help
+```
+
+Run:
+
+```bash
+python -m \
+  data_assimilation_engine.swe.SNODAS_preprocessing.fetch_nhf_gage_gpkgs \
+  --gage-list "$GAGE_LIST" \
+  --output-dir "$WORK_DIR/nhf_gpkgs" \
+  --environment oe \
+  --source nhf \
+  --domains "$DOMAIN" \
+  --default-domain "$DOMAIN" \
+  --default-agency "$PROVIDER" \
+  --manifest "$WORK_DIR/nhf_gpkg_fetch_manifest.csv"
+```
+
+Add `--enabled-only` when the input list contains enabled/disabled rows and only
+enabled entries should be processed.
+
+The expected GeoPackage directory is:
 
 ```text
-WORK_DIR/
+$WORK_DIR/nhf_gpkgs/$DOMAIN/$PROVIDER/
+```
+
+## 2.6 Step 2: Generate SWE CSVs
+
+Inspect the supported arguments:
+
+```bash
+python -m \
+  data_assimilation_engine.swe.SNODAS_preprocessing.swe_gage_nhf \
+  --help
+```
+
+Run:
+
+```bash
+python -m \
+  data_assimilation_engine.swe.SNODAS_preprocessing.swe_gage_nhf \
+  --gage-gpkg-dir "$WORK_DIR/nhf_gpkgs/$DOMAIN/$PROVIDER" \
+  --output-dir "$OUTPUT_ROOT/$DOMAIN/$PROVIDER" \
+  --start-date "$START_DATE" \
+  --end-date "$END_DATE" \
+  --domain "$DOMAIN" \
+  --snodas-nc-prefix "$SNODAS_NC_PREFIX" \
+  --scratch-dir "$WORK_DIR/scratch_${DOMAIN}_${PROVIDER}" \
+  --source-units mm \
+  --output-units m \
+  --manifest-file "$WORK_DIR/swe_nhf_${DOMAIN}_${PROVIDER}_manifest.csv"
+```
+
+Use `--overwrite` only when existing destination files should be replaced.
+
+The generated files are written under:
+
+```text
+$OUTPUT_ROOT/$DOMAIN/$PROVIDER/
+```
+
+## 2.7 Step 3: Validate SWE CSVs
+
+Inspect the supported arguments:
+
+```bash
+python -m \
+  data_assimilation_engine.swe.SNODAS_preprocessing.validate_swe_csv_nhf \
+  --help
+```
+
+Run:
+
+```bash
+python -m \
+  data_assimilation_engine.swe.SNODAS_preprocessing.validate_swe_csv_nhf \
+  --csv-prefix "$OUTPUT_ROOT/$DOMAIN/$PROVIDER" \
+  --gage-list "$GAGE_LIST" \
+  --domains "$DOMAIN" \
+  --agencies "$PROVIDER" \
+  --default-domain "$DOMAIN" \
+  --default-agency "$PROVIDER" \
+  --start-date "$START_DATE" \
+  --end-date "$END_DATE" \
+  --report "$WORK_DIR/swe_nhf_${DOMAIN}_${PROVIDER}_validation.csv"
+```
+
+Add `--enabled-only` when it was also used during GeoPackage retrieval.
+
+## 2.8 Output Structure
+
+```text
+$WORK_DIR/
 ├── nhf_gpkgs/
-├── scratch_*/
-├── *_manifest.csv
-└── *_validation.csv
+│   └── <domain>/
+│       └── <provider>/
+├── scratch_<domain>_<provider>/
+├── nhf_gpkg_fetch_manifest.csv
+├── swe_nhf_<domain>_<provider>_manifest.csv
+└── swe_nhf_<domain>_<provider>_validation.csv
 
-OUTPUT_PREFIX/
-└── <Domain>/<Provider>/gages-*_swe.csv
+$OUTPUT_ROOT/
+└── <domain>/
+    └── <provider>/
+        └── gages-<gage_id>_swe.csv
 ```
 
-## 2.5 Parallel Processing
+## 2.9 Parallel Processing
 
-For parallel execution:
+To process several shards concurrently:
 
-- split gage lists into non-overlapping shards;
-- use a unique `WORK_DIR` per worker;
-- use a unique local output directory per worker;
-- share the same read-only SNODAS NetCDF directory;
-- merge outputs only after all workers finish.
+- create non-overlapping gage lists;
+- use a unique `WORK_DIR` for every worker;
+- use a unique `OUTPUT_ROOT` for every worker;
+- share only the read-only SNODAS input prefix;
+- combine results after every worker finishes;
+- check for duplicate filenames before combining.
 
----
+## 2.10 Preserve Local Outputs
 
-# 3. Validation
+Do not delete a worker directory until its CSVs are safely retained.
 
-Validate ISMN products
+When the destination is remote, local generated CSVs are normally available
+under:
+
+```text
+$WORK_DIR/scratch_<domain>_<provider>/outputs/
+```
+
+Copy them to a persistent directory before cleanup:
 
 ```bash
-python -m data_assimilation_engine.soil_moisture.ISMN_preprocessing.check_ismn_basin_product --help
+export SAVED_OUTPUTS=/path/to/saved_outputs
+
+mkdir -p "$SAVED_OUTPUTS"
+
+find "$WORK_DIR" \
+  -path '*/scratch_*/outputs/gages-*_swe.csv' \
+  -exec cp -uv {} "$SAVED_OUTPUTS/" \;
 ```
-
-Validate SWE products
-
-```bash
-python -m data_assimilation_engine.swe.SNODAS_preprocessing.validate_swe_csv_nhf --help
-```
-
-Recommended checks
-
-- timestamps
-- duplicate records
-- expected gage count
-- missing values
-- manifest contents
 
 ---
 
-# 4. Backward Compatibility
-
-The implementation preserves existing modeled and SMAP workflows.
-
-ISMN support is optional and does not change existing processing when ISMN data
-are unavailable.
-
-The SWE workflow continues to produce the same CSV schema expected by existing
-downstream tools.
-
----
-
-# 5. Known Limitations
+# 3. Backward Compatibility
 
 ## ISMN
 
-- Multi-depth observations provide the best top-1 m estimates.
-- Some basins may contain no stations.
-- Single-depth proxy mode is intended only for exploratory analyses.
+- Existing modeled soil-moisture processing remains unchanged.
+- Existing SMAP processing remains unchanged.
+- ISMN loading is optional.
 
 ## SWE
 
-- Historical source coverage may be incomplete.
-- Missing source data produce blank values rather than zero.
-- Long-running jobs should preserve local outputs until validation completes.
+- The existing CSV schema remains unchanged.
+- Timestamps remain daily at 06Z.
+- Input and output locations are supplied through CLI arguments or environment
+  variables.
+- No project-specific local path or remote bucket is required by this README.
 
 ---
 
-# 6. Operational Checklist
+# 4. Known Limitations
 
-Before processing
+## ISMN
 
-- Activate the correct environment.
-- Verify required Python packages.
-- Run each tool with `--help`.
-- Confirm input paths.
-- Perform a small smoke test.
+- True top-1 m integration requires multiple depths or explicit intervals.
+- Some basins may contain no usable stations.
+- Single-depth proxy mode is approximate.
 
-After processing
+## SNODAS SWE
 
-- Validate outputs.
-- Verify timestamps.
-- Compare expected versus generated gage counts.
-- Preserve manifests and validation reports.
-- Verify uploaded objects before deleting local results.
+- Historical source coverage may be incomplete.
+- A source file may exist but contain no valid cells over a basin.
+- Missing values must not be converted to zero.
+- Long-running jobs should preserve local outputs before cleanup.
+
+---
+
+# 5. Minimal Validation Checklist
+
+Before processing:
+
+```text
+[ ] Run each module with --help.
+[ ] Confirm the gage-list provider and format.
+[ ] Confirm the requested date range exists in the SNODAS input.
+[ ] Use explicit work, input, and output paths.
+[ ] Run a short smoke test.
+```
+
+After processing:
+
+```text
+[ ] Compare expected and generated gage IDs.
+[ ] Confirm timestamps are at 06:00:00.
+[ ] Check duplicate timestamps.
+[ ] Review blank, zero, positive, and negative values separately.
+[ ] Preserve manifests and validation reports.
+[ ] Do not delete local outputs until verification is complete.
+```
