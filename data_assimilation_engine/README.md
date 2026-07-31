@@ -288,34 +288,6 @@ SWE_basin(t) = sum(SWE_cell * overlap_area) / sum(overlap_area)
 means 100 mm of water depth if all snow melted). Units are typically mm or
 kg/m² (numerically equivalent, since water density ≈ 1000 kg/m³).
 
-### 2.5 Processing by Agency/Region
-
-**USGS (CONUS)**
-- NHF GeoPackages fetched from the Icefabric API (`source=nhf`,
-  `id_type=gage_id`).
-- Outputs uploaded to s3:
-- Some southern USGS gages produced all-zero SWE — this is valid and
-  classified as `valid_zero_snow`, not missing data.
-
-**ENVCA (Canada)**
-- **Issue:** the existing SNODAS NetCDF archive
-  (`s3://ngwpc-forcing/snodas_nc_v4/`) was effectively clipped to CONUS, so
-  ENVCA basins had no usable raster coverage.
-- **Resolution:** regenerated SNODAS NetCDF files from the unmasked SNODAS
-  source (`https://noaadata.apps.nsidc.org/NOAA/G02158/unmasked/`):
-- A bash octal-parsing issue on month `08` was fixed using base-10
-  conversion: `month=$(printf "%02d" "$((10#$month))")`.
-
-**CADWR**
-
-### 2.6 Status Summary
-
-**Completed:**
-- NHF GeoPackage retrieval workflow
-- USGS NHF SWE processing tested, outputs placed on S3
-- ENVCA blocker resolved using the unmasked SNODAS source
-- CADWR gage-ID parsing issue fixed; outputs generated and placed on S3
-- Validation and manifest reporting implemented
 
 ---
 
