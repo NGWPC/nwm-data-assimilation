@@ -1,10 +1,12 @@
 """Soil Moisture Timeseries."""
 
 import logging
+import os
 from functools import lru_cache
 
 import numpy as np
 import pandas as pd
+import fsspec
 
 from data_assimilation_engine.utils.timeseries import (
     DataParser,
@@ -71,6 +73,7 @@ class SoilMoistureProcessor(Processor):
         self.variable = "Soil_Moisture"
         self.sim_col_output = "Simulated_Soil_Moisture"
         self.obs_col_output = "SMAP_Soil_Moisture"
+        self.gage_col_output = "ISMN_Soil_Moisture"
 
         self.lfl = SoilMoistureFileLoader(csv_directory, self.gpkg_file)
         self.s3l = SoilMoistureS3Loader(self.basin_id, self.direct_s3)
@@ -82,7 +85,20 @@ class SoilMoistureProcessor(Processor):
     @time_function
     def gage_ts(self) -> dict:
         """Dictionary of SNOTEL timeseries data."""
-        return {}
+        if not self.s3l.gage_prefix:
+            return {}
+
+        gage_df = self.s3l.gage_df
+        if gage_df is None or gage_df.empty:
+            return {}
+
+        values = self.parser.parse_obs_dataframe(gage_df)
+        return {
+            "ISMN": {
+                "soil_moisture": values,
+                "soil moisture": values,
+            }
+        }
 
 
 class SoilMoisturePlotter(Plotter):
@@ -154,12 +170,51 @@ class SoilMoistureDataParser(DataParser):
 class SoilMoistureS3Loader(S3Loader):
     """Handles loading and retrieving soil moisture data from S3."""
 
-    def __init__(self, basin_id: str, direct_s3: bool):
+    def __init__(
+        self,
+        basin_id: str,
+        direct_s3: bool,
+        gage_prefix: str = None,
+    ):
         """Initialize the SoilMoistureS3Loader with basin ID and S3 options."""
         super().__init__(basin_id, direct_s3)
         self.variable_name = "soil_moisture"
         # self.gage_prefix = SNOTEL_CSV_PREFIX
         self.obs_prefix = SMAP_CSV_PREFIX
+
+        self.gage_prefix = gage_prefix or os.getenv("ISMN_CSV_PREFIX")
+
+    @property
+    @lru_cache
+    def gage_path(self) -> str:
+        """Construct the basin-level ISMN CSV path."""
+        filename = f"gages-{self.basin_id}_{self.variable_name}.csv"
+        if not self.direct_s3:
+            fs = fsspec.filesystem("local")
+            path = f"{self.s3_mount_point}/{self.gage_prefix}/{filename}"
+            if fs.exists(path):
+                return path
+            raise FileNotFoundError(f"Could not find local ISMN csv file: {path}")
+        else:
+            fs = fsspec.filesystem("s3")
+            uri = f"s3://{self.gage_prefix}/{filename}"
+            if fs.exists(uri):
+                return uri
+            raise FileNotFoundError(f"Could not find ISMN S3 csv file: {uri}")
+
+    @property
+    @lru_cache
+    @time_function
+    def gage_df(self):
+        """Read basin-level ISMN CSV."""
+        try:
+            with fsspec.open(self.gage_path) as f:
+                return pd.read_csv(f)
+        except Exception as e:
+            logger.info(f"Error reading ISMN file: {e}")
+            return None
+
+
 
 
 class SoilMoistureFileLoader(FileLoader):

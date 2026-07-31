@@ -674,9 +674,10 @@ class Plotter:
 
             for i, (station_id, data) in enumerate(gage_ts.items()):
                 color = cmap(i % 30)
+                gage_key = self.variable_name.lower()
                 ax.plot(
                     times,
-                    data["swe"],
+                    data[gage_key],
                     "o-",
                     markersize=3,
                     linewidth=1,
