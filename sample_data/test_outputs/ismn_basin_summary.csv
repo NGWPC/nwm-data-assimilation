@@ -1,0 +1,2 @@
+gage_id,n_timestamps,start_time,end_time,mean_basin_soil_moisture,mean_station_count,mean_proxy_station_count,mean_integrated_station_count,mean_station_coverage_fraction
+07241780,12,2024-12-31 22:00:00+00:00,2025-01-02 22:00:00+00:00,0.3488703703703704,2.0,2.0,0.0,0.0
