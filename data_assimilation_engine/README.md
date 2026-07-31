@@ -240,7 +240,91 @@ export END_DATE=YYYY-MM-DD
 
 Examples of `PROVIDER` include `USGS`, `CADWR`, and `ENVCA`.
 
-## 2.5 Step 1: Fetch NHF GeoPackages
+## 2.5 Gage List Format
+
+The processing scripts accept plain text gage-list files. Each non-comment line
+represents one gage.
+
+Supported format:
+
+```text
+<gage_id> <domain> <agency> <enabled>
+```
+
+where:
+
+- **gage_id** – Provider-specific gage identifier.
+- **domain** – Domain containing the gage (for example, `CONUS`).
+- **agency** – Data provider (for example, `USGS`, `CADWR`, or `ENVCA`).
+- **enabled** – Optional boolean (`true` or `false`) indicating whether the
+  gage should be processed when the `--enabled-only` option is used.
+
+Blank lines and lines beginning with `#` are ignored.
+
+### Example: USGS
+
+```text
+01011000 CONUS USGS true
+01015800 CONUS USGS true
+02236500 CONUS USGS true
+08025500 CONUS USGS true
+11274790 CONUS USGS true
+```
+
+### Example: CADWR
+
+```text
+CMF CONUS CADWR true
+CHC CONUS CADWR true
+CLV CONUS CADWR true
+CDR CONUS CADWR true
+MCK CONUS CADWR true
+```
+
+### Example: ENVCA
+
+```text
+02AB021 CONUS ENVCA true
+02AC001 CONUS ENVCA true
+02AD010 CONUS ENVCA true
+02BA003 CONUS ENVCA true
+02CF011 CONUS ENVCA true
+```
+
+For one-column gage lists, specify the provider and domain using the command-line
+options:
+
+```bash
+--default-domain CONUS
+--default-agency USGS
+```
+
+or
+
+```bash
+--default-domain CONUS
+--default-agency CADWR
+```
+
+or
+
+```bash
+--default-domain CONUS
+--default-agency ENVCA
+```
+
+This allows simple lists such as:
+
+```text
+01011000
+01015800
+02236500
+08025500
+```
+
+to be interpreted correctly.
+
+## 2.6 Step 1: Fetch NHF GeoPackages
 
 Inspect the supported arguments:
 
@@ -274,7 +358,7 @@ The expected GeoPackage directory is:
 $WORK_DIR/nhf_gpkgs/$DOMAIN/$PROVIDER/
 ```
 
-## 2.6 Step 2: Generate SWE CSVs
+## 2.7 Step 2: Generate SWE CSVs
 
 Inspect the supported arguments:
 
@@ -309,7 +393,7 @@ The generated files are written under:
 $OUTPUT_ROOT/$DOMAIN/$PROVIDER/
 ```
 
-## 2.7 Step 3: Validate SWE CSVs
+## 2.8 Step 3: Validate SWE CSVs
 
 Inspect the supported arguments:
 
@@ -337,7 +421,7 @@ python -m \
 
 Add `--enabled-only` when it was also used during GeoPackage retrieval.
 
-## 2.8 Output Structure
+## 2.9 Output Structure
 
 ```text
 $WORK_DIR/
@@ -355,7 +439,7 @@ $OUTPUT_ROOT/
         └── gages-<gage_id>_swe.csv
 ```
 
-## 2.9 Parallel Processing
+## 2.10 Parallel Processing
 
 To process several shards concurrently:
 
@@ -366,7 +450,7 @@ To process several shards concurrently:
 - combine results after every worker finishes;
 - check for duplicate filenames before combining.
 
-## 2.10 Preserve Local Outputs
+## 2.11 Preserve Local Outputs
 
 Do not delete a worker directory until its CSVs are safely retained.
 
