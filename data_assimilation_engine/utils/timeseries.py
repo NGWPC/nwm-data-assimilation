@@ -129,13 +129,27 @@ class FileLoader(DataLoader):
 
         """
         try:
-            # Extract just the catchment numbers from divide_id
-            catchment_ids = pd.to_numeric(
-                self.catchment_gdf["divide_id"].str.replace("cat-", "", regex=False)
-            )
+            # Extract just the catchment numbers from divide_id (or div_id)
+            catchment_field = ''
+            catchment_area_field = ''
+            if "divide_id" in self.catchment_gdf.columns:
+                catchment_field = "divide_id"
+                catchment_area_field = "areasqkm"
+            elif "div_id" in self.catchment_gdf.columns:
+                catchment_field = "div_id"
+                catchment_area_field = "area_sqkm"
+            if catchment_field == '':
+                raise ValueError("Field for catchment ID is missing int the basins geodataframe/geopackage")
+            else:
+                catchment_ids = pd.to_numeric(
+                    self.catchment_gdf[catchment_field]
+                    .astype(str)
+                    .str.split("-")
+                    .str[-1]
+                )
 
             # Get areas from geometry
-            areas = self.catchment_gdf["areasqkm"]
+            areas = self.catchment_gdf[catchment_area_field]
 
             # Create dictionary with integer keys
             area_dict = dict(zip(catchment_ids, areas))
@@ -160,7 +174,7 @@ class S3Loader:
 
     @property
     @lru_cache
-    def obs_path(self) -> tuple[str, str]:
+    def obs_path(self) -> str:
         """Parse/construct observed data s3 path from gpkg filename."""
         # Construct the path using the numeric part and s3 options
         if not self.direct_s3:
@@ -190,18 +204,22 @@ class S3Loader:
         -------
         pandas.DataFrame
             DataFrame containing the CSV data
-
         """
         try:
+            obs_path = self.obs_path
+
             # Use fsspec to open the file
-            with fsspec.open(self.obs_path) as f:
+            with fsspec.open(obs_path) as f:
                 df = pd.read_csv(f)
 
             return df
 
         except Exception as e:
-            logger.info(f"Error reading S3 file {self.obs_path}: {e}")
-            return None
+            logger.exception(
+                f"Error reading observed data file: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise
 
 
 class DataParser:
@@ -739,7 +757,7 @@ class Processor:
     @property
     def basin_id(self) -> str:
         """Extract the basin ID from the geopackage filename."""
-        return re.search(r"(\d+)", self.gpkg_filename).group(1)
+        return self.gpkg_filename.split("_", 1)[-1]
 
     @property
     @lru_cache
@@ -855,7 +873,11 @@ class Processor:
                 f"Basin average {self.variable} data table saved to {self.csv_output}"
             )
         except Exception as e:
-            logger.info(f"Error saving data to CSV: {e}")
+            logger.exception(
+                f"Error saving data to CSV {self.csv_output}: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise
 
     @time_function
     def process(self) -> None:

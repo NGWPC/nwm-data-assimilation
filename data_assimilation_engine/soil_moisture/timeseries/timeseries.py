@@ -181,6 +181,7 @@ class SoilMoistureS3Loader(S3Loader):
         self.variable_name = "soil_moisture"
         # self.gage_prefix = SNOTEL_CSV_PREFIX
         self.obs_prefix = SMAP_CSV_PREFIX
+
         self.gage_prefix = gage_prefix or os.getenv("ISMN_CSV_PREFIX")
 
     @property
@@ -212,6 +213,8 @@ class SoilMoistureS3Loader(S3Loader):
         except Exception as e:
             logger.info(f"Error reading ISMN file: {e}")
             return None
+
+
 
 
 class SoilMoistureFileLoader(FileLoader):

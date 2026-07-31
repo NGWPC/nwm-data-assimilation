@@ -8,3 +8,7 @@
 */launch.json
 build
 .idea/
+
+**/testdata/**
+**/test_data/**
+**/testdata_out/**
