@@ -6,12 +6,12 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import dask.array as da
+import dask
 import time
 import math
 import re
 import shapely
-import warnings
-import inspect
+import traceback
 from pyproj import CRS
 # from typing import List, Tuple, Optional
 from .DataReader import DataReader
@@ -169,7 +169,7 @@ class DataProcessor(DataReader):
         tabular_layers = layers[layers[consts.GPKG_GEOMETRY_TYPE_IDENTIFIER].isna()]
         return layer_name.lower() in tabular_layers['name'].tolist()
     
-    def create_template_netcdf_using_config(self, mdata: NetCDFMetadata, template_netcdf_folder: str) -> None:
+    def create_template_netcdf_using_config(self, mdata: NetCDFMetadata, template_netcdf_folder: str) -> bool:
         """
         Create a template netcdf file that aligns to a national reference grid defined in the metadata config.
         For gridded NWM products, the output template grid covers the extents of the divides in the geopackage.
@@ -180,6 +180,10 @@ class DataProcessor(DataReader):
                 The instance of the custom class that captures the metadata of NWM products from the config
             template_netcdf_folder : str
                 The folder where the template will be saved or retrived from if it exists.
+
+        Returns:
+            bool
+                Returns True if the template has been generated/identified. Otherwise returns False.
         """
         
         os.makedirs(template_netcdf_folder, exist_ok = True)
@@ -196,129 +200,137 @@ class DataProcessor(DataReader):
 
         print(f"--Start creating template netcdf covering geopackage extent for {mdata.output_class}.{mdata.category}.{mdata.domain}")
 
-        # Check if the template file already exists for this request
-        template_nc_name = self._geo_id + '_' + self._output_class + '_' + self._category + '_' + self._domain + '.nc'
-        template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
-        if os.path.isfile(template_nc_file):
-            print(f"----Reusing existing template file found here: {template_nc_file}")
-        elif mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):  # these are non-gridded products
-            ds = xr.open_dataset(file_name)
+        try:
+            # Check if the template file already exists for this request
+            template_nc_name = self._geo_id + '_' + self._output_class + '_' + self._category + '_' + self._domain + '.nc'
+            template_nc_file = os.path.join(template_netcdf_folder, template_nc_name)
+            if os.path.isfile(template_nc_file):
+                print(f"----Reusing existing template file found here: {template_nc_file}")
+            elif mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):  # these are non-gridded products
+                ds = xr.open_dataset(file_name)
 
-            # Delete any variable that is in the ignore list. Zero the valid min and max attribute in the time dimension
-            ds = ds.drop_vars(consts.NWM_VARS_IGNORE_LIST, errors="ignore")
-            if consts.DIM_TIME in ds.coords:
-                attrs_to_reset = ['valid_min', 'valid_max']
-                for attr in attrs_to_reset:
-                    if attr in ds[consts.DIM_TIME].attrs:
-                        ds[consts.DIM_TIME].attrs[attr] = 0
+                # Delete any variable that is in the ignore list. Zero the valid min and max attribute in the time dimension
+                ds = ds.drop_vars(consts.NWM_VARS_IGNORE_LIST, errors="ignore")
+                time_dim = consts.DIM_TIME
+                if time_dim in ds.coords:
+                    attrs_to_reset = ['valid_min', 'valid_max']
+                    for attr in attrs_to_reset:
+                        if attr in ds[time_dim].attrs:
+                            ds[time_dim].attrs[attr] = 0
 
-            # Slice all coordinates and variable arrays to zero length.
-            dims = list(ds.sizes.keys())
-            zero_slices = {dim: slice(0, 0) for dim in dims}
-            ds_template = ds.isel(zero_slices)
+                # Slice all coordinates and variable arrays to zero length.
+                dims = list(ds.sizes.keys())
+                zero_slices = {dim: slice(0, 0) for dim in dims}
+                ds_template = ds.isel(zero_slices)
 
-            # Save to nc file
-            ds_template.to_netcdf(template_nc_file)
-            print(f"----Template netcdf saved to: {template_nc_file}")
-        else: # gridded products - land and terrain_rt
-            ds = xr.open_dataset(file_name)
-            # To do: Have to figure out a workflow when CRS is "Not Available"
-            target_crs = CRS.from_user_input(wkt) 
-            
-            gdf = self._gpkg_gdf.to_crs(target_crs)
-            gdf["geometry"] = gdf["geometry"].make_valid()
-            union_geom = shapely.ops.unary_union(gdf.geometry) 
-            
-            # Get bounding box and snap to origin in the national reference grid
-            minx, miny, maxx, maxy = gdf.total_bounds
-
-            snapped_minx = np.floor(minx / res_x) * res_x
-            snapped_miny = np.floor(miny / res_y) * res_y
-            snapped_maxx = np.ceil(maxx / res_x) * res_x
-            snapped_maxy = np.ceil(maxy / res_y) * res_y
-
-            # Filter national grid to a sub-grid within the snapped bounding box using slice
-            ds_subset = ds.sortby([x_name, y_name]).sel(
-                {
-                    x_name: slice(snapped_minx, snapped_maxx),
-                    y_name: slice(snapped_miny, snapped_maxy)
-                }
-            )
-
-            # create 1D coordinate arrays for the snapped subset
-            x_subset_1D = ds_subset[x_name].values
-            y_subset_1D = ds_subset[y_name].values
-            xx, yy = np.meshgrid(x_subset_1D, y_subset_1D)
-
-            shapely.prepare(union_geom) # for faster processing.
-            flat_mask = shapely.intersects_xy(union_geom, xx.ravel(), yy.ravel())
-            grid_mask = flat_mask.reshape(len(y_subset_1D), len(x_subset_1D))
-            
-            mask_da = xr.DataArray(grid_mask,
-                dims=(y_name, x_name),
-                coords={
-                    y_name: y_subset_1D,
-                    x_name: x_subset_1D
-                }
-            )
-            ds_masked = ds_subset.copy()
-
-            for var in ds_subset.data_vars:
-                da = ds_subset[var]
-                # Only mask numeric variables
-                if np.issubdtype(da.dtype, np.number):
-                    ds_masked[var] = da.where(mask_da)
-                else:
-                    ds_masked[var] = da # Leave non-numeric untouched
-            
-            # Combine variables to find valid outer coordinate indices
-            combined_mask = ds_masked.to_array().notnull()
-            dims_to_collapse = [dim for dim in combined_mask.dims if dim not in [x_name, y_name]]
-            dataset_mask = combined_mask.any(dim=dims_to_collapse)
-
-            # Extract non-null coordinates along each axis to locate the outer envelope borders
-            y_valid = ds_masked[y_name].where(dataset_mask.any(dim=x_name), drop=True)
-            x_valid = ds_masked[x_name].where(dataset_mask.any(dim=y_name), drop=True)
-            
-            if y_valid.size > 0 and x_valid.size > 0:
-                ymin, ymax = y_valid.values.min(), y_valid.values.max()
-                xmin, xmax = x_valid.values.min(), x_valid.values.max()
-                ds_clipped = ds_masked.sel({
-                    x_name: slice(xmin, xmax),
-                    y_name: slice(ymin, ymax)
-                })
-            else:
-                ds_clipped = ds_masked.copy()
-
-            # For land category, we are reducing the snow_layers from 3 (in current product) to 1.
-            # We can remove the additional layers and retain the first layer in template
-            if consts.DIM_SNOW_LYR in ds_clipped.dims:
-                ds_clipped = ds_clipped.isel(**{consts.DIM_SNOW_LYR: [0]})
-
-            # Set values of NWM variables to zero in the template grid and compress
-            encoding_dict = {}
-            nwm_vars = [name for name, var in ds_clipped.data_vars.items() 
-                       if var.ndim > 0 and name not in ds_clipped.coords]
-            for var in nwm_vars:
-                ds_clipped[var] = ds_clipped[var] * 0
-                if ds_clipped[var].dtype == np.float64:
-                    ds_clipped[var] = ds_clipped[var].astype(np.float32)
-                    encoding_dict[var] = {"zlib": True, "complevel": 4, "shuffle": True}
+                # Save to nc file
+                ds_template.to_netcdf(template_nc_file)
+                print(f"----Template netcdf saved to: {template_nc_file}")
+            else: # gridded products - land and terrain_rt
+                ds = xr.open_dataset(file_name)
+                # To do: Have to figure out a workflow when CRS is "Not Available"
+                target_crs = CRS.from_user_input(wkt) 
                 
-            # Create crs as a scalar variable.
-            crs_attrs = ds_clipped["crs"].attrs
-            ds_clipped = ds_clipped.drop_encoding()
-            del ds_clipped["crs"]
-            ds_clipped["crs"] = xr.DataArray("", dims=())
-            ds_clipped["crs"].attrs = crs_attrs
+                gdf = self._gpkg_gdf.to_crs(target_crs)
+                gdf["geometry"] = gdf["geometry"].make_valid()
+                union_geom = shapely.ops.unary_union(gdf.geometry) 
+                
+                # Get bounding box and snap to origin in the national reference grid
+                minx, miny, maxx, maxy = gdf.total_bounds
 
-            # Save to nc file
-            ds_clipped.to_netcdf(template_nc_file, engine = "netcdf4", encoding = encoding_dict)
-            print(f"----Template netcdf saved to: {template_nc_file}")
+                snapped_minx = np.floor(minx / res_x) * res_x
+                snapped_miny = np.floor(miny / res_y) * res_y
+                snapped_maxx = np.ceil(maxx / res_x) * res_x
+                snapped_maxy = np.ceil(maxy / res_y) * res_y
 
-        self._template_netcdf_ds = xr.open_dataset(template_nc_file) # assign to class variable.
+                # Filter national grid to a sub-grid within the snapped bounding box using slice
+                ds_subset = ds.sortby([x_name, y_name]).sel(
+                    {
+                        x_name: slice(snapped_minx, snapped_maxx),
+                        y_name: slice(snapped_miny, snapped_maxy)
+                    }
+                )
 
-    def produce_nwm_output_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> None:
+                # create 1D coordinate arrays for the snapped subset
+                x_subset_1D = ds_subset[x_name].values
+                y_subset_1D = ds_subset[y_name].values
+                xx, yy = np.meshgrid(x_subset_1D, y_subset_1D)
+
+                shapely.prepare(union_geom) # for faster processing.
+                flat_mask = shapely.intersects_xy(union_geom, xx.ravel(), yy.ravel())
+                grid_mask = flat_mask.reshape(len(y_subset_1D), len(x_subset_1D))
+                
+                mask_da = xr.DataArray(grid_mask,
+                    dims=(y_name, x_name),
+                    coords={
+                        y_name: y_subset_1D,
+                        x_name: x_subset_1D
+                    }
+                )
+                ds_masked = ds_subset.copy()
+
+                for var in ds_subset.data_vars:
+                    da = ds_subset[var]
+                    # Only mask numeric variables
+                    if np.issubdtype(da.dtype, np.number):
+                        ds_masked[var] = da.where(mask_da)
+                    else:
+                        ds_masked[var] = da # Leave non-numeric untouched
+                
+                # Combine variables to find valid outer coordinate indices
+                combined_mask = ds_masked.to_array().notnull()
+                dims_to_collapse = [dim for dim in combined_mask.dims if dim not in [x_name, y_name]]
+                dataset_mask = combined_mask.any(dim=dims_to_collapse)
+
+                # Extract non-null coordinates along each axis to locate the outer envelope borders
+                y_valid = ds_masked[y_name].where(dataset_mask.any(dim=x_name), drop=True)
+                x_valid = ds_masked[x_name].where(dataset_mask.any(dim=y_name), drop=True)
+                
+                if y_valid.size > 0 and x_valid.size > 0:
+                    ymin, ymax = y_valid.values.min(), y_valid.values.max()
+                    xmin, xmax = x_valid.values.min(), x_valid.values.max()
+                    ds_clipped = ds_masked.sel({
+                        x_name: slice(xmin, xmax),
+                        y_name: slice(ymin, ymax)
+                    })
+                else:
+                    ds_clipped = ds_masked.copy()
+
+                # For land category, we are reducing the snow_layers from 3 (in current product) to 1.
+                # We can remove the additional layers and retain the first layer in template
+                if consts.DIM_SNOW_LYR in ds_clipped.dims:
+                    ds_clipped = ds_clipped.isel(**{consts.DIM_SNOW_LYR: [0]})
+
+                # Set values of NWM variables to zero in the template grid and compress
+                encoding_dict = {}
+                nwm_vars = [name for name, var in ds_clipped.data_vars.items() 
+                        if var.ndim > 0 and name not in ds_clipped.coords]
+                for var in nwm_vars:
+                    ds_clipped[var] = ds_clipped[var] * 0
+                    if ds_clipped[var].dtype == np.float64:
+                        ds_clipped[var] = ds_clipped[var].astype(np.float32)
+                        encoding_dict[var] = {"zlib": True, "complevel": 4, "shuffle": True}
+                    
+                # Create crs as a scalar variable.
+                crs_attrs = ds_clipped["crs"].attrs
+                ds_clipped = ds_clipped.drop_encoding()
+                del ds_clipped["crs"]
+                ds_clipped["crs"] = xr.DataArray("", dims=())
+                ds_clipped["crs"].attrs = crs_attrs
+
+                # Save to nc file
+                ds_clipped.to_netcdf(template_nc_file, engine = "netcdf4", encoding = encoding_dict)
+                print(f"----Template netcdf saved to: {template_nc_file}")
+
+            self._template_netcdf_ds = xr.open_dataset(template_nc_file) # assign to class variable.
+            return True
+        except Exception as e:
+            self._template_netcdf_ds = None
+            print(f"Error in creating template netcdf for {mdata.output_class}.{mdata.category}.{mdata.domain}: {e}")
+            print(traceback.format_exc())
+            return False
+
+    def produce_nwm_output_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> bool:
         """
         Produces NWM output products for land, terrain, channel and reservoir categories depending on the
         NWM `nwm_output_class`. The product uses the template from `create_template_netcdf_using_config`
@@ -330,82 +342,105 @@ class DataProcessor(DataReader):
                 The folder where the output product will be saved or overwritten if it exists.
             output_cycle_hr : str
                 The hour in a day (0-23) for which the outputs are produced after simulations are run.
+        Returns:
+            bool
+                Returns True if the NWM product has been generated. Otherwise returns False.
         """
         produce_output = False
         is_gridded = True
         ds_modified = self._catchment_ds
 
         print(f"--Started nwm output product generation for {mdata.output_class}.{mdata.category}.{mdata.domain}")
-
-        # # if the output needs to have SOIL_M or SOIL_T, we need to
-        # # stack the ngen output into the layers.
-        var_prefix_list = []
-        if 'SOIL_M' in mdata.nwm_variables:
-            var_prefix_list.append('SOIL_M_')
-        if 'SOIL_T' in mdata.nwm_variables:
-            var_prefix_list.append('SOIL_T_')
+        try:
+            # # if the output needs to have SOIL_M or SOIL_T, we need to
+            # # stack the ngen output into the layers.
+            var_prefix_list = []
+            if 'SOIL_M' in mdata.nwm_variables:
+                var_prefix_list.append('SOIL_M_')
+            if 'SOIL_T' in mdata.nwm_variables:
+                var_prefix_list.append('SOIL_T_')
+                
+            if len(var_prefix_list) > 0:
+                ds_modified = self.stack_soil_variables(var_prefix_list)
             
-        if len(var_prefix_list) > 0:
-            ds_modified = self.stack_soil_variables(var_prefix_list)
-        
-        # if the output needs to have SNLIQ (snow layer liquid water), we need to expand 
-        # dimensions to include a snow layer. It is assumed to be of length=1
-        if 'SNLIQ' in mdata.nwm_variables:
-            expanded_var = ds_modified['SNLIQ'].expand_dims(dim = consts.DIM_SNOW_LYR)
-            expanded_var = expanded_var.transpose(consts.DIM_TIME, consts.DIM_CATCHMENTS, consts.DIM_SNOW_LYR)
-            ds_modified['SNLIQ'] = expanded_var
+            # if the output needs to have SNLIQ (snow layer liquid water), we need to expand 
+            # dimensions to include a snow layer. It is assumed to be of length=1
+            if 'SNLIQ' in mdata.nwm_variables:
+                expanded_var = ds_modified['SNLIQ'].expand_dims(dim = consts.DIM_SNOW_LYR)
+                expanded_var = expanded_var.transpose(consts.DIM_TIME, consts.DIM_SNOW_LYR, consts.DIM_CATCHMENTS)
+                ds_modified['SNLIQ'] = expanded_var
 
-        cat_class_domain = mdata.output_class + '.' + mdata.category +  '.' + mdata.domain
-        if (cat_class_domain in consts.NWM_PRODUCTS_LIST):
-            produce_output = True
-        if mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):
-            is_gridded = False
+            cat_class_domain = mdata.output_class + '.' + mdata.category +  '.' + mdata.domain
+            if (cat_class_domain in consts.NWM_PRODUCTS_LIST):
+                produce_output = True
+            if mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):
+                is_gridded = False
 
-        if produce_output and is_gridded:
-            # Remove data variables that should not be part of the product.
-            # You can remove variables that are in the ignore variables as well.
-            target_variables = [var.strip() for var in mdata.nwm_variables.split(",")]
-            removed_items = list(set(target_variables).intersection(set(consts.NWM_VARS_IGNORE_LIST))) # for logging
-            print(f"----NWM Variables ignored for {mdata.category}: {removed_items}")
-            ignore_set = set(consts.NWM_VARS_IGNORE_LIST)
-            pruned_variables = [item for item in target_variables if item not in ignore_set]
-            variables_to_drop = [var for var in ds_modified.data_vars if var not in pruned_variables and len(ds_modified[var].dims) > 0]
-            ds_filtered = ds_modified.drop_vars(variables_to_drop, errors="ignore")
+            if produce_output and is_gridded:
+                # Remove data variables that should not be part of the product.
+                # You can remove variables that are in the ignore variables as well.
+                target_variables = [var.strip() for var in mdata.nwm_variables.split(",")]
+                removed_items = list(set(target_variables).intersection(set(consts.NWM_VARS_IGNORE_LIST))) # for logging
+                print(f"----NWM Variables ignored for {mdata.category}: {removed_items}")
+                ignore_set = set(consts.NWM_VARS_IGNORE_LIST)
+                pruned_variables = [item for item in target_variables if item not in ignore_set]
+                variables_to_drop = [var for var in ds_modified.data_vars if var not in pruned_variables and len(ds_modified[var].dims) > 0]
+                ds_filtered = ds_modified.drop_vars(variables_to_drop, errors="ignore")
 
-            # Log any variables that are missing in ngen output.
-            for var_name in pruned_variables:
-                if var_name in ds_filtered.data_vars:
-                    continue # the variable exists in ngen output. We don't need to do anything
-                else:
-                    # If not in ngen output
-                    print(f"----'{var_name}' is missing in ngen output")
+                # Log any variables that are missing in ngen output.
+                for var_name in pruned_variables:
+                    if var_name in ds_filtered.data_vars:
+                        continue # the variable exists in ngen output. We don't need to do anything
+                    else:
+                        # If not in ngen output
+                        print(f"----'{var_name}' is missing in ngen output")
 
-            catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
-            mapped_grid, grid_index = self.transfer_catchment_data_to_grid(ds_filtered, catchment_grid, mdata.x_name, mdata.y_name)
+                start_time = time.perf_counter()
+                catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
+                end_time = time.perf_counter()
+                duration_minutes = (end_time - start_time) / 60
+                print(f"----build_catchment_id_grid: {duration_minutes:.2f} minutes")
 
-            # Data validation:
-            # consider making this optional
-            mapped_ds_times = mapped_grid[consts.DIM_TIME].values
-            for time_index, time_val in enumerate(mapped_ds_times):
-                positive_variables = self.find_positive_variables(ds_filtered, time_index)
-                self.data_validation_check(
-                    source=ds_filtered,
-                    output=mapped_grid,
-                    grid_index=grid_index,
-                    variables=positive_variables,
-                    sample_size = 50,
-                    time_index = time_index,
-                    catchments_dim=consts.DIM_CATCHMENTS,
-                    time_dim=consts.DIM_TIME
-                )
-            self.write_netcdf_per_timestep(mapped_grid, output_dir, output_cycle_hr)
-            print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
-        elif produce_output and not is_gridded:
-            self.produce_channel_reservoir_nwm_product(mdata, output_dir, output_cycle_hr)
-            print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
-        else:
-            print(f"----Production skipped for {cat_class_domain}")
-        
+                interval = get_output_interval_hours(mdata.output_class, mdata.category)
+                if interval is None:
+                    print(f"------No output files produced for {self._output_class}.{self._category}")
+                    return
+
+                start_time = time.perf_counter()
+                mapped_grid, grid_index = self.transfer_catchment_data_to_grid(ds_filtered, catchment_grid, mdata.x_name, mdata.y_name, interval)
+                end_time = time.perf_counter()
+                duration_minutes = (end_time - start_time) / 60
+                print(f"----transfer_catchment_data_to_grid: {duration_minutes:.2f} minutes")
+                # output_file = os.path.join(output_dir, "mapped.nc")
+                # mapped_grid.to_netcdf(output_file)
+                # Data validation:
+                # consider making this optional
+                # mapped_ds_times = mapped_grid[consts.DIM_TIME].values
+                # for time_index, time_val in enumerate(mapped_ds_times):
+                #     positive_variables = self.find_positive_variables(ds_filtered, time_index)
+                #     self.data_validation_check(
+                #         source=ds_filtered,
+                #         output=mapped_grid,
+                #         grid_index=grid_index,
+                #         variables=positive_variables,
+                #         sample_size = 50,
+                #         time_index = time_index,
+                #         catchments_dim=consts.DIM_CATCHMENTS,
+                #         time_dim=consts.DIM_TIME
+                #     )
+                self.write_netcdf_per_timestep(mapped_grid, mdata.x_name, mdata.y_name, output_dir, output_cycle_hr)
+                print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+            elif produce_output and not is_gridded:
+                self.produce_channel_reservoir_nwm_product(mdata, output_dir, output_cycle_hr)
+                print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+            else:
+                print(f"----Production skipped for {cat_class_domain}. This combination is not specified in the NWM_Products_List.")
+            return True
+        except Exception as e:
+            print(f"Error in creating netcdf product for {mdata.output_class}.{mdata.category}.{mdata.domain}: {e}")
+            print(traceback.format_exc())
+            return False
+
     def stack_soil_variables(self, var_prefix_list: list[str]) -> xr.Dataset:
         """
         Combines multiple data arrays (soil-related variables) along a new dimension as required for NWM. 
@@ -516,7 +551,7 @@ class DataProcessor(DataReader):
         return catchment_id_da
 
     def transfer_catchment_data_to_grid(self, ds: xr.Dataset, catchment_grid: xr.DataArray, 
-                                        x_dim: str, y_dim: str
+                                        x_dim: str, y_dim: str, interval: int
     ) -> tuple[xr.Dataset, xr.DataArray]:
         """
         Transfer catchment-indexed variables from a source xarray Dataset
@@ -531,6 +566,8 @@ class DataProcessor(DataReader):
             The variable that holds the x coordinates in the netcdf template.
             y_dim : str
                 The variable that holds the y coordinates in the netcdf template.
+            interval : int
+                The time interval that needs to be mapped to grid. For example, medium_range is 3, long_range is 24.
 
         Returns:
             tuple[xr.Dataset, xr.DataArray]
@@ -540,13 +577,22 @@ class DataProcessor(DataReader):
         Raises:
             ValueErrors during diagnostic validation checks after the grid index dataarray is produced.
         """
+        overall_start_time = time.perf_counter()
         ds_data = ds
+        time_dim = consts.DIM_TIME
+        catchment_dim = consts.DIM_CATCHMENTS
 
-        # Convert catchment IDs to index positions
-        catchment_ids = ds_data[consts.DIM_CATCHMENTS].values
+        start_time = time.perf_counter()
 
-        # Convert grid IDs to indices
+        # Extract only those timeslices that need to be produced
+        source_times = ds_data[time_dim].values
+        source_times = np.sort(source_times) # ensure chronological order
+        output_times = source_times[0::interval]
+        ds_data = ds_data.sel({time_dim: output_times})
+
+        # Convert grid IDs to indices with catchments
         # Sort catchment_ids for vectorized lookup
+        catchment_ids = ds_data[catchment_dim].values
         sort_order = np.argsort(catchment_ids)
         sorted_ids = catchment_ids[sort_order]
 
@@ -581,17 +627,231 @@ class DataProcessor(DataReader):
                 f"({y_dim}, {x_dim}). "
                 f"Got dimensions: {grid_index.dims}"
             )
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"------Build grid_index: {duration_minutes:.2f} minutes")
 
         # Put dimensions in canonical order.
         # Sanity check to confirm that the lat-lon are aligned after masking.
+        start_time = time.perf_counter()
         grid_index = grid_index.transpose(y_dim, x_dim)
         valid_mask = grid_index >= 0
         if not grid_index.coords.equals(valid_mask.coords):
-            print("----grid_index and valid_mask coordinates are shifted or some corodinates are lost.")
+            print("----grid_index and valid_mask coordinates are shifted or some coordinates are lost.")
+            raise ValueError("grid_index and valid_mask coordinates do not match.")
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"------Transpose and mask cells: {duration_minutes:.2f} minutes")
+
+        ds_template = self._template_netcdf_ds
+        # Convert the un-chunked source_ds into a Dask dataset and lazy Dask arrays for RAM optimization
+        dask_data_ds = ds_data.chunk({time_dim: 1})
+        spatial_chunks = {y_dim: consts.NC_SPATIAL_CHUNK_SIZE, x_dim: consts.NC_SPATIAL_CHUNK_SIZE} # size default = 500
+        variables_to_transfer = [
+            name
+            for name in ds_template.data_vars
+            if (
+                name in ds_data.data_vars
+                and catchment_dim in ds_data[name].dims
+            )
+        ]
+
+
+        # copy the template. Template has single time while the data should have mulitple.
+        # we need to retain all. So, dropping time from template and assign data time coord
+        output = ds_template.copy(deep=False)
+        if time_dim in output.dims:
+            output = output.drop_dims(time_dim)
+
+        chunked_time_coord = dask_data_ds[time_dim] # Chunk the incoming time coordinate array
+        output = output.assign_coords({time_dim: chunked_time_coord})
+
+        # Convert spatial mapping matrices to Dask arrays
+        # dask_grid_index = da.from_array(
+        #         grid_index, chunks=(spatial_chunks[y_dim], spatial_chunks[x_dim])
+        #     )
+        # dask_valid_mask = da.from_array(
+        #         valid_mask, chunks=(spatial_chunks[y_dim], spatial_chunks[x_dim])
+        #     )
+        safe_index = np.where(valid_mask, grid_index, 0).astype(np.int64)
+        safe_index_da = xr.DataArray(safe_index, dims=[y_dim, x_dim])
+        valid_mask_da = valid_mask.astype(bool)
+        # valid_mask_da = xr.DataArray(dask_valid_mask, dims=[y_dim, x_dim])
+
+        # Map catchment to the grid lazily across all dimensions
+        # mapped = dask_data_ds.isel({catchment_dim: safe_index_da})
+
+        variables_to_transfer.sort()
+        print(f"Variables: {variables_to_transfer}")
+        for name in variables_to_transfer:
+            start_time = time.perf_counter()
+            source_da = ds_data[name]
+            template_da = ds_template[name]
+
+            source_non_catchment_dims = [
+                dim
+                for dim in source_da.dims
+                if dim != catchment_dim
+            ]
+
+            missing_dims = [
+                dim
+                for dim in source_non_catchment_dims
+                if dim not in ds_template.dims
+            ]
+
+            if missing_dims:
+                print(f"----Variable {name} contains dimensions "
+                    f"{missing_dims} that are not present in the template.")
+                raise ValueError(f"Variable {name} contains dimensions "
+                    f"{missing_dims} that are not present in the template."
+                )
+
+            mapped_da = dask_data_ds[name].isel({catchment_dim: safe_index_da})
+            # Remove the catchments dimension if present.
+            # print(f"{name}: dims - {mapped.dims}")
+            if catchment_dim in mapped_da.coords:
+                mapped_da = mapped_da.drop_vars(catchment_dim)
+                
+                # Mask data safely to protect memory bounds
+                if np.issubdtype(mapped_da.dtype, np.integer):
+                    processed_da = mapped_da.where(valid_mask_da, other=-9999)
+                    output[name] = processed_da
+                    output[name].encoding["_FillValue"] = -9999
+                else:
+                    processed_da = mapped_da.where(valid_mask_da, other=np.nan).astype(np.float32)
+                    processed_da.attrs = template_da.attrs.copy() # Preserve template attributes
+                    processed_da.encoding = template_da.encoding.copy() # Preserve template encoding that got stripped
+                    output[name] = processed_da
+                    output[name].encoding["_FillValue"] = np.nan
+
+                # Unify the Dask chunk structure explicitly
+                target_chunks = {
+                    time_dim: 1,
+                    y_dim: spatial_chunks[y_dim],
+                    x_dim: spatial_chunks[x_dim],
+                }
+                # Adjust target chunks if the variable has extra dimensions (like snow layers or soil layers)
+                for dim in processed_da.dims:
+                    if dim not in target_chunks:
+                        dask_chunks = dask_data_ds.chunks.get(dim)
+                        if dask_chunks is not None:
+                            target_chunks[dim] = dask_chunks[0]
+                        else:
+                            target_chunks[dim] = ds_data[dim].size
+                output[name] = output[name].chunk(target_chunks)
+            else:
+                # Check if the variable is a pure scalar (0 dimensions)
+                if len(source_da.dims) == 0:
+                    # Assign the scalar directly without any chunking modifications
+                    output[name] = source_da.copy(deep=False)
+                else:
+                    # Verify dimensions are compatible.
+                    # for dim in source_da.dims:
+                    #     if dim not in ds_template.dims:
+                    #         print(f"----Cannot copy variable {name}: dimension "
+                    #             f"{dim} does not exist in template.")
+                    #         raise ValueError(
+                    #             f"Cannot copy variable {name}: dimension "
+                    #             f"{dim} does not exist in template."
+                    #         )
+                    # If it has other dimensions (but not time or catchment), copy its lazy dask representation
+                    output[name] = dask_data_ds[name].copy(deep=False)
+
+            end_time = time.perf_counter()
+            duration_minutes = (end_time - start_time) / 60
+            print(f"------Pushed data for {name}: {duration_minutes:.2f} minutes")
+
+        # Preserve global template attributes
+        output.attrs = ds_template.attrs.copy()
+        # print(f"------Number of time values in mapped grid: {output.sizes[time_dim]}")
+        overall_end_time = time.perf_counter()
+        duration_minutes = (overall_end_time - overall_start_time) / 60
+        print(f"------Transfer data to grid: {duration_minutes:.2f} minutes")
+        return output, grid_index
+
+    def transfer_catchment_data_to_grid_0(self, ds: xr.Dataset, catchment_grid: xr.DataArray, 
+                                        x_dim: str, y_dim: str
+    ) -> tuple[xr.Dataset, xr.DataArray]:
+        """
+        Transfer catchment-indexed variables from a source xarray Dataset
+        to a spatial grid defined by the template dataset.
+
+        Args:
+            ds : xarray.Dataset
+                The netcdf dataset containing the required variables processed and ready to be written to the final product.
+            catchment_grid: xr.DataArray
+                The grid mapping x, y to catchment ID. This is the output from `build_catchment_id_grid`
+            x_dim : str
+            The variable that holds the x coordinates in the netcdf template.
+            y_dim : str
+                The variable that holds the y coordinates in the netcdf template.
+
+        Returns:
+            tuple[xr.Dataset, xr.DataArray]
+                The dataset represents the grid with all timesteps for NWM product generation.
+                The dataarray represents the catchment indices (instead of catchment ID) in each (x,y) for faster processing.
+
+        Raises:
+            ValueErrors during diagnostic validation checks after the grid index dataarray is produced.
+        """
+        ds_data = ds
+        time_dim = consts.DIM_TIME
+        catchment_dim = consts.DIM_CATCHMENTS
+
+        start_time = time.perf_counter()
+
+        # Convert grid IDs to indices with catchments
+        # Sort catchment_ids for vectorized lookup
+        catchment_ids = ds_data[catchment_dim].values
+        sort_order = np.argsort(catchment_ids)
+        sorted_ids = catchment_ids[sort_order]
+
+        # Perform vectorized lookup
+        flat_grid = catchment_grid.values.ravel()
+        pos = np.searchsorted(sorted_ids, flat_grid)
+        pos_clipped = np.clip(pos, 0, len(sorted_ids) - 1)
+        matched = sorted_ids[pos_clipped] == flat_grid
+
+        flat_index = np.where(matched, sort_order[pos_clipped], -1)
+        grid_index_values = flat_index.reshape(catchment_grid.shape)
+
+        grid_index = xr.DataArray(
+            grid_index_values,
+            dims=catchment_grid.dims,
+            coords=catchment_grid.coords
+        )
+
+        # confirm that grid index is a dataarray
+        if not isinstance(grid_index, xr.DataArray): 
+            print("----Indexing the catchments grid to indices is not a DataArray")
+            raise TypeError(f"grid_index must be an xarray.DataArray")
+
+        # Validate grid_index dimensions
+        expected_grid_dims = {y_dim, x_dim}
+        if set(grid_index.dims) != expected_grid_dims:
+            print(f"----grid_index must have exactly the dimensions "
+                f"({y_dim}, {x_dim}). "
+                f"Got dimensions: {grid_index.dims}")
+            raise ValueError(
+                "grid_index must have exactly the dimensions "
+                f"({y_dim}, {x_dim}). "
+                f"Got dimensions: {grid_index.dims}"
+            )
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"------Build grid_index: {duration_minutes:.2f} minutes")
+
+        # Put dimensions in canonical order.
+        # Sanity check to confirm that the lat-lon are aligned after masking.
+        start_time = time.perf_counter()
+        grid_index = grid_index.transpose(y_dim, x_dim)
+        valid_mask = grid_index >= 0
+        if not grid_index.coords.equals(valid_mask.coords):
+            print("----grid_index and valid_mask coordinates are shifted or some coordinates are lost.")
             raise ValueError("grid_index and valid_mask coordinates do not match.")
 
         ds_template = self._template_netcdf_ds
-        catchment_dim = consts.DIM_CATCHMENTS
         # The invalid cells are subsequently masked out.
         safe_index = (grid_index.where(valid_mask, 0).astype(np.int64))
         variables_to_transfer = [
@@ -599,23 +859,29 @@ class DataProcessor(DataReader):
             for name in ds_template.data_vars
             if (
                 name in ds_data.data_vars
-                and consts.DIM_CATCHMENTS in ds_data[name].dims
+                and catchment_dim in ds_data[name].dims
             )
         ]
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"------Transpose and mask cells: {duration_minutes:.2f} minutes")
 
-        # copy the template. Template has single time while the data should have 3.
-        # we need to retain all three. So, dropping time from template and assign data time coord
+        # copy the template. Template has single time while the data should have mulitple.
+        # we need to retain all. So, dropping time from template and assign data time coord
         output = ds_template.copy(deep=False)
-        if consts.DIM_TIME in output.dims:
-            output = output.drop_dims(consts.DIM_TIME)
-        output = output.assign_coords({consts.DIM_TIME: ds_data[consts.DIM_TIME]})
+        if time_dim in output.dims:
+            output = output.drop_dims(time_dim)
+        output = output.assign_coords({time_dim: ds_data[time_dim]})
 
         # Map each catchment variable to the target grid
+        variables_to_transfer.sort()
+        print(f"Variables: {variables_to_transfer}")
         for name in variables_to_transfer:
+            start_time = time.perf_counter()
             source_da = ds_data[name]
             template_da = ds_template[name]
 
-            if consts.DIM_CATCHMENTS not in source_da.dims:
+            if catchment_dim not in source_da.dims:
                 print(f"----Variable {name} does not contain the catchments dimension.")
                 raise ValueError(f"Variable {name} does not contain the catchments dimension.")
 
@@ -664,6 +930,11 @@ class DataProcessor(DataReader):
             mapped.encoding = template_da.encoding.copy() # Preserve template encoding that got stripped
             output[name] = mapped
 
+            end_time = time.perf_counter()
+            duration_minutes = (end_time - start_time) / 60
+            print(f"------Pushed data for {name}: {duration_minutes:.2f} minutes")
+
+        start_time = time.perf_counter()
         # copy source variables without catchment dimensions
         for name in ds_template.data_vars:
             if name not in ds_data.data_vars:
@@ -690,19 +961,63 @@ class DataProcessor(DataReader):
             copied.attrs = ds_template[name].attrs.copy()
             copied.encoding = ds_template[name].encoding.copy()
             output[name] = copied
+            print("------Copied non-catchment data: {name}")
+            end_time = time.perf_counter()
+            duration_minutes = (end_time - start_time) / 60
+            print(f"------Copied other variables: {duration_minutes:.2f} minutes")
 
         # Preserve global template attributes
         output.attrs = ds_template.attrs.copy()
         
         return output, grid_index
 
-    def write_netcdf_per_timestep(self, mapped_grid: xr.Dataset, output_dir: str, output_cycle_hr: str) -> None:
+    def chunk_for_netcdf_writer(self, ds: xr.Dataset, x_dim: str, y_dim: str):
+        """
+        Apply chunking optimized for single-timestep NetCDF output.
+        """
+        chunks = {}
+        if consts.DIM_TIME in ds.dims:
+            chunks[consts.DIM_TIME] = 1
+
+        if x_dim in ds.dims:
+            chunks[x_dim] = min(512, ds.sizes[x_dim])
+
+        if y_dim in ds.dims:
+            chunks[y_dim] = min(512, ds.sizes[y_dim])
+
+        # Any other dimensions: no chunking
+        for dim in ds.dims:
+            if dim not in chunks:
+                chunks[dim] = -1
+
+        return ds.chunk(chunks)
+
+    def sort_by_time(self, ds, time_dim="time", ascending=True):
+        """
+        Sort dataset by datetime time coordinate.
+        """
+
+        time_values = ds[time_dim].values
+
+        sort_idx = np.argsort(time_values)
+
+        if not ascending:
+            sort_idx = sort_idx[::-1]
+
+        return ds.isel({time_dim: sort_idx})
+
+    def write_netcdf_per_timestep(self, mapped_grid: xr.Dataset, x_dim: str, y_dim: str, 
+                                  output_dir: str, output_cycle_hr: str) -> None:
         """
         Writes one NetCDF per timestep for the various NWM cycle runs. It handles the product file naming as well.
         This is called only for land and terrain_rt NWM products.
         Args:
             mapped_grid : xarray.Dataset
                 The netcdf dataset representing the grid with all timesteps for the final NWM product.
+            x_dim : str
+                The name of the spatial x dimension
+            y_dim : str
+                The name of the spatial y dimension
             output_dir : str
                 The folder where the output product will be saved or overwritten if it exists.
             output_cycle_hr : str
@@ -710,8 +1025,141 @@ class DataProcessor(DataReader):
 
         """
         os.makedirs(output_dir, exist_ok=True)
+        time_dim = consts.DIM_TIME
+        catchment_dim = consts.DIM_CATCHMENTS
+        ref_time_dim = consts.DIM_REF_TIME
+
         reference_epoch = np.datetime64("1970-01-01T00:00:00").astype("datetime64[m]")
-        source_ds_times = mapped_grid[consts.DIM_TIME].values
+
+        # Filter times by output interval
+        interval = get_output_interval_hours(self._output_class, self._category)
+        if interval is None:
+            print(f"----No output files produced for {self._output_class}.{self._category}")
+            return
+        
+        if self._output_class.startswith('analysis_assim'):
+            # AnA numbers tm00 (most recent) -> tmNN (oldest)
+            mapped_grid = self.sort_by_time(mapped_grid, time_dim, False)
+            sorted_times = mapped_grid[time_dim].values
+            selected_times = sorted_times
+            time_value_min = np.int32(np.datetime64(sorted_times[-1]).astype("datetime64[m]"))
+            time_value_max = np.int32(np.datetime64(sorted_times[0]).astype("datetime64[m]"))
+            reference_time = np.int32(time_value_min - 60) # mins.
+            pass
+        elif interval > 1:
+            # Sort and Keep every Nth entry
+            mapped_grid = self.sort_by_time(mapped_grid, time_dim, True)
+            sorted_times = mapped_grid[time_dim].values
+            selected_times = sorted_times #[0::interval]
+            selected_indices = np.searchsorted(sorted_times, selected_times)
+            time_value_min = np.int32(np.datetime64(sorted_times[0]).astype("datetime64[m]"))
+            time_value_max = np.int32(np.datetime64(sorted_times[-1]).astype("datetime64[m]"))
+            reference_time = np.int32(time_value_min - 60) # mins.
+        else:
+            sorted_times = sorted_times[::-1]
+
+
+        start_time = time.perf_counter()
+
+        # Speed up writing by batching using dask
+        mapped_grid = self.chunk_for_netcdf_writer(mapped_grid, x_dim, y_dim)
+
+        total_files = len(selected_indices)
+        for i in range(0, total_files, consts.NC_BATCH_SIZE):
+            batch_indices = selected_indices[i:i + consts.NC_BATCH_SIZE]
+            batch_times = selected_times[i:i + consts.NC_BATCH_SIZE]
+            batch_ds = mapped_grid.isel({time_dim: batch_indices})
+            batch_writes = []
+            for time_step, snapshot_time_val in enumerate(batch_times):
+                ds_t = batch_ds.isel({time_dim: time_step})
+                time_value_mins = np.int32((snapshot_time_val - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+                ds_t = ds_t.expand_dims({time_dim: [time_value_mins]})
+                ds_t = self.chunk_for_netcdf_writer(ds_t, x_dim, y_dim) # data chunking
+
+                # Rebuild CRS info and mapping.
+                if "crs" in ds_t:
+                    ds_t = ds_t.drop_vars("crs")
+
+                ds_t["crs"] = np.array(b"", dtype="S1")
+                ds_t["crs"].attrs = self._template_netcdf_ds["crs"].attrs.copy()
+                for var in ds_t.data_vars:
+                    if not var == "crs":
+                        ds_t[var].attrs["grid_mapping"] = "crs"
+
+                # Add reference_time variable and attributes to netcdf
+                ref_time_da = xr.DataArray(
+                    data = [reference_time],
+                    dims = [ref_time_dim],
+                    coords = {ref_time_dim: [reference_time]},  # Makes it an official coordinate index
+                    attrs={
+                        "long_name": "model initialization time",
+                        "standard_name": "forecast_reference_time",
+                        "units": "minutes since 1970-01-01 00:00:00 UTC"
+                    }
+                )
+                ds_t[ref_time_dim] = ref_time_da
+
+                # Transfer fill and missing values as in the template.
+                ds_t = self.attribute_fill_missing_values(ds_t)
+
+                # Delete some additional variables and attributes that are remnants of the processes.
+                ds_t = ds_t.drop_vars(catchment_dim, errors="ignore")
+                for var in ds_t.variables:
+                    ds_t[var].attrs.pop("coordinates", None)
+
+                # Lastly, update time attributes.
+                ds_t[time_dim].encoding.clear()
+                ds_t[time_dim].encoding.update({
+                    "units": "minutes since 1970-01-01 00:00:00 UTC",
+                    "calendar": "proleptic_gregorian"})
+                ds_t[time_dim].attrs.update({
+                    "standard_name": "time",
+                    "units": "minutes since 1970-01-01 00:00:00 UTC",
+                    "valid_min": time_value_min,
+                    "valid_max": time_value_max
+                })
+
+                # Output filename and save
+                prefix = get_file_timestep_prefix(self._output_class)
+                time_step = time_step + i # set correct timestep value for file name
+                sim_time_hr = generate_formatted_timestring_for_naming(time_step, self._output_class, self._category)
+                formatted_t = f"{prefix}{sim_time_hr}"
+                cycle_hr = output_cycle_hr.zfill(2)
+                output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
+                batch_writes.append(ds_t.to_netcdf(output_file, compute=False)) # compute=False prevents immediate writes
+
+        # Parallel writing using dask
+        dask.compute(*batch_writes, scheduler = "threads", num_workers = 4)
+
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"------{self._category} Products written in: {duration_minutes:.2f} minutes")
+
+    def write_netcdf_per_timestep_0(self, mapped_grid: xr.Dataset, x_dim: str, y_dim: str, 
+                                      output_dir: str, output_cycle_hr: str) -> None:
+        """
+        Writes one NetCDF per timestep for the various NWM cycle runs. It handles the product file naming as well.
+        This is called only for land and terrain_rt NWM products.
+        Args:
+            mapped_grid : xarray.Dataset
+                The netcdf dataset representing the grid with all timesteps for the final NWM product.
+            x_dim : str
+                The name of the spatial x dimension
+            y_dim : str
+                The name of the spatial y dimension
+            output_dir : str
+                The folder where the output product will be saved or overwritten if it exists.
+            output_cycle_hr : str
+                The hour in a day (0-23) for which the outputs are produced after simulations are run.
+
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        time_dim = consts.DIM_TIME
+        catchment_dim = consts.DIM_CATCHMENTS
+        ref_time_dim = consts.DIM_REF_TIME
+
+        reference_epoch = np.datetime64("1970-01-01T00:00:00").astype("datetime64[m]")
+        source_ds_times = mapped_grid[time_dim].values
         sorted_times = np.sort(source_ds_times)[::-1] # sort and reverse slice
 
         time_value_min = np.int32(np.datetime64(sorted_times[-1]).astype("datetime64[m]"))
@@ -734,61 +1182,81 @@ class DataProcessor(DataReader):
         else:
             sorted_times = sorted_times[::-1]
 
-        for time_step, snapshot_time_val in enumerate(sorted_times):
-            ds_t = mapped_grid.sel({consts.DIM_TIME: snapshot_time_val}).copy()
-            time_value_mins = np.int32((snapshot_time_val - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-            ds_t = ds_t.expand_dims({consts.DIM_TIME: [time_value_mins]})
-            
-            # Rebuild CRS info and mapping.
-            if "crs" in ds_t:
-                ds_t = ds_t.drop_vars("crs")
+        start_time = time.perf_counter()
 
-            ds_t["crs"] = np.array(b"", dtype="S1")
-            ds_t["crs"].attrs = self._template_netcdf_ds["crs"].attrs.copy()
-            for var in ds_t.data_vars:
-                if not var == "crs":
-                    ds_t[var].attrs["grid_mapping"] = "crs"
+        # Speed up writing by batching using dask
+        mapped_grid = self.chunk_for_netcdf_writer(mapped_grid, x_dim, y_dim)
+        total_files = len(sorted_times)
+        for i in range(0, total_files, consts.NC_BATCH_SIZE):
+            batch_times = sorted_times[i:i+consts.NC_BATCH_SIZE]
+            batch_writes = []
+            for time_step, snapshot_time_val in enumerate(batch_times):
+                time_step = time_step + i
+                t0 = time.time()
+                ds_t = mapped_grid.sel({time_dim: snapshot_time_val})
+                ds_t = ds_t.compute()
+                print("Selection + read:", time.time() - t0)
+                ds_t = self.chunk_for_netcdf_writer(ds_t, x_dim, y_dim) # data chunking
+                time_value_mins = np.int32((snapshot_time_val - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+                ds_t = ds_t.expand_dims({time_dim: [time_value_mins]})
+                
+                # Rebuild CRS info and mapping.
+                if "crs" in ds_t:
+                    ds_t = ds_t.drop_vars("crs")
 
-            # Add reference_time variable and attributes to netcdf
-            ref_time_da = xr.DataArray(
-                data = [reference_time],
-                dims = [consts.DIM_REF_TIME],
-                coords = {consts.DIM_REF_TIME: [reference_time]},  # Makes it an official coordinate index
-                attrs={
-                    "long_name": "model initialization time",
-                    "standard_name": "forecast_reference_time",
-                    "units": "minutes since 1970-01-01 00:00:00 UTC"
-                }
-            )
-            ds_t[consts.DIM_REF_TIME] = ref_time_da
+                ds_t["crs"] = np.array(b"", dtype="S1")
+                ds_t["crs"].attrs = self._template_netcdf_ds["crs"].attrs.copy()
+                for var in ds_t.data_vars:
+                    if not var == "crs":
+                        ds_t[var].attrs["grid_mapping"] = "crs"
 
-            # Transfer fill and missing values as in the template.
-            ds_t = self.attribute_fill_missing_values(ds_t)
+                # Add reference_time variable and attributes to netcdf
+                ref_time_da = xr.DataArray(
+                    data = [reference_time],
+                    dims = [ref_time_dim],
+                    coords = {ref_time_dim: [reference_time]},  # Makes it an official coordinate index
+                    attrs={
+                        "long_name": "model initialization time",
+                        "standard_name": "forecast_reference_time",
+                        "units": "minutes since 1970-01-01 00:00:00 UTC"
+                    }
+                )
+                ds_t[ref_time_dim] = ref_time_da
 
-            # Delete some additional variables and attributes that are remnants of the processes.
-            ds_t = ds_t.drop_vars(consts.DIM_CATCHMENTS, errors="ignore")
-            for var in ds_t.variables:
-                ds_t[var].attrs.pop("coordinates", None)
+                # Transfer fill and missing values as in the template.
+                ds_t = self.attribute_fill_missing_values(ds_t)
 
-            # Lastly, update time attributes.
-            ds_t[consts.DIM_TIME].encoding.clear()
-            ds_t[consts.DIM_TIME].encoding.update({
-                "units": "minutes since 1970-01-01 00:00:00 UTC",
-                "calendar": "proleptic_gregorian"})
-            ds_t[consts.DIM_TIME].attrs.update({
-                "standard_name": "time",
-                "units": "minutes since 1970-01-01 00:00:00 UTC",
-                "valid_min": time_value_min,
-                "valid_max": time_value_max
-            })
+                # Delete some additional variables and attributes that are remnants of the processes.
+                ds_t = ds_t.drop_vars(catchment_dim, errors="ignore")
+                for var in ds_t.variables:
+                    ds_t[var].attrs.pop("coordinates", None)
 
-            # Output filename and save
-            prefix = get_file_timestep_prefix(self._output_class)
-            sim_time_hr = generate_formatted_timestring_for_naming(time_step, self._output_class, self._category)
-            formatted_t = f"{prefix}{sim_time_hr}"
-            cycle_hr = output_cycle_hr.zfill(2)
-            output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
-            ds_t.to_netcdf(output_file)
+                # Lastly, update time attributes.
+                ds_t[time_dim].encoding.clear()
+                ds_t[time_dim].encoding.update({
+                    "units": "minutes since 1970-01-01 00:00:00 UTC",
+                    "calendar": "proleptic_gregorian"})
+                ds_t[time_dim].attrs.update({
+                    "standard_name": "time",
+                    "units": "minutes since 1970-01-01 00:00:00 UTC",
+                    "valid_min": time_value_min,
+                    "valid_max": time_value_max
+                })
+
+                # Output filename and save
+                prefix = get_file_timestep_prefix(self._output_class)
+                sim_time_hr = generate_formatted_timestring_for_naming(time_step, self._output_class, self._category)
+                formatted_t = f"{prefix}{sim_time_hr}"
+                cycle_hr = output_cycle_hr.zfill(2)
+                output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
+                batch_writes.append(ds_t.to_netcdf(output_file, compute=False)) # compute=False prevents immediate writes
+    
+        # Parallel writing using dask
+        dask.compute(*batch_writes, scheduler = "threads", num_workers = 2)
+
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"------{self._category} Products written in: {duration_minutes:.2f} minutes")
 
     def produce_channel_reservoir_nwm_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> None:
         """
@@ -817,6 +1285,10 @@ class DataProcessor(DataReader):
         if mdata.category.startswith('reservoir') and self._troute_lakeout_netcdf_ds is None:
             raise ValueError("troute lakeout netcdf not set")
 
+        time_dim = consts.DIM_TIME
+        ref_time_dim = consts.DIM_REF_TIME
+        feature_id_dim = consts.DIM_FEATURE_ID
+
         reference_epoch = np.datetime64("1970-01-01T00:00:00") # set reference epoch
         # We have to identify min and max times and reference times for the products. 
         # The approach is different because each product uses different way of reporting time.
@@ -825,7 +1297,7 @@ class DataProcessor(DataReader):
         # troute lakeout (waterbody) reports in minutes since reference epoch.
         if mdata.category.startswith('reservoir'):
             troute_source_ds = self._troute_lakeout_netcdf_ds
-            source_ds_times = troute_source_ds[consts.DIM_TIME].values
+            source_ds_times = troute_source_ds[time_dim].values
             sorted_times = np.sort(source_ds_times)[::-1] # sort and reverse slice
             time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
             time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
@@ -835,7 +1307,7 @@ class DataProcessor(DataReader):
             # adopting to quickly rename the variable in the troute output for now.
             # To do: Have a variables mapping of these outputs with NWM products and do that without hardcoding here
             troute_source_ds = troute_source_ds.rename({"flow": "streamflow"})
-            source_ds_times = troute_source_ds[consts.DIM_TIME].values
+            source_ds_times = troute_source_ds[time_dim].values
             sorted_times = np.sort(source_ds_times)[::-1]  # sort and reverse slice
             time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m"))
             time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m"))
@@ -862,26 +1334,31 @@ class DataProcessor(DataReader):
         ref_time_val = time_value_min - 60 # 60 mins less than the smallest time.
 
         re_index_args = {
-            consts.DIM_FEATURE_ID: troute_source_ds[consts.DIM_FEATURE_ID].values,
-            consts.DIM_REF_TIME: [ref_time_val]
+            feature_id_dim: troute_source_ds[feature_id_dim].values,
+            ref_time_dim: [ref_time_val]
         }
 
+        # Maintain a list of errorw/warnings that need to be logged for a product.
+        # We will use this to avoid duplicate items in the log.
+        log_warnings = []
+
         # Create one netcdf each for each time step
+        start_time = time.perf_counter()
+
         for time_step, snapshot_time_val in enumerate(sorted_times):
             populated_ds = self._template_netcdf_ds.reindex(**re_index_args, fill_value = np.nan)
-            time_args = {consts.DIM_TIME: [snapshot_time_val]}
+            time_args = {time_dim: [snapshot_time_val]}
             populated_ds = populated_ds.assign_coords(**time_args)
             populated_ds.attrs.update(self._template_netcdf_ds.attrs)
 
             # Populate variables defined in the template using the negen output and troute data
             for var_name in self._template_netcdf_ds.variables:
-                print(f"Processing variable {var_name}")
                 # leave the dimensions out as they (except time) have already been populated.
                 if var_name in self._template_netcdf_ds.dims:
                     continue
                 
                 # Add reference time value to the output
-                if var_name == consts.DIM_REF_TIME:
+                if var_name == ref_time_dim:
                     # Assign the scalar or 1D value directly to the pre-allocated template dimension
                     populated_ds[var_name].values = np.array([ref_time_val]).astype(populated_ds[var_name].dtype)
                     continue
@@ -893,33 +1370,48 @@ class DataProcessor(DataReader):
                     in_ngenout = var_name in self._catchment_ds.variables
                 
                 if not in_snapshot and not in_populated:
-                    print(f"{var_name} is missing from both troute and output datasets.")
+                    warning_msg = var_name + " is missing from both troute and output datasets."
+                    if warning_msg not in log_warnings:
+                        log_warnings.append(warning_msg)
+                        print(f"{var_name} is missing from both troute and output datasets.")
                     continue
                 elif not in_snapshot and var_name.lower() != 'qbucket':
                     if self._template_netcdf_ds[var_name].ndim == 0: # Scalar variables not in the data, but in template
                         populated_ds[var_name] = xr.DataArray(self._template_netcdf_ds[var_name].values.item())
-                        print(f"----Found a scalar variable - {var_name} that is not in the data, but present in the template.Template value has been copied over.")
-                        #continue
+                        warning_msg = ("----Found a scalar variable - " + var_name + " that is not in the data, "
+                        "but present in the template.Template value has been copied over.")
+                        if warning_msg not in log_warnings:
+                            log_warnings.append(warning_msg)
+                            print(f"----Found a scalar variable - {var_name} that is not in the data, but present in the template.Template value has been copied over.")
                     else:
-                        print(f"----Found a data variable - {var_name} that is not in the data, but present in the template. It is filled with NaN.")
-                        # populated_ds[var_name] = populated_ds[var_name].fillna(0)
+                        warning_msg = ("----Found a data variable - " + var_name + " that is not in the data, "
+                        "but present in the template. It is filled with NaN.")
+                        if warning_msg not in log_warnings:
+                            log_warnings.append(warning_msg)
+                            print(f"----Found a data variable - {var_name} that is not in the data, but present in the template. It is filled with NaN.")
                     continue
                 elif not in_populated:
-                    print(f"----{var_name} is in the template but not found in the output dataset.")
+                    warning_msg = "----" + var_name + " is in the template but not found in the output dataset."
+                    if warning_msg not in log_warnings:
+                        log_warnings.append(warning_msg)
+                        print(f"----{var_name} is in the template but not found in the output dataset.")
                     continue
                 elif var_name.lower() == 'qbucket' and not in_ngenout:
-                    print(f"----{var_name} is in the template but not found in the catchment output dataset.")
+                    warning_msg = "----" + var_name + " is in the template but not found in the catchment output dataset."
+                    if warning_msg not in log_warnings:
+                        log_warnings.append(warning_msg)
+                        print(f"----{var_name} is in the template but not found in the catchment output dataset.")
                     continue
                 
                 # Get the time slice data for this variable, if time is one of the dimensions.
                 # Otherwise, get the full variable (typically 1D based on feature_id dimension)
                 template_var = self._template_netcdf_ds[var_name]
                 if var_name.lower() == 'qbucket':
-                    # the ngen variable may or may not have the same catchments as in the troute. 
-                    # We use troute as the authoritative source and reindex ngen variable
+                    # Bug in troute: troute may not have the same catchments as in ngen. 
+                    # Temporary measure: We use troute as the authoritative source and reindex ngen variable
 
                     # ngen uses 'catchments', while troute uses 'feature_id'. So, we rename first.
-                    ngen_ds = self._catchment_ds.rename({consts.DIM_CATCHMENTS: consts.DIM_FEATURE_ID})
+                    ngen_ds = self._catchment_ds.rename({consts.DIM_CATCHMENTS: feature_id_dim})
                     
                     # get time slice data from ngen catchment output. 
                     # Cast to nanosecond precision to match ngen source values.
@@ -927,8 +1419,8 @@ class DataProcessor(DataReader):
                     source_var = ngen_ds[var_name].sel({consts.DIM_TIME: dt_ns})
                     
                     # Log differences between the two datasets
-                    ngen_feature_ids = source_var[consts.DIM_FEATURE_ID].values
-                    troute_feature_ids = troute_source_ds[consts.DIM_FEATURE_ID].values
+                    ngen_feature_ids = source_var[feature_id_dim].values
+                    troute_feature_ids = troute_source_ds[feature_id_dim].values
                     common = np.intersect1d(ngen_feature_ids, troute_feature_ids)
                     only_in_ngen = np.setdiff1d(ngen_feature_ids, troute_feature_ids)
                     only_in_troute = np.setdiff1d(ngen_feature_ids, troute_feature_ids)
@@ -936,28 +1428,32 @@ class DataProcessor(DataReader):
                             print("----No matching catchments found between ngen and troute.")
                             raise ValueError("No matching catchments found between ngen and troute.")
                     if len(only_in_ngen) > 0:
-                        print(f"----Warning: Missing catchments in troute: {len(only_in_ngen)}")
+                        warning_msg = "----Warning: Missing catchments in troute: " + str(len(only_in_ngen))
+                        if warning_msg not in log_warnings:
+                            print(f"----Warning: Missing catchments in troute: {len(only_in_ngen)}")
                     if len(only_in_troute) > 0:
-                        print(f"----Warning: Missing in ngen output: {only_in_troute}")
+                        warning_msg = "----Warning: Missing in ngen output: " + str(len(only_in_troute))
+                        if warning_msg not in log_warnings:
+                            print(f"----Warning: Missing in ngen output: {len(only_in_troute)}")
 
                     #reindex ngen variable
-                    troute_feature_ids = troute_source_ds[consts.DIM_FEATURE_ID]
-                    if consts.DIM_FEATURE_ID in source_var.dims:
-                        if consts.DIM_FEATURE_ID not in source_var.coords:
+                    troute_feature_ids = troute_source_ds[feature_id_dim]
+                    if feature_id_dim in source_var.dims:
+                        if feature_id_dim not in source_var.coords:
                             source_var = source_var.assign_coords(
-                                {consts.DIM_FEATURE_ID: source_var[consts.DIM_FEATURE_ID]}
+                                {feature_id_dim: source_var[feature_id_dim]}
                             )
-                        source_var = source_var.reindex({consts.DIM_FEATURE_ID: troute_feature_ids})
+                        source_var = source_var.reindex({feature_id_dim: troute_feature_ids})
                     else:
-                        print(f"{var_name} does not have {consts.DIM_FEATURE_ID} in its dimensions: {source_var.dims}")
+                        print(f"{var_name} does not have {feature_id_dim} in its dimensions: {source_var.dims}")
                 else:
                     troute_unsliced_var = troute_source_ds[var_name]
-                    if consts.DIM_TIME in troute_unsliced_var.dims:
+                    if time_dim in troute_unsliced_var.dims:
                         # this loop is in descending order of time. but, the source is in ascending order.
                         # recalculate time index.
-                        total_timesteps = troute_unsliced_var.sizes[consts.DIM_TIME]
+                        total_timesteps = troute_unsliced_var.sizes[time_dim]
                         inverted_time_index = total_timesteps - 1 - time_step
-                        source_var = troute_unsliced_var.isel({consts.DIM_TIME: inverted_time_index})
+                        source_var = troute_unsliced_var.isel({time_dim: inverted_time_index})
                     else:
                         source_var = troute_unsliced_var
                 
@@ -987,12 +1483,12 @@ class DataProcessor(DataReader):
                     populated_ds[var_name].attrs.pop('calendar', None)
             
             # Add valid min and max times to the "time" attributes
-            populated_ds[consts.DIM_TIME].attrs["valid_min"] = np.int32(time_value_min)
-            populated_ds[consts.DIM_TIME].attrs["valid_max"] = np.int32(time_value_max)
+            populated_ds[time_dim].attrs["valid_min"] = np.int32(time_value_min)
+            populated_ds[time_dim].attrs["valid_max"] = np.int32(time_value_max)
 
             # Manually assign units and encoding for reference time. 
             # Without this it was encoding as nanoseconds since 1970-01-01
-            populated_ds[consts.DIM_REF_TIME].attrs['units'] = "minutes since 1970-01-01 00:00:00"
+            populated_ds[ref_time_dim].attrs['units'] = "minutes since 1970-01-01 00:00:00"
 
             # Rebuild CRS info and mapping.
             if "crs" in populated_ds:
@@ -1012,6 +1508,9 @@ class DataProcessor(DataReader):
             cycle_hr = output_cycle_hr.zfill(2)
             output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
             populated_ds.to_netcdf(output_file)
+        end_time = time.perf_counter()
+        duration_minutes = (end_time - start_time) / 60
+        print(f"------{self._category} Products written in: {duration_minutes:.2f} minutes")
 
     def attribute_fill_missing_values(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -1057,7 +1556,6 @@ class DataProcessor(DataReader):
                         ds[var_name].encoding["_FillValue"] = None
                     if var_name in self._template_netcdf_ds and "units" in self._template_netcdf_ds[var_name].attrs:
                         ds[var_name].attrs["units"] = self._template_netcdf_ds[var_name].attrs["units"]
-               
         return ds
 
 # region data validation
@@ -1120,12 +1618,10 @@ class DataProcessor(DataReader):
         # Get the indices of catchments that are mapped (grid_index >=0)
         mapped_catchment_indices = np.unique(grid_index.values[grid_index.values >= 0])
 
-        print("----Validation for gridded NetCDF output")
         for var in variables:
             passed = 0
             failed = 0
             failures = []
-            print(f"------Validating: {var} using a catchments sample size of {sample_size} for time slice index {time_index}")
             src = source[var].isel(
                 {time_dim: time_index}
             )
@@ -1154,7 +1650,6 @@ class DataProcessor(DataReader):
                 for catchment_idx in sample_catchments_indices:
 
                     # Convert catchment ID to grid index
-                    # catchments_idx = source[catchments_dim].values.tolist().index(catchment)
                     # Positional indices and not the catchment values in grid_index
                     catchment = source[catchments_dim].values[catchment_idx]
                     locations = np.argwhere(grid_index.values == catchment_idx)
@@ -1199,9 +1694,11 @@ class DataProcessor(DataReader):
                             "message": str(e),
                         }
                     )
-                print(f"------Validation check for {var}: Number of catchments passed = {passed}; failed = {failed}")
+                # print data validation failures for the variable. N
+                if failed > 0:
+                    print(f"------Validation check for {var}: Sample size of catchments: {sample_size}; Passed = {passed}; Failed = {failed}")
                 if len(failures) > 0:
-                    print(f"------Failures for {var}: {failures}")
+                    print(f"------Data validation failures for {var}: {failures}")
 
 # endregion
 

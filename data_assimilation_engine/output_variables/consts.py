@@ -10,6 +10,12 @@ NWM_VARS_IGNORE_LIST = ['ACCET', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'CANWAT', 'SO
 
 NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.conus',
                      'analysis_assim.channel_rt.conus', 'analysis_assim.reservoir.conus',
+                     'analysis_assim.land.alaska', 'analysis_assim.terrain_rt.alaska',
+                     'analysis_assim.channel_rt.alaska', 'analysis_assim.reservoir.alaska',
+                     'analysis_assim.land.hawaii', 'analysis_assim.terrain_rt.hawaii',
+                     'analysis_assim.channel_rt.hawaii', 'analysis_assim.reservoir.hawaii',
+                     'analysis_assim.land.puertorico', 'analysis_assim.terrain_rt.puertorico',
+                     'analysis_assim.channel_rt.puertorico', 'analysis_assim.reservoir.puertorico',
                      'analysis_assim_long.land.conus', 'analysis_assim_long.terrain_rt.conus',
                      'analysis_assim_long.channel_rt.conus', 'analysis_assim_long.reservoir.conus',
                      'analysis_assim_no_da.channel_rt.conus', 'medium_range_no_da.channel_rt.conus',
@@ -21,20 +27,44 @@ NWM_PRODUCTS_LIST = ['analysis_assim.land.conus', 'analysis_assim.terrain_rt.con
                      'medium_range.land_4.conus', 'medium_range.terrain_rt_4.conus',
                      'medium_range.land_5.conus', 'medium_range.terrain_rt_5.conus',
                      'medium_range.land_6.conus', 'medium_range.terrain_rt_6.conus',
+                     'medium_range.land_1.alaska', 'medium_range.terrain_rt_1.alaska',
+                     'medium_range.land_2.alaska', 'medium_range.terrain_rt_2.alaska',
+                     'medium_range.land_3.alaska', 'medium_range.terrain_rt_3.alaska',
+                     'medium_range.land_4.alaska', 'medium_range.terrain_rt_4.alaska',
+                     'medium_range.land_5.alaska', 'medium_range.terrain_rt_5.alaska',
+                     'medium_range.land_6.alaska', 'medium_range.terrain_rt_6.alaska',
                      'medium_range.channel_rt_1.conus', 'medium_range.reservoir_1.conus',
                      'medium_range.channel_rt_2.conus', 'medium_range.reservoir_2.conus',
                      'medium_range.channel_rt_3.conus', 'medium_range.reservoir_3.conus',
                      'medium_range.channel_rt_4.conus', 'medium_range.reservoir_4.conus',
                      'medium_range.channel_rt_5.conus', 'medium_range.reservoir_5.conus',
                      'medium_range.channel_rt_6.conus', 'medium_range.reservoir_6.conus',
+                     'medium_range.channel_rt_1.alaska', 'medium_range.reservoir_1.alaska',
+                     'medium_range.channel_rt_2.alaska', 'medium_range.reservoir_2.alaska',
+                     'medium_range.channel_rt_3.alaska', 'medium_range.reservoir_3.alaska',
+                     'medium_range.channel_rt_4.alaska', 'medium_range.reservoir_4.alaska',
+                     'medium_range.channel_rt_5.alaska', 'medium_range.reservoir_5.alaska',
+                     'medium_range.channel_rt_6.alaska', 'medium_range.reservoir_6.alaska',
                      'long_range.land_1.conus', 'long_range.land_2.conus',
                      'long_range.land_3.conus', 'long_range.land_4.conus',
                      'long_range.channel_rt_1.conus', 'long_range.channel_rt_2.conus',
                      'long_range.channel_rt_3.conus', 'long_range.channel_rt_4.conus',
                      'long_range.reservoir_1.conus', 'long_range.reservoir_2.conus',
                      'long_range.reservoir_3.conus', 'long_range.reservoir_4.conus',
+                     'long_range.land_1.alaska', 'long_range.land_2.alaska',
+                     'long_range.land_3.alaska', 'long_range.land_4.alaska',
+                     'long_range.channel_rt_1.alaska', 'long_range.channel_rt_2.alaska',
+                     'long_range.channel_rt_3.alaska', 'long_range.channel_rt_4.alaska',
+                     'long_range.reservoir_1.alaska', 'long_range.reservoir_2.alaska',
+                     'long_range.reservoir_3.alaska', 'long_range.reservoir_4.alaska',
                      'short_range.land.conus', 'short_range.terrain_rt.conus',
-                     'short_range.channel_rt.conus', 'short_range.reservoir.conus']
+                     'short_range.channel_rt.conus', 'short_range.reservoir.conus',
+                     'short_range.land.alaska', 'short_range.terrain_rt.alaska',
+                     'short_range.channel_rt.alaska', 'short_range.reservoir.alaska',
+                     'short_range.land.hawaii', 'short_range.terrain_rt.hawaii',
+                     'short_range.channel_rt.hawaii', 'short_range.reservoir.hawaii',
+                     'short_range.land.puertorico', 'short_range.terrain_rt.puertorico',
+                     'short_range.channel_rt.puertorico', 'short_range.reservoir.puertorico']
 
 NOMADS_BASE_URL = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/prod'
 NWM_DATA_LOCAL_FOLDER = 'nwm_ref_files'
@@ -79,3 +109,5 @@ JSON_CLASS = 'class'
 JSON_CATEGORY = 'category'
 JSON_DOMAIN = 'domain'
 CSV_BASE_COLS = ['time step','time'] #use lowercase
+NC_BATCH_SIZE = 30
+NC_SPATIAL_CHUNK_SIZE = 500

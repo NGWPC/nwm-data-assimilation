@@ -17,11 +17,6 @@ def extract_netcdf_metadata(netcdf_root_folder: str):
     # python netcdf_production_sample.py obtain-netcdf-metadata sample_data/nwm_output metadata
     utils.obtain_metadata_information(netcdf_root_folder)
 
-def convert_csv_to_netcdf(csv_folder: str):
-    #Usage:
-    # python netcdf_production_sample.py convert-csv-to-netcdf sample_data/medium_range_mem2
-    utils.convert_csvs_to_netcdf(csv_folder)
-
 def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
     #Usage:
@@ -56,13 +51,17 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
 
     # Begin data processing
     start_time = time.perf_counter()
-
+    gpkg_name, extension = os.path.splitext(os.path.basename(ngen_gpkg_file))
+    
     processor = DataProcessor(ngen_netcdf_output_file, ngen_gpkg_file)
     log_file = os.path.join(output_folder, consts.LOG_FOLDER, 'nwm_postprocessing_' + datetime.now().strftime("%Y%m%d_%H%M%S") + '.log')
     processor.log_file  =log_file
-
-    gpkg_name, extension = os.path.splitext(os.path.basename(ngen_gpkg_file))
+    end_time = time.perf_counter()
+    duration_minutes = (end_time - start_time) / 60
     print(f"Post-processing started for: {gpkg_name}")
+    print(f"--ngen output netcdf read in: {duration_minutes:.2f} minutes")
+
+    start_time = time.perf_counter()
     ngen_template_nc_folder = os.path.join(output_folder, consts.NWM_NGEN_TEMPLATE_FOLDER)
     nwm_output_folder = os.path.join(output_folder, consts.NWM_OUTPUT_FOLDER)
     for mdata in netcdf_metadata_list:
@@ -71,20 +70,20 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
                 raise ValueError("T-Route output file is not specified")
             if mdata.category.startswith('reservoir') and troute_lakeout_file is None:
                 raise ValueError("T-Route lakeout file is not specified")
-
-            processor.nwm_output_class = mdata.output_class
-            processor.nwm_category = mdata.category
-            processor.nwm_domain = mdata.domain
-            processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
-            if mdata.category.startswith('channel_rt'):
-                processor.set_troute_netcdf(troute_output_file)
-            if mdata.category.startswith('reservoir'):
-                processor.set_troute_lakeout_netcdf(troute_lakeout_file)
-            processor.produce_nwm_output_product(mdata, nwm_output_folder, output_cycle_hr)
+            if mdata.category.startswith('terrain_rt'): # == False:
+                processor.nwm_output_class = mdata.output_class
+                processor.nwm_category = mdata.category
+                processor.nwm_domain = mdata.domain
+                processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
+                if mdata.category.startswith('channel_rt'):
+                    processor.set_troute_netcdf(troute_output_file)
+                if mdata.category.startswith('reservoir'):
+                    processor.set_troute_lakeout_netcdf(troute_lakeout_file)
+                processor.produce_nwm_output_product(mdata, nwm_output_folder, output_cycle_hr)
 
     end_time = time.perf_counter()
     duration_minutes = (end_time - start_time) / 60
-    print(f"Function execution time: {duration_minutes:.2f} minutes")
+    print(f"Post-processing execution time: {duration_minutes:.2f} minutes")
 
 def main() -> None:
 
@@ -100,10 +99,6 @@ def main() -> None:
     #Extract metadata info from current NWM output netcdfs that are downloaded 
     parser_nwm_info = subparsers.add_parser("obtain-netcdf-metadata")
     parser_nwm_info.add_argument("local_folder_path")
-
-    #convert CSV files from ngen outputs to netcdf
-    parser_csv_to_nc = subparsers.add_parser("convert-csv-to-netcdf")
-    parser_csv_to_nc.add_argument("csv_folder_path")
 
     #create combined netcdf using timestep netcdfs
     parser_basin_grids = subparsers.add_parser("create-combined-basin-products")
@@ -130,8 +125,6 @@ def main() -> None:
         download_netcdf_from_nomads(args.download_url, args.output_folder_path)
     elif args.command == "obtain-netcdf-metadata":
         extract_netcdf_metadata(args.local_folder_path)
-    elif args.command == "convert-csv-to-netcdf":
-        convert_csv_to_netcdf(args.csv_folder_path)
     elif args.command == "create-combined-basin-products":
         combine_basin_products(args.netcdf_folder, args.output_basin_grids_folder, args.json_config_file,
                             args.output_cycle_hr, args.output_cycle_type, args.output_cycle_domain)
