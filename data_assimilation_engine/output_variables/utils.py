@@ -813,9 +813,9 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
         if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
             product_categories[mdata.category] = mdata.file_path
             output_class = mdata.output_class
-    
+    sorted_categories = {k: product_categories[k] for k in sorted(product_categories)}
     is_gridded = True
-    for category, ref_file in product_categories.items():
+    for category, ref_file in sorted_categories.items():
         if category.startswith('channel_rt') or category.startswith('reservoir'):
             is_gridded = False
         elif category.startswith('land') or category.startswith('terrain_rt'):
