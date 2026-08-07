@@ -373,7 +373,7 @@ def download_nwm_data_recursive(download_url: str, local_path: str,
         existing_keys: set[tuple[str, str, str]]
             A unique combination key of NWM class, category and domain.
     """
-    response = requests.get(download_url)
+    response = requests.get(download_url, verify=False)
     if response.status_code != 200:
         raise Exception(f"Failed to access {download_url}")
     
