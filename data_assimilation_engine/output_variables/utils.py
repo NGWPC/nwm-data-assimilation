@@ -43,61 +43,72 @@ def parse_filename_metadata(filename: str) -> tuple[str, str, str]:
     domain = components[5]
     return output_class, category, domain
 
-def get_file_timestep_prefix(cycle_run: str) -> str:
+def get_file_timestep_prefix(output_class: str) -> str:
     """
     Function to retrieve file name prefix for NWM products. For example:
     "nwm.t00z.medium_range.channel_rt_1.f001.alaska.nc" --> returns 'f'
 
     Args:
         cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
+            The output_class for NWM product. For example, medium_range, analysis_assim etc.
 
     Returns:
         str
             The prefix before the timestep number in a standard NWM product file name.
     """
-    if cycle_run.startswith('analysis_assim'):
+    if output_class.startswith('analysis_assim'):
         return 'tm'
     else:
         return 'f'
 
-def get_file_timestep_list(cycle_run: str, category: str) -> list[str]:
+def get_file_timestep_list(output_class: str, category: str, output_domain: str, number_only: bool) -> list[str] | list[int]:
     """
     Function to retrieve all the file name prefix for timesteps in NWM products. For example:
-    analysis_assim --> returns ['tm00', 'tm01', 'tm02']
+    analysis_assim --> returns ['tm00', 'tm01', 'tm02'] or [0,1,2]
 
     Args:
-        cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
+        output_class: str
+            The output_class for NWM product. For example, medium_range, analysis_assim etc.
         category: str
             The product category For example: channel_rt, land
-
+        output_domain: str
+            The domain for the output products. For example, conus, hawaii, alaska
+        number_only: bool
+            A boolean flag that indicates whether the returned list includes filename prefix or not.
     Returns:
-        list[str]
-            A list containing all the file name prefixes at each timestep in a run.
+        list[str] | list[int]
+            A list containing all the file name prefixes or the file numbers at each timestep in a run.
     """
-    timesteps = []
-    prefix = get_file_timestep_prefix(cycle_run)
-    match cycle_run:
+    timesteps_list = []
+    prefix = get_file_timestep_prefix(output_class)
+    match output_class:
         case 'analysis_assim' | 'analysis_assim_no_da':
-            return generate_formatted_string_list(0, 3, 1, 2, prefix)
+            timesteps_list = generate_formatted_string_list(0, 3, 1, 2, prefix)
         case 'analysis_assim_long':
-            return generate_formatted_string_list(0, 12, 1, 2, prefix)
+            timesteps_list = generate_formatted_string_list(0, 12, 1, 2, prefix)
         case 'short_range':
-            return generate_formatted_string_list(1, 19, 1, 3, prefix)
+            if output_domain == 'alaska':
+                timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
+            else:
+                timesteps_list = generate_formatted_string_list(1, 19, 1, 3, prefix)
         case 'long_range':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return generate_formatted_string_list(6, 721, 6, 3, prefix)
+                timesteps_list = generate_formatted_string_list(6, 721, 6, 3, prefix)
             elif category.startswith('land'):
-                return generate_formatted_string_list(24, 721, 24, 3, prefix)
+                timesteps_list = generate_formatted_string_list(24, 721, 24, 3, prefix)
         case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return generate_formatted_string_list(1, 241, 1, 3, prefix)
+                timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
             elif category.startswith('land') or category.startswith('terrain'):
-                return generate_formatted_string_list(3, 241, 3, 3, prefix)
-        case _:
-            return "Unknown"  # This is the default 'else' case
-    return timesteps
+                timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
+        case 'medium_range_no_da':
+            if category.startswith('channel_rt'):
+                timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
+
+    if len(timesteps_list) > 0 and number_only:
+        return [int(time_step.lstrip(prefix)) for time_step in timesteps_list]
+    else:
+        return timesteps_list
 
 def generate_formatted_string_list(start: int, end: int, interval: int, 
                                    width: int, prefix: str) -> list[str]:
@@ -126,15 +137,15 @@ def generate_formatted_string_list(start: int, end: int, interval: int,
         ret_list.append(ts)
     return ret_list
 
-def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, category: str) -> str:
+def generate_formatted_timestring_for_naming(time_step: int, output_class: str, category: str) -> str:
     """
     Function to generate the file name prefix for a given timestep and given NWM product.
 
     Args:
         time_step: int
             The timestep of simulation run for a given product.
-        cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
+        output_class: str
+            The output_class for NWM product. For example, medium_range, analysis_assim etc.
         category: str
             The product category For example: channel_rt, land
 
@@ -142,7 +153,7 @@ def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, cat
         str
             A string representing the file name prefix. For example, 'f024', 'tm02' etc.
     """
-    match cycle_run:
+    match output_class:
         case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long':
             return f"{time_step:02d}"
         case 'short_range':
@@ -155,7 +166,7 @@ def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, cat
             elif category.startswith('land'):
                 formatted = (time_step+1) * 24
                 return f"{(formatted):03d}"
-        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
+        case 'medium_range' | 'medium_range_blend':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
                 formatted = (time_step+1)
                 return f"{(formatted):03d}"
@@ -711,7 +722,7 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
         elif category.startswith('land') or category.startswith('terrain_rt'):
             is_gridded = True
         
-        time_list = get_file_timestep_list(output_class, category)
+        time_list = get_file_timestep_list(output_class, output_cycle_domain, category, False)
         # print(f"File times List: {time_list}")
         for tm in time_list:
             keywords_list = [cycle_hr, output_class, category, tm, output_cycle_domain]

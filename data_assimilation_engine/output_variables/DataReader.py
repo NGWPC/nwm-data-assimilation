@@ -44,7 +44,7 @@ class DataReader:
                 f,
                 chunks={
                     consts.DIM_TIME: 1,
-                    consts.DIM_CATCHMENTS: self._chunk_size
+                    consts.DIM_CATCHMENTS: -1
                 }
             )
             return ds.load()

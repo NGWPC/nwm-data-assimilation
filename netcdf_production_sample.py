@@ -70,7 +70,7 @@ def overall_netcdf_workflow(ngen_netcdf_output_file: str, ngen_gpkg_file: str, o
                 raise ValueError("T-Route output file is not specified")
             if mdata.category.startswith('reservoir') and troute_lakeout_file is None:
                 raise ValueError("T-Route lakeout file is not specified")
-            #if mdata.category.startswith('terrain_rt'): # == False:
+            # if mdata.category.startswith('land'): # == False:
             processor.nwm_output_class = mdata.output_class
             processor.nwm_category = mdata.category
             processor.nwm_domain = mdata.domain
