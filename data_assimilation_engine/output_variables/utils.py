@@ -233,7 +233,6 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
     os.makedirs(nwm_data_folder, exist_ok = True)
 
     # Re-download if requested
-    # To consider: may be we should do away with the re_download argument altogether
     if (re_download): 
         if len(os.listdir(nwm_data_folder)) > 0:
             # Delete all the contents in the local folder and re-create

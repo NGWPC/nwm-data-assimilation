@@ -242,10 +242,11 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
 
     match action_item:
         case "download":
-            if len(args_list) < 2:
-                raise ValueError("'download' action requires argument for: [root output folder path, 'download']")
+            if len(args_list) < 3:
+                raise ValueError("'download' action requires argument for: [root output folder path, re_download,'download']")
             root_output_folder = args_list[0]
-            config_json_file = download_netcdf_from_nomads(root_output_folder)
+            re_download = args_list[1]
+            config_json_file = download_netcdf_from_nomads(root_output_folder, re_download)
             return config_json_file
 
         case "config":
