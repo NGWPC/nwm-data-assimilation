@@ -6,7 +6,7 @@ import xml.etree.ElementTree as etree
 from TimeSliceC import TimeSliceC
 import pytz
 import unicodedata
-from EmptyDirOrFileException import EmptyDirOrFileException
+from data_assimilation_engine.EmptyDirOrFileException import EmptyDirOrFileException
 
 """
    The class to mange dicharge data from one real-time discharge file
