@@ -104,7 +104,9 @@ def get_file_timestep_list(output_class: str, category: str, output_domain: str,
             elif category.startswith('land'):
                 timesteps_list = generate_formatted_string_list(24, 721, 24, 3, prefix)
         case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
+            print (f"inside case medium range for **{output_domain}**")
             if output_domain == 'conus':
+                print ("inside case conus")
                 if category.startswith('channel_rt') or category.startswith('reservoir'):
                     timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
                 elif category.startswith('land') or category.startswith('terrain'):
@@ -729,13 +731,16 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
     
     is_gridded = True
     for category, ref_file in product_categories.items():
+        # print(f"Product categories to mosaic: {product_categories}")
         if category.startswith('channel_rt') or category.startswith('reservoir'):
             is_gridded = False
         elif category.startswith('land') or category.startswith('terrain_rt'):
             is_gridded = True
-        
-        time_list = get_file_timestep_list(output_class, output_cycle_domain, category, False)
-        # print(f"File times List: {time_list}")
+
+        time_list = get_file_timestep_list(output_class, category, output_cycle_domain, False)
+        if len(time_list) == 0:
+            print(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
+            raise ValueError(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
         for tm in time_list:
             keywords_list = [cycle_hr, output_class, category, tm, output_cycle_domain]
             # print(f"Keywords list: {keywords_list}")

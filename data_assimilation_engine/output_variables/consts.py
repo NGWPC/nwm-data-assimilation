@@ -53,6 +53,7 @@ JSON_DOMAIN = 'domain'
 CSV_BASE_COLS = ['time step','time'] #use lowercase
 NC_BATCH_SIZE = 30
 NC_SPATIAL_CHUNK_SIZE = 500
+VALIDATION_SAMPLE_SIZE = 2
 
 NWM_PRODUCTS_LIST = ['analysis_assim.channel_rt.conus',
                      'analysis_assim.land.conus',

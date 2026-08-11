@@ -424,26 +424,35 @@ class DataProcessor(DataReader):
                 print(f"----Transfer ngen catchment data to grid: {duration_minutes:.2f} minutes")
                 # output_file = os.path.join(output_dir, "mapped.nc")
                 # mapped_grid.to_netcdf(output_file)
+                
                 # Data validation:
-                # consider making this optional
+                # Validate if the spatial mapping from catchments to x, y is correct.
+                # We will use 2 random catchments and 2 timesteps that have positive variable values
+                num_timesteps_validated = 0
                 start_time = time.perf_counter()
                 mapped_ds_times = mapped_grid[consts.DIM_TIME].values
                 for time_index, time_val in enumerate(mapped_ds_times):
-                    positive_variables = self.find_positive_variables(ds_sliced, time_index)
-                    if len(positive_variables) > 0:
-                        self.data_validation_check(
-                            source=ds_sliced,
-                            output=mapped_grid,
-                            grid_index=grid_index,
-                            variables=positive_variables,
-                            sample_size=5,
-                            time_index=time_index,
-                            catchments_dim=consts.DIM_CATCHMENTS,
-                            time_dim=consts.DIM_TIME
-                        )
+                    if time_index > 0 and num_timesteps_validated < 2:
+                        positive_variables = self.find_positive_variables(ds_sliced, time_index)
+                        if len(positive_variables) > 0:
+                            self.data_validation_check(
+                                source=ds_sliced,
+                                output=mapped_grid,
+                                grid_index=grid_index,
+                                variables=positive_variables,
+                                sample_size=consts.VALIDATION_SAMPLE_SIZE,
+                                time_index=time_index,
+                                catchments_dim=consts.DIM_CATCHMENTS,
+                                time_dim=consts.DIM_TIME
+                            )
+                            num_timesteps_validated += 1
                 end_time = time.perf_counter()
                 duration_minutes = (end_time - start_time) / 60
-                print(f"----Data validation completed in : {duration_minutes:.2f} minutes")
+                if num_timesteps_validated > 0:
+                        print(f"----Data validation completed for {consts.VALIDATION_SAMPLE_SIZE} random catchments at {num_timesteps_validated} times : {duration_minutes:.2f} minutes")
+                else:
+                    print(f"----Warning: Variables with positive values were not found in the gridded dataset")
+
                 self.write_netcdf_per_timestep(mapped_grid, mdata.x_name, mdata.y_name, output_dir, output_cycle_hr)
                 print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
             elif produce_output and not is_gridded:
@@ -1262,7 +1271,7 @@ class DataProcessor(DataReader):
         return positive_vars
 
     def data_validation_check(self, source: xr.Dataset, output: xr.Dataset,
-        grid_index: xr.DataArray, variables: list[str], sample_size: int = 10,
+        grid_index: xr.DataArray, variables: list[str], sample_size: int = 5,
         time_index: int = 0, catchments_dim: str = "catchments", time_dim: str = "time"
     ) -> None: 
         """
