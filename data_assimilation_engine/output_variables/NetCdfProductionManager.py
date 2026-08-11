@@ -189,7 +189,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
             _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
             product_created = _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
     if not product_created:
-        raise ValueError("FATAL: NWM Production creation failed.")
+        raise ValueError("FATAL: NWM Production creation failed. See log for more details.")
 
 def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):

@@ -92,9 +92,10 @@ def get_file_timestep_list(output_class: str, category: str, output_domain: str,
             else:
                 timesteps_list = generate_formatted_string_list(0, 28, 1, 2, prefix)
         case 'short_range' | 'short_range_no_da':
+            print(f"{output_class}, {output_domain}")
             if output_domain == 'alaska':
                 timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
-            if output_domain == 'puertorico':
+            elif output_domain == 'puertorico':
                 timesteps_list = generate_formatted_string_list(1, 48, 1, 3, prefix)
             else:
                 timesteps_list = generate_formatted_string_list(1, 19, 1, 3, prefix)
@@ -104,9 +105,7 @@ def get_file_timestep_list(output_class: str, category: str, output_domain: str,
             elif category.startswith('land'):
                 timesteps_list = generate_formatted_string_list(24, 721, 24, 3, prefix)
         case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
-            print (f"inside case medium range for **{output_domain}**")
             if output_domain == 'conus':
-                print ("inside case conus")
                 if category.startswith('channel_rt') or category.startswith('reservoir'):
                     timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
                 elif category.startswith('land') or category.startswith('terrain'):
