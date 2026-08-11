@@ -24,7 +24,7 @@ from RFC_Forecast import RFC_Forecast
 from RFCTimeSeries import RFCTimeSeries
 from RFCHelper import RFCHelper
 from RFC_Sites import RFC_Sites
-from EmptyDirOrFileException import EmptyDirOrFileException
+from data_assimilation_engine.EmptyDirOrFileException import EmptyDirOrFileException
 #import Tracer
 
 """

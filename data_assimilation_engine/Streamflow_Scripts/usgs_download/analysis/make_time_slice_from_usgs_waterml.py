@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from USGS_Observation import USGS_Observation
 from TimeSlice import TimeSlice
 from Observation import Observation, All_Observations
-from EmptyDirOrFileException import EmptyDirOrFileException
+from data_assimilation_engine.EmptyDirOrFileException import EmptyDirOrFileException
 
 """
    The driver to parse downloaded Json observations and 

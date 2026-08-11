@@ -6,7 +6,7 @@ import xml.etree.ElementTree as etree
 from datetime import datetime, timedelta
 from WSC_Observation import WSC_Observation, All_WSC_Observations
 from TimeSliceC import TimeSliceC
-from EmptyDirOrFileException import EmptyDirOrFileException
+from data_assimilation_engine.EmptyDirOrFileException import EmptyDirOrFileException
 
 """
    The driver to parse downloaded hydrologic data files from

@@ -24,7 +24,7 @@ from TimeSlice import TimeSlice
 from Observation import Observation, All_Observations
 from CWMS_Sites import CWMS_Sites
 from ACE_Observation import ACE_Observation
-from EmptyDirOrFileException import EmptyDirOrFileException
+from data_assimilation_engine.EmptyDirOrFileException import EmptyDirOrFileException
 
 """
    The driver to parse downloaded ACE JSON observations and 
