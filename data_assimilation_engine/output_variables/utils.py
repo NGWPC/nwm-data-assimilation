@@ -169,7 +169,7 @@ def generate_formatted_timestring_for_naming(time_step: int, output_class: str, 
             A string representing the file name prefix. For example, 'f024', 'tm02' etc.
     """
     match output_class:
-        case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long':
+        case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long' | 'analysis_assim_extend':
             return f"{time_step:02d}"
         case 'short_range' | 'short_range_no_da':
             formatted = (time_step+1)
@@ -277,7 +277,7 @@ def download_nwm_data_recursive(download_url: str, local_path: str,
         existing_keys: set[tuple[str, str, str]]
             A unique combination key of NWM class, category and domain.
     """
-    response = requests.get(download_url)
+    response = requests.get(download_url, verify=False)
     if response.status_code != 200:
         raise Exception(f"Failed to access {download_url}")
     
@@ -320,7 +320,7 @@ def download_file(url: str, save_path: str) -> None:
         save_path: str
             The folder path where the downloaded files are saved.
     """
-    response = requests.get(url)
+    response = requests.get(url, verify=False)
     if response.status_code == 200:
         with open(save_path, 'wb') as f:
             f.write(response.content)
