@@ -92,7 +92,6 @@ def get_file_timestep_list(output_class: str, category: str, output_domain: str,
             else:
                 timesteps_list = generate_formatted_string_list(0, 28, 1, 2, prefix)
         case 'short_range' | 'short_range_no_da':
-            print(f"{output_class}, {output_domain}")
             if output_domain == 'alaska':
                 timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
             elif output_domain == 'puertorico':
