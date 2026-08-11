@@ -84,11 +84,18 @@ def get_file_timestep_list(output_class: str, category: str, output_domain: str,
     match output_class:
         case 'analysis_assim' | 'analysis_assim_no_da':
             timesteps_list = generate_formatted_string_list(0, 3, 1, 2, prefix)
-        case 'analysis_assim_long':
+        case 'analysis_assim_long' | 'analysis_assim_long_no_da':
             timesteps_list = generate_formatted_string_list(0, 12, 1, 2, prefix)
-        case 'short_range':
+        case 'analysis_assim_extend' | 'analysis_assim_extend_no_da':
+            if output_domain == 'alaska':
+                timesteps_list = generate_formatted_string_list(0, 32, 1, 2, prefix)
+            else:
+                timesteps_list = generate_formatted_string_list(0, 28, 1, 2, prefix)
+        case 'short_range' | 'short_range_no_da':
             if output_domain == 'alaska':
                 timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
+            if output_domain == 'puertorico':
+                timesteps_list = generate_formatted_string_list(1, 48, 1, 3, prefix)
             else:
                 timesteps_list = generate_formatted_string_list(1, 19, 1, 3, prefix)
         case 'long_range':
@@ -97,10 +104,16 @@ def get_file_timestep_list(output_class: str, category: str, output_domain: str,
             elif category.startswith('land'):
                 timesteps_list = generate_formatted_string_list(24, 721, 24, 3, prefix)
         case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
-            if category.startswith('channel_rt') or category.startswith('reservoir'):
-                timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
-            elif category.startswith('land') or category.startswith('terrain'):
-                timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
+            if output_domain == 'conus':
+                if category.startswith('channel_rt') or category.startswith('reservoir'):
+                    timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
+                elif category.startswith('land') or category.startswith('terrain'):
+                    timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
+            elif output_domain == 'alaska':
+                if category.startswith('channel_rt') or category.startswith('reservoir'):
+                    timesteps_list = generate_formatted_string_list(1, 205, 1, 3, prefix)
+                elif category.startswith('land') or category.startswith('terrain'):
+                    timesteps_list = generate_formatted_string_list(3, 205, 3, 3, prefix)
         case 'medium_range_no_da':
             if category.startswith('channel_rt'):
                 timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
@@ -156,7 +169,7 @@ def generate_formatted_timestring_for_naming(time_step: int, output_class: str, 
     match output_class:
         case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long':
             return f"{time_step:02d}"
-        case 'short_range':
+        case 'short_range' | 'short_range_no_da':
             formatted = (time_step+1)
             return f"{(formatted):03d}"
         case 'long_range':
@@ -739,9 +752,9 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
                 if is_gridded:
                     merged_ds, encoding = create_multi_basin_netcdfs(ref_file, matching_files, None, 1.0, True)
                 else:
-                    # print(f"File category: {category}; Feature ID present: {has_featureid}")
-                    merged_ds, encoding = combined_non_gridded_netcdfs(matching_files, True)
-                # Write dataset to disk
+                    merged_ds, encoding = combined_non_gridded_netcdfs(matching_files)
+
+                # Write dataset
                 output_file = os.path.join(output_folder, f"nwm.{cycle_hr}.{output_class}.{category}.{tm}.{output_cycle_domain}.nc")
                 merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
             else:
@@ -832,7 +845,7 @@ def create_multi_basin_netcdfs(reference_netcdf: str, nc_files: list[str], varia
 
     return ds_combined, encoding_config
 
-def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
+def combined_non_gridded_netcdfs(nc_files: list[str]) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
     """
     Merge multiple NetCDF files that are not gridded. This is specific for channel_rt and reservoir NWM products
 
@@ -840,30 +853,21 @@ def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> tu
         nc_files: list[str]
             List of netcdf files to be merged/combined.
 
-        has_featureid: bool
-            Boolean variable indicating that the feature_id dimension exists. Default is True.
-
     Returns:
         tuple[xr.Dataset, dict[str, dict[str, Any]]]
             tuple representing the xarray dataset and the encoding config
     """
-    if has_featureid:
-        combined = xr.open_mfdataset(
-        nc_files,
-        data_vars="all",
-        combine="nested",
-        concat_dim=consts.DIM_FEATURE_ID,
-        preprocess=preprocess_sort,
-        combine_attrs="override"
-        )
-        combined = combined.sortby(consts.DIM_FEATURE_ID)
-    # else:
-    #     combined = xr.open_mfdataset(
-    #         nc_files,
-    #         combine="by_coords",
-    #         preprocess=preprocess_sort,
-    #         combine_attrs="override"
-    #     )
+
+    combined = xr.open_mfdataset(
+    nc_files,
+    data_vars="all",
+    combine="nested",
+    concat_dim=consts.DIM_FEATURE_ID,
+    preprocess=preprocess_sort,
+    combine_attrs="override"
+    )
+    combined = combined.sortby(consts.DIM_FEATURE_ID)
+
     encoding = {}
     for var in combined.data_vars:
         if consts.DIM_FEATURE_ID in combined[var].dims:

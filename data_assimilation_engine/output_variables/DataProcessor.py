@@ -604,7 +604,6 @@ class DataProcessor(DataReader):
 
         # Convert the un-chunked source_ds into a Dask dataset and lazy Dask arrays for RAM optimization
         dask_data_ds = ds_data.chunk({time_dim: 1})
-        chunked_time_coord = dask_data_ds[time_dim] # Chunk the time coordinate
 
         # Convert grid IDs to indices with catchments
         # Sort catchment_ids for vectorized lookup
@@ -666,11 +665,6 @@ class DataProcessor(DataReader):
             )
         ]
 
-        # copy the template. Template has single time while the data should have all times to be retained.
-        # We need to reindex because if we broadcast without reindex, the number of timesteps increased by 1.
-        # ds_template_aligned = ds_template.reindex({time_dim: chunked_time_coord}, method=None)
-        # output, _ = xr.broadcast(ds_template_aligned, chunked_time_coord)
-
         # copy the template. Template has single time while the data should have multiple times.
         # we need to retain all. So, dropping time from template and expand as per time in the data
         output = ds_template.copy(deep=False)
@@ -721,6 +715,7 @@ class DataProcessor(DataReader):
 
                 processed_da.attrs = template_da.attrs.copy() # Preserve template attributes
                 processed_da.encoding = template_da.encoding.copy() # Preserve template encoding that got stripped
+                processed_da.attrs.pop("_ChunkSizes", None) # remove the stale chunk sizes.
                 output[name] = processed_da
 
                 # Unify the Dask chunk structure explicitly
@@ -971,55 +966,59 @@ class DataProcessor(DataReader):
         feature_id_dim = consts.DIM_FEATURE_ID
 
         reference_epoch = np.datetime64("1970-01-01T00:00:00") # set reference epoch
-        # We have to identify min and max times and reference times for the products. 
-        # The approach is different because each product uses different way of reporting time.
-        # ngen catchment output reports in seconds since reference_epoch.
-        # troute output reports in offset seconds since the model initialization time.
-        # troute lakeout (waterbody) reports in minutes since reference epoch.
+        
         if mdata.category.startswith('reservoir'):
             troute_source_ds = self._troute_lakeout_netcdf_ds
-            source_ds_times = troute_source_ds[time_dim].values
-            sorted_times = np.sort(source_ds_times)[::-1] # sort and reverse slice
-            time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-            time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
         elif mdata.category.startswith('channel_rt'):
             troute_source_ds = self._troute_netcdf_ds
             # troute output has a variable called flow which should be streamflow in the NWM product.
             # adopting to quickly rename the variable in the troute output for now.
             # To do: Have a variables mapping of these outputs with NWM products and do that without hardcoding here
             troute_source_ds = troute_source_ds.rename({"flow": "streamflow"})
-            source_ds_times = troute_source_ds[time_dim].values
-            sorted_times = np.sort(source_ds_times)[::-1]  # sort and reverse slice
-            time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m"))
-            time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m"))
         else:
-            raise ValueError(f"Unexpected category for channel/reservoir product: {mdata.category!r}")
+            raise ValueError(f"Unexpected category for channel/reservoir product: {mdata.category}")
 
-        # Filter times by output interval
-        interval = get_output_interval_hours(self._output_class, self._category)
-        if interval is None:
-            print(f"----No output files produced for {self._output_class}.{self._category}")
+        # Get the list of hours that needs to be processed for the NWM product.
+        hours_list = get_file_timestep_list(mdata.output_class, mdata.category, mdata.domain, True)
+        if len(hours_list) == 0:
+            print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
             return
 
+        # Extract only those timeslices that need to be produced
+        # for example, hours [3, 6, 9, 12...] correspond to indices [2, 5, 8, 11...]
+        target_indices = [hr - 1 for hr in hours_list]
+        ds_sliced = troute_source_ds.isel(time=target_indices)
+
         if self._output_class.startswith('analysis_assim'):
-            # AnA numbers tm00 (most recent) -> tmNN (oldest)
-            # Keep native descending order from above
-            pass
-        elif interval > 1:
-            # Keep every Nth entry
-            sorted_times = sorted_times[0::interval][::-1]
+            # AnA numbers tm00 (most recent) -> tmNN (oldest). Sort by descending
+            ds_sliced = self.sort_by_time(ds_sliced, time_dim, False)
         else:
-            sorted_times = sorted_times[::-1]
+            ds_sliced = self.sort_by_time(ds_sliced, time_dim, True) # sort ascending
+
+        sorted_times = ds_sliced[time_dim].values
+
+
+        # Compute min, max and reference time
+        # The approach is different from the mapped products because each product uses different way of reporting time.
+        # ngen catchment output reports in seconds since reference_epoch.
+        # troute output reports in offset seconds since the model initialization time.
+        # troute lakeout (waterbody) reports in minutes since reference epoch.
+        if self._output_class.startswith('analysis_assim'):
+            time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+            time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+        else:
+            time_value_min = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+            time_value_max = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
 
         # Get reference time for output
         ref_time_val = time_value_min - 60 # 60 mins less than the smallest time.
 
         re_index_args = {
-            feature_id_dim: troute_source_ds[feature_id_dim].values,
+            feature_id_dim: ds_sliced[feature_id_dim].values,
             ref_time_dim: [ref_time_val]
         }
 
-        # Maintain a list of errorw/warnings that need to be logged for a product.
+        # Maintain a list of errors/warnings that need to be logged for a product.
         # We will use this to avoid duplicate items in the log.
         log_warnings = []
 
@@ -1045,7 +1044,7 @@ class DataProcessor(DataReader):
                     continue
 
                 # Confirm if the variable is present both in lakeout and final output
-                in_snapshot = var_name in troute_source_ds.variables
+                in_snapshot = var_name in ds_sliced.variables
                 in_populated = var_name in populated_ds.variables
                 if var_name.lower() == 'qbucket':
                     in_ngenout = var_name in self._catchment_ds.variables
@@ -1101,7 +1100,7 @@ class DataProcessor(DataReader):
                     
                     # Log differences between the two datasets
                     ngen_feature_ids = source_var[feature_id_dim].values
-                    troute_feature_ids = troute_source_ds[feature_id_dim].values
+                    troute_feature_ids = ds_sliced[feature_id_dim].values
                     common = np.intersect1d(ngen_feature_ids, troute_feature_ids)
                     only_in_ngen = np.setdiff1d(ngen_feature_ids, troute_feature_ids)
                     only_in_troute = np.setdiff1d(ngen_feature_ids, troute_feature_ids)
@@ -1118,7 +1117,7 @@ class DataProcessor(DataReader):
                             print(f"----Warning: Missing in ngen output: {len(only_in_troute)}")
 
                     #reindex ngen variable
-                    troute_feature_ids = troute_source_ds[feature_id_dim]
+                    troute_feature_ids = ds_sliced[feature_id_dim]
                     if feature_id_dim in source_var.dims:
                         if feature_id_dim not in source_var.coords:
                             source_var = source_var.assign_coords(
@@ -1128,7 +1127,7 @@ class DataProcessor(DataReader):
                     else:
                         print(f"{var_name} does not have {feature_id_dim} in its dimensions: {source_var.dims}")
                 else:
-                    troute_unsliced_var = troute_source_ds[var_name]
+                    troute_unsliced_var = ds_sliced[var_name]
                     if time_dim in troute_unsliced_var.dims:
                         # this loop is in descending order of time. but, the source is in ascending order.
                         # recalculate time index.
@@ -1153,11 +1152,12 @@ class DataProcessor(DataReader):
             # Transfer fill and missing value from template
             populated_ds = self.attribute_fill_missing_values(populated_ds)
 
-            # Prevent overwriting conflicts by clearing 'units' and calendar
+            # Prevent overwriting conflicts by clearing 'units' and calendar. Pop chunksizez as well
             for var_name in self._template_netcdf_ds.variables:
                 if var_name in populated_ds.variables:
                     populated_ds[var_name].attrs.pop('units', None)
                     populated_ds[var_name].attrs.pop('calendar', None)
+                    populated_ds[var_name].attrs.pop("_ChunkSizes", None)
             
             # Add valid min and max times to the "time" attributes
             populated_ds[time_dim].attrs["valid_min"] = np.int32(time_value_min)
