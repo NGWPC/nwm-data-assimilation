@@ -111,13 +111,12 @@ def get_file_timestep_list(output_cycle_type: str, output_class: str, category: 
                 if category.startswith('channel_rt') or category.startswith('reservoir'):
                     timesteps_list = generate_formatted_string_list(1, 205, 1, 3, prefix)
                 elif category.startswith('land') or category.startswith('terrain'):
-                    timesteps_list = generate_formatted_string_list(3, 205, 3, 3, prefix)                
+                    timesteps_list = generate_formatted_string_list(3, 205, 3, 3, prefix)
             else:
                 if category.startswith('channel_rt') or category.startswith('reservoir'):
                     timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
                 elif category.startswith('land') or category.startswith('terrain'):
                     timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
-
         case 'medium_range_no_da':
             if category.startswith('channel_rt'):
                 timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
