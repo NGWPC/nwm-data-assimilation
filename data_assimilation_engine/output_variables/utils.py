@@ -61,12 +61,15 @@ def get_file_timestep_prefix(output_class: str) -> str:
     else:
         return 'f'
 
-def get_file_timestep_list(output_class: str, category: str, output_domain: str, number_only: bool) -> list[str] | list[int]:
+def get_file_timestep_list(output_cycle_type: str, output_class: str, category: str, 
+                           output_domain: str, number_only: bool) -> list[str] | list[int]:
     """
     Function to retrieve all the file name prefix for timesteps in NWM products. For example:
     analysis_assim --> returns ['tm00', 'tm01', 'tm02'] or [0,1,2]
 
     Args:
+        output_cycle_type: str
+            The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
         output_class: str
             The output_class for NWM product. For example, medium_range, analysis_assim etc.
         category: str
@@ -103,17 +106,18 @@ def get_file_timestep_list(output_class: str, category: str, output_domain: str,
                 timesteps_list = generate_formatted_string_list(6, 721, 6, 3, prefix)
             elif category.startswith('land'):
                 timesteps_list = generate_formatted_string_list(24, 721, 24, 3, prefix)
-        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
-            if output_domain == 'conus':
+        case 'medium_range' | 'medium_range_blend':
+            if output_cycle_type[-1].isdigit() and int(output_cycle_type[-1]) > 1:
+                if category.startswith('channel_rt') or category.startswith('reservoir'):
+                    timesteps_list = generate_formatted_string_list(1, 205, 1, 3, prefix)
+                elif category.startswith('land') or category.startswith('terrain'):
+                    timesteps_list = generate_formatted_string_list(3, 205, 3, 3, prefix)                
+            else:
                 if category.startswith('channel_rt') or category.startswith('reservoir'):
                     timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
                 elif category.startswith('land') or category.startswith('terrain'):
                     timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
-            elif output_domain == 'alaska':
-                if category.startswith('channel_rt') or category.startswith('reservoir'):
-                    timesteps_list = generate_formatted_string_list(1, 205, 1, 3, prefix)
-                elif category.startswith('land') or category.startswith('terrain'):
-                    timesteps_list = generate_formatted_string_list(3, 205, 3, 3, prefix)
+
         case 'medium_range_no_da':
             if category.startswith('channel_rt'):
                 timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
@@ -735,7 +739,7 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
         elif category.startswith('land') or category.startswith('terrain_rt'):
             is_gridded = True
 
-        time_list = get_file_timestep_list(output_class, category, output_cycle_domain, False)
+        time_list = get_file_timestep_list(output_cycle_type, output_class, category, output_cycle_domain, False)
         if len(time_list) == 0:
             print(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
             raise ValueError(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
