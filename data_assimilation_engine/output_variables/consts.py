@@ -65,10 +65,10 @@ NWM_PRODUCTS_LIST = ['analysis_assim.channel_rt.conus',
                      'analysis_assim.reservoir.alaska',
                      'analysis_assim.terrain_rt.alaska',
 
-                     'analysis_assim.channel_rt.hawaii',
-                     'analysis_assim.land.hawaii',
-                     'analysis_assim.reservoir.hawaii',
-                     'analysis_assim.terrain_rt.hawaii',
+                    #  'analysis_assim.channel_rt.hawaii',
+                    #  'analysis_assim.land.hawaii',
+                    #  'analysis_assim.reservoir.hawaii',
+                    #  'analysis_assim.terrain_rt.hawaii',
 
                      'analysis_assim.channel_rt.puertorico',
                      'analysis_assim.land.puertorico',
@@ -142,32 +142,32 @@ NWM_PRODUCTS_LIST = ['analysis_assim.channel_rt.conus',
 
                      'medium_range.channel_rt_1.alaska',
                      'medium_range.land_1.alaska',
-                     'medium_range.reservoir_1.alaska'
+                     'medium_range.reservoir_1.alaska',
                      'medium_range.terrain_rt_1.alaska',
 
                      'medium_range.channel_rt_2.alaska',
                      'medium_range.land_2.alaska',
-                     'medium_range.reservoir_2.alaska'
+                     'medium_range.reservoir_2.alaska',
                      'medium_range.terrain_rt_2.alaska',
 
                      'medium_range.channel_rt_3.alaska',
                      'medium_range.land_3.alaska',
-                     'medium_range.reservoir_3.alaska'
+                     'medium_range.reservoir_3.alaska',
                      'medium_range.terrain_rt_3.alaska',
 
                      'medium_range.channel_rt_4.alaska',
                      'medium_range.land_4.alaska',
-                     'medium_range.reservoir_4.alaska'
+                     'medium_range.reservoir_4.alaska',
                      'medium_range.terrain_rt_4.alaska',
 
                      'medium_range.channel_rt_5.alaska',
                      'medium_range.land_5.alaska',
-                     'medium_range.reservoir_5.alaska'
+                     'medium_range.reservoir_5.alaska',
                      'medium_range.terrain_rt_5.alaska',
 
                      'medium_range.channel_rt_6.alaska',
                      'medium_range.land_6.alaska',
-                     'medium_range.reservoir_6.alaska'
+                     'medium_range.reservoir_6.alaska',
                      'medium_range.terrain_rt_6.alaska',
 
                      'long_range.channel_rt_1.conus',
