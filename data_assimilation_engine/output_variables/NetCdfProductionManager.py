@@ -113,7 +113,8 @@ def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gp
     # Create templates.
     template_created = False
     for mdata in netcdf_metadata_list:
-        if mdata.domain == output_cycle_domain:
+        # create templates only for non-coastal products
+        if mdata.domain == output_cycle_domain and 'coastal' not in mdata.output_class:
             template_created = _processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
     if not template_created:
         raise ValueError("FATAL: Not all templates were created successfully.")
