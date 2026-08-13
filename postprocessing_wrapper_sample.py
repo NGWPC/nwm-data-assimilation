@@ -3,6 +3,7 @@ from data_assimilation_engine.output_variables.NetCdfProductionManager import ne
 # Download data from NOMADs server for national reference files
 download_inputs = [
     "sample_data/outputs_root",
+    True,
     "download"
 ]
 netcdf_production_workflow(download_inputs)  # download and metadata_config.json creation.
