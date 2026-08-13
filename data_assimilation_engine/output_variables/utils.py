@@ -104,6 +104,8 @@ def get_file_timestep_list(output_cycle_type: str, output_class: str, category: 
                     timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
             elif output_domain == 'puertorico':
                 timesteps_list = generate_formatted_string_list(1, 49, 1, 3, prefix)
+            elif output_domain == 'hawaii':
+                timesteps_list = generate_formatted_string_list(1, 49, 1, 3, prefix)
             else:
                 timesteps_list = generate_formatted_string_list(1, 19, 1, 3, prefix)
         case 'long_range':
@@ -199,37 +201,8 @@ def generate_formatted_timestring_for_naming(time_step: int, output_class: str, 
                 formatted = (time_step+1) * 3
                 return f"{(formatted):03d}"
         case _:
-            return "Unknown"  # This is the default 'else' case
+            return "unknown"  # This is the default 'else' case
 
-def get_output_interval_hours(cycle_run: str, category: str) -> int | None:
-    """
-    Output interval (hours) for a given output cycle/category. None means no files should be 
-    produced for that combination
-
-    Args:
-        cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
-        category: str
-            The product category For example: channel_rt, land
-
-    Returns:
-        int | None
-        The integer number that represents the output interval hours in the file name of a product.
-    """
-    match cycle_run:
-        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
-            if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return 1
-            elif category.startswith('land') or category.startswith('terrain'):
-                return 3
-        case 'long_range':
-            if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return 6
-            elif category.startswith('land'):
-                return 24
-            elif category.startswith('terrain'):
-                return None
-    return 1  # Covers all other cycles, should be updated with oCONUS regions if necessary
 # endregion
 
 # region data download
@@ -607,7 +580,6 @@ def write_metadata_to_config_json(metadata_list: list[NetCDFMetadata], output_js
         output_json: str
             Full or relative path to the config json file
     """
-    # Delete any existing config file
     if os.path.exists(output_json):
         os.remove(output_json)
 
@@ -737,7 +709,6 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
     
     is_gridded = True
     for category, ref_file in product_categories.items():
-        # print(f"Product categories to mosaic: {product_categories}")
         if category.startswith('channel_rt') or category.startswith('reservoir'):
             is_gridded = False
         elif category.startswith('land') or category.startswith('terrain_rt'):
@@ -749,10 +720,6 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
             raise ValueError(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
         for tm in time_list:
             keywords_list = [cycle_hr, output_class, category, tm, output_cycle_domain]
-            # print(f"Keywords list: {keywords_list}")
-
-            # for full_file_path in Path(netcdf_folder).glob("*.nc"):
-            #     print(str(full_file_path))
             matching_files = [str(full_file_path)
                 for full_file_path in Path(netcdf_folder).glob("*.nc")
                 if all(keyword in full_file_path.name for keyword in keywords_list)
@@ -882,6 +849,7 @@ def combined_non_gridded_netcdfs(nc_files: list[str]) -> tuple[xr.Dataset, dict[
     encoding = {}
     for var in combined.data_vars:
         if consts.DIM_FEATURE_ID in combined[var].dims:
+            # To do: add feature_id chunking for these variables.
             encoding[var] = {
                 "zlib": True,
                 "complevel": 4,

@@ -13,13 +13,11 @@ import re
 import shapely
 import traceback
 from pyproj import CRS
-# from typing import List, Tuple, Optional
 from .DataReader import DataReader
 from .utils import (
     NetCDFMetadata,
     get_file_timestep_prefix,
     generate_formatted_timestring_for_naming,
-    get_output_interval_hours,
     get_file_timestep_list,
 )
 from . import consts
@@ -85,7 +83,7 @@ class DataProcessor(DataReader):
             raise ValueError("There is a mistmatch between catchment IDs in geopackage and netcdf")
         
         # Set log file which will be redirect to stdout.
-        # Only for testing
+        # To do: Update this with EWTS
         self._original_stdout = sys.stdout
         self._log_file = None
 
@@ -222,17 +220,15 @@ class DataProcessor(DataReader):
                         if attr in ds[time_dim].attrs:
                             ds[time_dim].attrs[attr] = 0
 
-                # Slice all coordinates and variable arrays to zero length.
+                # Slice all coordinates and variable arrays to zero length and save the template
                 dims = list(ds.sizes.keys())
                 zero_slices = {dim: slice(0, 0) for dim in dims}
                 ds_template = ds.isel(zero_slices)
-
-                # Save to nc file
                 ds_template.to_netcdf(template_nc_file)
                 print(f"----Template netcdf saved to: {template_nc_file}")
             else: # gridded products - land and terrain_rt
                 ds = xr.open_dataset(file_name)
-                # To do: Have to figure out a workflow when CRS is "Not Available"
+                # To do: Have to figure out a workflow when CRS is "Not Available". This is almost all coastal products
                 target_crs = CRS.from_user_input(wkt) 
                 
                 gdf = self._gpkg_gdf.to_crs(target_crs)
@@ -260,7 +256,7 @@ class DataProcessor(DataReader):
                 y_subset_1D = ds_subset[y_name].values
                 xx, yy = np.meshgrid(x_subset_1D, y_subset_1D)
 
-                shapely.prepare(union_geom) # for faster processing.
+                shapely.prepare(union_geom)
                 flat_mask = shapely.intersects_xy(union_geom, xx.ravel(), yy.ravel())
                 grid_mask = flat_mask.reshape(len(y_subset_1D), len(x_subset_1D))
                 
@@ -281,7 +277,7 @@ class DataProcessor(DataReader):
                     else:
                         ds_masked[var] = da # Leave non-numeric untouched
                 
-                # Combine variables to find valid outer coordinate indices
+                # Flattened 2D spatial mask for pixels with valid data
                 combined_mask = ds_masked.to_array().notnull()
                 dims_to_collapse = [dim for dim in combined_mask.dims if dim not in [x_name, y_name]]
                 dataset_mask = combined_mask.any(dim=dims_to_collapse)
@@ -359,8 +355,8 @@ class DataProcessor(DataReader):
 
         print(f"--Started nwm output product generation for {mdata.output_class}.{mdata.category}.{mdata.domain}")
         try:
-            # # if the output needs to have SOIL_M or SOIL_T, we need to
-            # # stack the ngen output into the layers.
+            # if the output needs to have SOIL_M or SOIL_T, we need to
+            # stack the ngen output into the layers.
             var_prefix_list = []
             if 'SOIL_M' in mdata.nwm_variables:
                 var_prefix_list.append('SOIL_M_')
@@ -383,6 +379,7 @@ class DataProcessor(DataReader):
             if mdata.category.startswith('channel_rt') or mdata.category.startswith('reservoir'):
                 is_gridded = False
 
+            product_created = True
             if produce_output and is_gridded:
                 # Remove data variables that should not be part of the product.
                 # You can remove variables that are in the ignore variables as well.
@@ -410,7 +407,7 @@ class DataProcessor(DataReader):
                                                     mdata.category, mdata.domain, int(output_cycle_hr), True)
                 if len(hours_list) == 0:
                     print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
-                    return
+                    return False
 
                 # Extract only those timeslices that need to be produced
                 # for example, hours [3, 6, 9, 12...] correspond to indices [2, 5, 8, 11...]
@@ -423,8 +420,6 @@ class DataProcessor(DataReader):
                 end_time = time.perf_counter()
                 duration_minutes = (end_time - start_time) / 60
                 print(f"----Transfer ngen catchment data to grid: {duration_minutes:.2f} minutes")
-                # output_file = os.path.join(output_dir, "mapped.nc")
-                # mapped_grid.to_netcdf(output_file)
                 
                 # Data validation:
                 # Validate if the spatial mapping from catchments to x, y is correct.
@@ -454,14 +449,16 @@ class DataProcessor(DataReader):
                 else:
                     print(f"----Warning: Variables with positive values were not found in the gridded dataset")
 
-                self.write_netcdf_per_timestep(mapped_grid, mdata.x_name, mdata.y_name, output_dir, output_cycle_hr)
-                print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+                product_created = self.write_netcdf_per_timestep(mapped_grid, mdata.x_name, mdata.y_name, output_dir, output_cycle_hr)
+                if product_created:
+                    print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
             elif produce_output and not is_gridded:
-                self.produce_channel_reservoir_nwm_product(mdata, output_dir, output_cycle_hr)
-                print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
+                product_created = self.produce_channel_reservoir_nwm_product(mdata, output_dir, output_cycle_hr)
+                if product_created:
+                    print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
             else:
                 print(f"----Production skipped for {cat_class_domain}. This combination is not specified in the NWM_Products_List.")
-            return True
+            return product_created
         except Exception as e:
             print(f"Error in creating netcdf product for {mdata.output_class}.{mdata.category}.{mdata.domain}: {e}")
             print(traceback.format_exc())
@@ -830,7 +827,7 @@ class DataProcessor(DataReader):
         return ds.isel({time_dim: sort_idx})
 
     def write_netcdf_per_timestep(self, mapped_grid: xr.Dataset, x_dim: str, y_dim: str, 
-                                  output_dir: str, output_cycle_hr: str) -> None:
+                                  output_dir: str, output_cycle_hr: str) -> bool:
         """
         Writes one NetCDF per timestep for the various NWM cycle runs. It handles the product file naming as well.
         This is called only for land and terrain_rt NWM products.
@@ -845,7 +842,9 @@ class DataProcessor(DataReader):
                 The folder where the output product will be saved or overwritten if it exists.
             output_cycle_hr : str
                 The hour in a day (0-23) for which the outputs are produced after simulations are run.
-
+        Returns:
+            bool
+                True if all files have been written successfully. Otherwise False.
         """
         os.makedirs(output_dir, exist_ok=True)
         time_dim = consts.DIM_TIME
@@ -935,6 +934,9 @@ class DataProcessor(DataReader):
                 prefix = get_file_timestep_prefix(self._output_class)
                 output_time_index = (i + time_step) # set correct timestep value for file name
                 sim_time_hr = generate_formatted_timestring_for_naming(output_time_index, self._output_class, self._category)
+                if sim_time_hr == 'unknown':
+                    print(f"----Formatted timestring for file name not generated for {self._output_class}, {self._category}")
+                    return False
                 formatted_t = f"{prefix}{sim_time_hr}"
                 cycle_hr = output_cycle_hr.zfill(2)
                 output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
@@ -943,8 +945,9 @@ class DataProcessor(DataReader):
         end_time = time.perf_counter()
         duration_minutes = (end_time - start_time) / 60
         print(f"----{self._category} products for each timestep written in: {duration_minutes:.2f} minutes")
+        return True
 
-    def produce_channel_reservoir_nwm_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> None:
+    def produce_channel_reservoir_nwm_product(self, mdata: NetCDFMetadata, output_dir: str, output_cycle_hr: str) -> bool:
         """
         Expands a zeroed NetCDF template and populates it with data for channel_rt and reservoir NWM products.
         
@@ -956,6 +959,9 @@ class DataProcessor(DataReader):
             output_cycle_hr : str
                 The hour in a day (0-23) for which the outputs are produced after simulations are run.
         
+        Returns:
+            bool
+                True if the product has been created successfully. Otherwise False
         Raises:
             ValueError if the required dataset inputs are not being assigned yet.
         """
@@ -993,7 +999,7 @@ class DataProcessor(DataReader):
                                             mdata.category, mdata.domain, int(output_cycle_hr), True)
         if len(hours_list) == 0:
             print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
-            return
+            return False
 
         # Extract only those timeslices that need to be produced
         # for example, hours [3, 6, 9, 12...] correspond to indices [2, 5, 8, 11...]
@@ -1137,6 +1143,7 @@ class DataProcessor(DataReader):
                         source_var = source_var.reindex({feature_id_dim: troute_feature_ids})
                     else:
                         print(f"{var_name} does not have {feature_id_dim} in its dimensions: {source_var.dims}")
+                        return False
                 else:
                     troute_unsliced_var = ds_sliced[var_name]
                     if time_dim in troute_unsliced_var.dims:
@@ -1159,6 +1166,7 @@ class DataProcessor(DataReader):
                     populated_ds[var_name] = source_var
                 else:
                     print(f"----The dimensions don't match between template ({template_var.dims}) and snapshot ({source_var.dims}) for {var_name}")
+                    return False
                 
             # Transfer fill and missing value from template
             populated_ds = self.attribute_fill_missing_values(populated_ds)
@@ -1192,6 +1200,9 @@ class DataProcessor(DataReader):
             os.makedirs(output_dir, exist_ok=True)
             prefix = get_file_timestep_prefix(self._output_class)
             sim_time_hr = generate_formatted_timestring_for_naming(time_step, self._output_class, self._category)
+            if sim_time_hr == 'unknown':
+                print(f"----Formatted timestring for file name not generated for {self._output_class}, {self._category}")
+                return False
             formatted_t = f"{prefix}{sim_time_hr}"
             cycle_hr = output_cycle_hr.zfill(2)
             output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
@@ -1199,6 +1210,7 @@ class DataProcessor(DataReader):
         end_time = time.perf_counter()
         duration_minutes = (end_time - start_time) / 60
         print(f"----{self._category} products for each timestep written in: {duration_minutes:.2f} minutes")
+        return True
 
     def attribute_fill_missing_values(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -1379,7 +1391,7 @@ class DataProcessor(DataReader):
                             "message": str(e),
                         }
                     )
-                # print data validation failures for the variable. N
+                # print data validation failures for the variable
                 if failed > 0:
                     print(f"------Validation check for {var}: Time index: {time_index}, Sample size of catchments: {sample_size}; Passed = {passed}; Failed = {failed}")
                 if len(failures) > 0:

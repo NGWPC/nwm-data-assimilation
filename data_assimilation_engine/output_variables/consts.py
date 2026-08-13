@@ -65,10 +65,10 @@ NWM_PRODUCTS_LIST = ['analysis_assim.channel_rt.conus',
                      'analysis_assim.reservoir.alaska',
                      'analysis_assim.terrain_rt.alaska',
 
-                    #  'analysis_assim.channel_rt.hawaii',
-                    #  'analysis_assim.land.hawaii',
-                    #  'analysis_assim.reservoir.hawaii',
-                    #  'analysis_assim.terrain_rt.hawaii',
+                     'analysis_assim.channel_rt.hawaii',
+                     'analysis_assim.land.hawaii',
+                     'analysis_assim.reservoir.hawaii',
+                     'analysis_assim.terrain_rt.hawaii',
 
                      'analysis_assim.channel_rt.puertorico',
                      'analysis_assim.land.puertorico',
@@ -88,17 +88,6 @@ NWM_PRODUCTS_LIST = ['analysis_assim.channel_rt.conus',
                      'analysis_assim_extend.land.alaska',
                      'analysis_assim_extend.reservoir.alaska',
                      'analysis_assim_extend.terrain_rt.alaska',
-
-                     'analysis_assim_no_da.channel_rt.conus',
-                     'analysis_assim_no_da.channel_rt.alaska',
-                     'analysis_assim_no_da.channel_rt.puertorico',
-
-                     'analysis_assim_long_no_da.channel_rt.conus',
-
-                     'analysis_assim_extend_no_da.channel_rt.alaska',
-
-                     'medium_range_no_da.channel_rt.conus',
-                     'medium_range_no_da.channel_rt.alaska',
 
                      'medium_range_blend.channel_rt.conus',
                      'medium_range_blend.land.conus',
@@ -201,5 +190,8 @@ NWM_PRODUCTS_LIST = ['analysis_assim.channel_rt.conus',
                      'short_range.reservoir.puertorico',
                      'short_range.terrain_rt.puertorico',
 
-                     'short_range_no_da.channel_rt.puertorico'
+                     'short_range.channel_rt.hawaii',
+                     'short_range.land.hawaii',
+                     'short_range.reservoir.hawaii',
+                     'short_range.terrain_rt.hawaii',
                      ]
