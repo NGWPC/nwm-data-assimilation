@@ -402,6 +402,7 @@ class DataProcessor(DataReader):
                 # Associate catchments to gridded template pixel centroid points
                 catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
 
+                # First check if we have correct number of timesteps in the data.
                 # Get the list of hours that needs to be processed for the NWM product.
                 hours_list = get_file_timestep_list(mdata.output_cycle, mdata.output_class, 
                                                     mdata.category, mdata.domain, int(output_cycle_hr), True)
@@ -409,6 +410,10 @@ class DataProcessor(DataReader):
                     print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
                     return False
 
+                ngen_timesteps = ds_modified.sizes[consts.DIM_TIME]
+                if len(hours_list) > ngen_timesteps:
+                    print(f"------Mismatch: {self._output_class}.{self._category} requires {len(hours_list)} timesteps. ngen output has {ngen_timesteps}. Process aborted.")
+                    return False
                 # Extract only those timeslices that need to be produced
                 # for example, hours [3, 6, 9, 12...] correspond to indices [2, 5, 8, 11...]
                 target_indices = [hr - 1 for hr in hours_list]
@@ -994,11 +999,16 @@ class DataProcessor(DataReader):
         else:
             raise ValueError(f"Unexpected category for channel/reservoir product: {mdata.category}")
 
+        # Check if there are correct number of files in the data. 
         # Get the list of hours that needs to be processed for the NWM product.
         hours_list = get_file_timestep_list(mdata.output_cycle, mdata.output_class, 
                                             mdata.category, mdata.domain, int(output_cycle_hr), True)
         if len(hours_list) == 0:
             print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
+            return False
+        troute_timesteps = troute_source_ds.sizes[time_dim]
+        if len(hours_list) != troute_timesteps:
+            print(f"------Mismatch: {self._output_class}.{self._category} requires {len(hours_list)} timesteps. T-Route output has {troute_timesteps}. Process aborted.")
             return False
 
         # Extract only those timeslices that need to be produced
