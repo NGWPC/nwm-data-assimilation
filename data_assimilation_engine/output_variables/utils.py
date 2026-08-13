@@ -278,7 +278,7 @@ def download_nwm_data_recursive(download_url: str, local_path: str,
         existing_keys: set[tuple[str, str, str]]
             A unique combination key of NWM class, category and domain.
     """
-    response = requests.get(download_url, verify=False)
+    response = requests.get(download_url)
     if response.status_code != 200:
         raise Exception(f"Failed to access {download_url}")
     
@@ -321,7 +321,7 @@ def download_file(url: str, save_path: str) -> None:
         save_path: str
             The folder path where the downloaded files are saved.
     """
-    response = requests.get(url, verify=False)
+    response = requests.get(url)
     if response.status_code == 200:
         with open(save_path, 'wb') as f:
             f.write(response.content)
