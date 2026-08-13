@@ -62,7 +62,7 @@ def get_file_timestep_prefix(output_class: str) -> str:
         return 'f'
 
 def get_file_timestep_list(output_cycle_type: str, output_class: str, category: str, 
-                           output_domain: str, number_only: bool) -> list[str] | list[int]:
+                           output_domain: str, output_cycle_hr: int, number_only: bool) -> list[str] | list[int]:
     """
     Function to retrieve all the file name prefix for timesteps in NWM products. For example:
     analysis_assim --> returns ['tm00', 'tm01', 'tm02'] or [0,1,2]
@@ -76,6 +76,8 @@ def get_file_timestep_list(output_cycle_type: str, output_class: str, category: 
             The product category For example: channel_rt, land
         output_domain: str
             The domain for the output products. For example, conus, hawaii, alaska
+        output_cycle_hr : int
+            The hour in a day (0-23) for which the outputs are produced after simulations are run.
         number_only: bool
             A boolean flag that indicates whether the returned list includes filename prefix or not.
     Returns:
@@ -96,7 +98,10 @@ def get_file_timestep_list(output_cycle_type: str, output_class: str, category: 
                 timesteps_list = generate_formatted_string_list(0, 28, 1, 2, prefix)
         case 'short_range' | 'short_range_no_da':
             if output_domain == 'alaska':
-                timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
+                if output_class == 'short_range' and output_cycle_hr % 2 != 0:
+                    timesteps_list = generate_formatted_string_list(1, 46, 1, 3, prefix)
+                else:
+                    timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
             elif output_domain == 'puertorico':
                 timesteps_list = generate_formatted_string_list(1, 49, 1, 3, prefix)
             else:
@@ -738,7 +743,7 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
         elif category.startswith('land') or category.startswith('terrain_rt'):
             is_gridded = True
 
-        time_list = get_file_timestep_list(output_cycle_type, output_class, category, output_cycle_domain, False)
+        time_list = get_file_timestep_list(output_cycle_type, output_class, category, output_cycle_domain, int(output_cycle_hr), False)
         if len(time_list) == 0:
             print(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
             raise ValueError(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")

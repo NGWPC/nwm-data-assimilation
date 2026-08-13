@@ -406,7 +406,8 @@ class DataProcessor(DataReader):
                 catchment_grid = self.build_catchment_id_grid(mdata.x_name, mdata.y_name)
 
                 # Get the list of hours that needs to be processed for the NWM product.
-                hours_list = get_file_timestep_list(mdata.output_cycle, mdata.output_class, mdata.category, mdata.domain, True)
+                hours_list = get_file_timestep_list(mdata.output_cycle, mdata.output_class, 
+                                                    mdata.category, mdata.domain, int(output_cycle_hr), True)
                 if len(hours_list) == 0:
                     print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
                     return
@@ -988,7 +989,8 @@ class DataProcessor(DataReader):
             raise ValueError(f"Unexpected category for channel/reservoir product: {mdata.category}")
 
         # Get the list of hours that needs to be processed for the NWM product.
-        hours_list = get_file_timestep_list(mdata.output_cycle, mdata.output_class, mdata.category, mdata.domain, True)
+        hours_list = get_file_timestep_list(mdata.output_cycle, mdata.output_class, 
+                                            mdata.category, mdata.domain, int(output_cycle_hr), True)
         if len(hours_list) == 0:
             print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
             return
