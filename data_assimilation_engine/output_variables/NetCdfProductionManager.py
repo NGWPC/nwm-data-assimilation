@@ -87,7 +87,7 @@ def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gp
                 If None provided, it defaults to a subfolder with the `root_output_folder`
 
         Raises:
-            ValueError if any of the input file paths do not exist.
+            ValueError if any of the input file paths do not exist or if the template is not created.
     """
     if not os.path.isfile(netcdf_file):
         raise ValueError("Specified ngen output cathments netcdf file does not exist")
@@ -111,9 +111,13 @@ def create_template_files_for_gpkg(root_output_folder: str, netcdf_file: str, gp
     os.makedirs(ngen_template_nc_folder, exist_ok = True)
 
     # Create templates.
+    template_created = False
     for mdata in netcdf_metadata_list:
-        if mdata.domain == output_cycle_domain:
-            _processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
+        # create templates only for non-coastal products
+        if mdata.domain == output_cycle_domain and 'coastal' not in mdata.output_class:
+            template_created = _processor.create_template_netcdf_using_config(mdata, ngen_template_nc_folder)
+    if not template_created:
+        raise ValueError("FATAL: Not all templates were created successfully.")
 
 def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: str, troute_lakeout_netcdf: str, 
                                    config_json: str, output_templates_folder: str | None, 
@@ -143,7 +147,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
                 The domain for the output products. For example, conus, hawaii, alaska
 
         Raises:
-            ValueError if any of the input file paths do not exist.
+            ValueError if any of the input file paths do not exist or if the NWM product was not created.
     """
     if output_templates_folder is None or output_templates_folder == '':
         # If no folder is specified, we will assume it as a subfolder within the root as defined in consts.py.
@@ -174,7 +178,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
 
     # set cycle hour
     formatted_hr = f"{output_cycle_hour:02d}"
-
+    product_created = False
     for mdata in netcdf_metadata_list:
         if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
             _processor.nwm_output_class = mdata.output_class
@@ -184,7 +188,9 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
             _processor.set_template_netcdf(template_files_dict[template_nc_name])
             _processor.set_troute_netcdf(troute_output_netcdf)
             _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
-            _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
+            product_created = _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
+    if not product_created:
+        raise ValueError("FATAL: NWM Production creation failed. See log for more details.")
 
 def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
@@ -237,10 +243,11 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
 
     match action_item:
         case "download":
-            if len(args_list) < 2:
-                raise ValueError("'download' action requires argument for: [root output folder path, 'download']")
+            if len(args_list) < 3:
+                raise ValueError("'download' action requires argument for: [root output folder path, re_download,'download']")
             root_output_folder = args_list[0]
-            config_json_file = download_netcdf_from_nomads(root_output_folder)
+            re_download = args_list[1]
+            config_json_file = download_netcdf_from_nomads(root_output_folder, re_download)
             return config_json_file
 
         case "config":
@@ -263,7 +270,8 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
             output_templates_folder = args_list[5]
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
-            create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_cycle_domain, output_templates_folder)
+                create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, 
+                                           config_json_file, output_cycle_domain, output_templates_folder)
 
         case "output":
             if len(args_list) < 11:

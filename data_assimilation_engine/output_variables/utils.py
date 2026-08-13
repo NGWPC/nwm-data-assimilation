@@ -4,6 +4,7 @@ import requests
 import xarray as xr
 import csv
 import pandas as pd
+import geopandas as gpd
 import numpy as np
 import json
 from pathlib import Path
@@ -42,183 +43,95 @@ def parse_filename_metadata(filename: str) -> tuple[str, str, str]:
     domain = components[5]
     return output_class, category, domain
 
-def convert_csvs_to_netcdf(csv_folder: str) -> None:
-    """
-    Takes a directory for ngen output CSVs, automatically discovers NWM variables,
-    analyzes their native data types, and converts them to netcdf.
-
-    Args:
-    csv_folder: str
-        The folder containing all the ngen output CSV files.
-
-    
-    Raises:
-        FileNotFoundError if csv folder is empty or no files in it.
-    """
-    # Find all CSV files in the target directory
-    csv_files = []
-    try:
-        with os.scandir(csv_folder) as entries:
-            for entry in entries:
-                if entry.is_file() and entry.name.lower().endswith('.csv'):
-                    csv_files.append(entry.path)
-    except FileNotFoundError:
-        print(f"The directory '{csv_folder}' does not exist or has no csv files in it.")
-        return
-    
-    if not csv_files:
-        print(f"No CSV files found in directory: {csv_folder}")
-        return
-
-    # 1. Discover variables using the first valid CSV file
-    template_df = pd.read_csv(csv_files[0])
-    base_cols = consts.CSV_BASE_COLS
-    nwm_variables = [col for col in template_df.columns if col.lower() not in base_cols]
-    
-    print(f"NWM variables for netcdf: {nwm_variables}")
-
-    catchment_nc_data = []
-
-    for file_path in csv_files:
-        filename = os.path.basename(file_path)
-        try:
-            # Use file names to extract the catchment IDs. We are using splitext and isdigit 
-            # instead of the usual replace 'cat-' so that it can handle other filename formats 
-            # Assumes that the file name contains long integer catchment IDs.
-            catchment_id_name = os.path.splitext(filename)[0]
-            catchment_id_str = ''.join(filter(str.isdigit, catchment_id_name))
-            catchment_id = np.int64(catchment_id_str) # for latest NHF schema
-        except ValueError:
-            print(f"Skipping {filename}: Could not parse catchment ID as a long integer.")
-            continue
-
-        # Load CSV into Pandas
-        df = pd.read_csv(file_path)
-
-        #Convert Time column to lower case
-        if 'Time' in df.columns:
-            df.rename(columns={'Time': consts.DIM_TIME}, inplace=True)
-
-        # Safety check: Ensure this specific CSV contains all discovered data columns
-        if not set(nwm_variables).issubset(df.columns):
-            print(f"Skipping {filename}: Headers do not match the expected dataset schema.")
-            continue
-
-        # Convert time to UNIX Epoch
-        df['datetime'] = pd.to_datetime(df['time'])
-        df['epoch'] = (df['datetime'].astype('int64') // 10**9).astype(np.int32) # int32 good until year 2038
-
-        # 2. Dynamically extract columns based on their native types
-        nwm_vars_dict = {}
-        for var in nwm_variables:
-            col_type = df[var].dtype
-
-            if col_type.kind in {"U", "S", "O"}: # If the column is text/string or generic object data
-                nwm_vars_dict[var] = (["time"], df[var].astype(str).values)
-            elif col_type.kind in {"i", "u"}: # If the column is an integer type (like status codes, IDs)
-                nwm_vars_dict[var] = (["time"], df[var].values)
-            else: # Default floats/doubles
-                nwm_vars_dict[var] = (["time"], df[var].values)
-
-        # Set coordinates for xarray translation
-        df = df.set_index('epoch')
-
-        # Convert individual dataframe to an xarray Dataset
-        catchment_ds = xr.Dataset(
-            data_vars = nwm_vars_dict,
-            coords = {
-                consts.DIM_TIME: (["time"], df.index.values.astype(np.int32)),
-                consts.DIM_CATCHMENTS: catchment_id
-            }
-        )
-
-        # Expand the dataset to include catchments as a dimension axis
-        catchment_ds = catchment_ds.expand_dims(consts.DIM_CATCHMENTS)
-        catchment_nc_data.append(catchment_ds)
-
-    if not catchment_nc_data:
-        print("No valid data was extracted. NetCDF generation aborted.")
-        return
-
-    print(" Combining and aligning all catchments")
-    
-    # Merge all separate catchments together along the catchments dimension
-    combined_ds = xr.combine_by_coords(catchment_nc_data)
-
-    # Enforce structural array coordinates to be 64-bit long integers
-    combined_ds[consts.DIM_TIME] = combined_ds[consts.DIM_TIME].astype(np.int32)
-    combined_ds[consts.DIM_CATCHMENTS] = combined_ds[consts.DIM_CATCHMENTS].astype(np.int64)
-
-    # Add descriptive metadata attributes dynamically
-    combined_ds[consts.DIM_TIME].attrs = {"units": "seconds since 1970-01-01 00:00:00", "calendar": "gregorian"}
-    combined_ds[consts.DIM_CATCHMENTS].attrs = {"Catchment_ID": "Catchment identifier in input"}
-    
-    for var in nwm_variables:
-        # Do we need to have a dictionary of variable name, mapping and units for attributes?
-        combined_ds[var].attrs = {"long_name": f"{var}"}
-        combined_ds[var].attrs["_FillValue"] = -1.0
-        combined_ds[var].attrs["missing_value"] = -1.0
-
-    output_netcdf_path = os.path.join(csv_folder, 'catchment_output.nc')
-    print(f"Saving unified NetCDF to: {output_netcdf_path}")
-    combined_ds.to_netcdf(output_netcdf_path)
-    print("Process complete!")
-
-def get_file_timestep_prefix(cycle_run: str) -> str:
+def get_file_timestep_prefix(output_class: str) -> str:
     """
     Function to retrieve file name prefix for NWM products. For example:
     "nwm.t00z.medium_range.channel_rt_1.f001.alaska.nc" --> returns 'f'
 
     Args:
         cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
+            The output_class for NWM product. For example, medium_range, analysis_assim etc.
 
     Returns:
         str
             The prefix before the timestep number in a standard NWM product file name.
     """
-    if cycle_run.startswith('analysis_assim'):
+    if output_class.startswith('analysis_assim'):
         return 'tm'
     else:
         return 'f'
 
-def get_file_timestep_list(cycle_run: str, category: str) -> list[str]:
+def get_file_timestep_list(output_cycle_type: str, output_class: str, category: str, 
+                           output_domain: str, output_cycle_hr: int, number_only: bool) -> list[str] | list[int]:
     """
     Function to retrieve all the file name prefix for timesteps in NWM products. For example:
-    analysis_assim --> returns ['tm00', 'tm01', 'tm02']
+    analysis_assim --> returns ['tm00', 'tm01', 'tm02'] or [0,1,2]
 
     Args:
-        cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
+        output_cycle_type: str
+            The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
+        output_class: str
+            The output_class for NWM product. For example, medium_range, analysis_assim etc.
         category: str
             The product category For example: channel_rt, land
-
+        output_domain: str
+            The domain for the output products. For example, conus, hawaii, alaska
+        output_cycle_hr : int
+            The hour in a day (0-23) for which the outputs are produced after simulations are run.
+        number_only: bool
+            A boolean flag that indicates whether the returned list includes filename prefix or not.
     Returns:
-        list[str]
-            A list containing all the file name prefixes at each timestep in a run.
+        list[str] | list[int]
+            A list containing all the file name prefixes or the file numbers at each timestep in a run.
     """
-    timesteps = []
-    prefix = get_file_timestep_prefix(cycle_run)
-    match cycle_run:
+    timesteps_list = []
+    prefix = get_file_timestep_prefix(output_class)
+    match output_class:
         case 'analysis_assim' | 'analysis_assim_no_da':
-            return generate_formatted_string_list(0, 3, 1, 2, prefix)
-        case 'analysis_assim_long':
-            return generate_formatted_string_list(0, 12, 1, 2, prefix)
-        case 'short_range':
-            return generate_formatted_string_list(1, 19, 1, 3, prefix)
+            timesteps_list = generate_formatted_string_list(0, 3, 1, 2, prefix)
+        case 'analysis_assim_long' | 'analysis_assim_long_no_da':
+            timesteps_list = generate_formatted_string_list(0, 12, 1, 2, prefix)
+        case 'analysis_assim_extend' | 'analysis_assim_extend_no_da':
+            if output_domain == 'alaska':
+                timesteps_list = generate_formatted_string_list(0, 32, 1, 2, prefix)
+            else:
+                timesteps_list = generate_formatted_string_list(0, 28, 1, 2, prefix)
+        case 'short_range' | 'short_range_no_da':
+            if output_domain == 'alaska':
+                if output_class == 'short_range' and output_cycle_hr % 2 != 0:
+                    timesteps_list = generate_formatted_string_list(1, 46, 1, 3, prefix)
+                else:
+                    timesteps_list = generate_formatted_string_list(1, 16, 1, 3, prefix)
+            elif output_domain == 'puertorico':
+                timesteps_list = generate_formatted_string_list(1, 49, 1, 3, prefix)
+            elif output_domain == 'hawaii':
+                timesteps_list = generate_formatted_string_list(1, 49, 1, 3, prefix)
+            else:
+                timesteps_list = generate_formatted_string_list(1, 19, 1, 3, prefix)
         case 'long_range':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return generate_formatted_string_list(6, 721, 6, 3, prefix)
+                timesteps_list = generate_formatted_string_list(6, 721, 6, 3, prefix)
             elif category.startswith('land'):
-                return generate_formatted_string_list(24, 721, 24, 3, prefix)
-        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
-            if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return generate_formatted_string_list(1, 241, 1, 3, prefix)
-            elif category.startswith('land') or category.startswith('terrain'):
-                return generate_formatted_string_list(3, 241, 3, 3, prefix)
-        case _:
-            return "Unknown"  # This is the default 'else' case
-    return timesteps
+                timesteps_list = generate_formatted_string_list(24, 721, 24, 3, prefix)
+        case 'medium_range' | 'medium_range_blend':
+            if output_cycle_type[-1].isdigit() and int(output_cycle_type[-1]) > 1:
+                if category.startswith('channel_rt') or category.startswith('reservoir'):
+                    timesteps_list = generate_formatted_string_list(1, 205, 1, 3, prefix)
+                elif category.startswith('land') or category.startswith('terrain'):
+                    timesteps_list = generate_formatted_string_list(3, 205, 3, 3, prefix)
+            else:
+                if category.startswith('channel_rt') or category.startswith('reservoir'):
+                    timesteps_list = generate_formatted_string_list(1, 241, 1, 3, prefix)
+                elif category.startswith('land') or category.startswith('terrain'):
+                    timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
+        case 'medium_range_no_da':
+            if category.startswith('channel_rt'):
+                timesteps_list = generate_formatted_string_list(3, 241, 3, 3, prefix)
+
+    if len(timesteps_list) > 0 and number_only:
+        return [int(time_step.lstrip(prefix)) for time_step in timesteps_list]
+    else:
+        return timesteps_list
 
 def generate_formatted_string_list(start: int, end: int, interval: int, 
                                    width: int, prefix: str) -> list[str]:
@@ -247,15 +160,15 @@ def generate_formatted_string_list(start: int, end: int, interval: int,
         ret_list.append(ts)
     return ret_list
 
-def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, category: str) -> str:
+def generate_formatted_timestring_for_naming(time_step: int, output_class: str, category: str) -> str:
     """
     Function to generate the file name prefix for a given timestep and given NWM product.
 
     Args:
         time_step: int
             The timestep of simulation run for a given product.
-        cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
+        output_class: str
+            The output_class for NWM product. For example, medium_range, analysis_assim etc.
         category: str
             The product category For example: channel_rt, land
 
@@ -263,10 +176,10 @@ def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, cat
         str
             A string representing the file name prefix. For example, 'f024', 'tm02' etc.
     """
-    match cycle_run:
-        case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long':
+    match output_class:
+        case 'analysis_assim' | 'analysis_assim_no_da' | 'analysis_assim_long' | 'analysis_assim_extend':
             return f"{time_step:02d}"
-        case 'short_range':
+        case 'short_range' | 'short_range_no_da':
             formatted = (time_step+1)
             return f"{(formatted):03d}"
         case 'long_range':
@@ -276,7 +189,7 @@ def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, cat
             elif category.startswith('land'):
                 formatted = (time_step+1) * 24
                 return f"{(formatted):03d}"
-        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
+        case 'medium_range' | 'medium_range_blend':
             if category.startswith('channel_rt') or category.startswith('reservoir'):
                 formatted = (time_step+1)
                 return f"{(formatted):03d}"
@@ -288,37 +201,8 @@ def generate_formatted_timestring_for_naming(time_step: int, cycle_run: str, cat
                 formatted = (time_step+1) * 3
                 return f"{(formatted):03d}"
         case _:
-            return "Unknown"  # This is the default 'else' case
+            return "unknown"  # This is the default 'else' case
 
-def get_output_interval_hours(cycle_run: str, category: str) -> int | None:
-    """
-    Output interval (hours) for a given output cycle/category. None means no files should be 
-    produced for that combination
-
-    Args:
-        cycle_run: str
-            The run cycle for NWM product. For example, medium_range_mem2.
-        category: str
-            The product category For example: channel_rt, land
-
-    Returns:
-        int | None
-        The integer number that represents the output interval hours in the file name of a product.
-    """
-    match cycle_run:
-        case 'medium_range' | 'medium_range_blend' | 'medium_range_no_da':
-            if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return 1
-            elif category.startswith('land') or category.startswith('terrain'):
-                return 3
-        case 'long_range':
-            if category.startswith('channel_rt') or category.startswith('reservoir'):
-                return 6
-            elif category.startswith('land'):
-                return 24
-            elif category.startswith('terrain'):
-                return None
-    return 1  # Covers all other cycles, should be updated with oCONUS regions if necessary
 # endregion
 
 # region data download
@@ -343,7 +227,6 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
     os.makedirs(nwm_data_folder, exist_ok = True)
 
     # Re-download if requested
-    # To consider: may be we should do away with the re_download argument altogether
     if (re_download): 
         if len(os.listdir(nwm_data_folder)) > 0:
             # Delete all the contents in the local folder and re-create
@@ -697,7 +580,6 @@ def write_metadata_to_config_json(metadata_list: list[NetCDFMetadata], output_js
         output_json: str
             Full or relative path to the config json file
     """
-    # Delete any existing config file
     if os.path.exists(output_json):
         os.remove(output_json)
 
@@ -802,7 +684,18 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
             The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
         output_cycle_domain: str
             The domain for the output products. For example, conus, hawaii, alaska
+    
+    Raises:
+        Raises FileNotFoundError if the input netcdf folder or the config json file does not exist.
     """
+    input_path = Path(netcdf_folder)
+    if not input_path.is_dir():
+        raise FileNotFoundError(f"The folder {netcdf_folder} does not exist.")
+
+    input_path = Path(config_json)
+    if not input_path.is_file():
+        raise FileNotFoundError(f"The config file {config_json} does not exist.")
+
     os.makedirs(output_folder, exist_ok=True)
     cycle_hr = f"t{str(output_cycle_hr).zfill(2)}z"
 
@@ -820,22 +713,26 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
             is_gridded = False
         elif category.startswith('land') or category.startswith('terrain_rt'):
             is_gridded = True
-        
-        time_list = get_file_timestep_list(output_class, category)
+
+        time_list = get_file_timestep_list(output_cycle_type, output_class, category, output_cycle_domain, int(output_cycle_hr), False)
+        if len(time_list) == 0:
+            print(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
+            raise ValueError(f"Fatal: No files list suffixes were identified for {output_class}, {category}, {output_cycle_domain}")
         for tm in time_list:
             keywords_list = [cycle_hr, output_class, category, tm, output_cycle_domain]
             matching_files = [str(full_file_path)
                 for full_file_path in Path(netcdf_folder).glob("*.nc")
                 if all(keyword in full_file_path.name for keyword in keywords_list)
             ]
+
             if len(matching_files) > 0:
                 print(f"Merging files for {output_class}, {category}, {tm}")
                 if is_gridded:
                     merged_ds, encoding = create_multi_basin_netcdfs(ref_file, matching_files, None, 1.0, True)
                 else:
-                    # print(f"File category: {category}; Feature ID present: {has_featureid}")
-                    merged_ds, encoding = combined_non_gridded_netcdfs(matching_files, True)
-                # Write dataset to disk
+                    merged_ds, encoding = combined_non_gridded_netcdfs(matching_files)
+
+                # Write dataset
                 output_file = os.path.join(output_folder, f"nwm.{cycle_hr}.{output_class}.{category}.{tm}.{output_cycle_domain}.nc")
                 merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
             else:
@@ -926,7 +823,7 @@ def create_multi_basin_netcdfs(reference_netcdf: str, nc_files: list[str], varia
 
     return ds_combined, encoding_config
 
-def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
+def combined_non_gridded_netcdfs(nc_files: list[str]) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
     """
     Merge multiple NetCDF files that are not gridded. This is specific for channel_rt and reservoir NWM products
 
@@ -934,33 +831,25 @@ def combined_non_gridded_netcdfs(nc_files: list[str], has_featureid: bool) -> tu
         nc_files: list[str]
             List of netcdf files to be merged/combined.
 
-        has_featureid: bool
-            Boolean variable indicating that the feature_id dimension exists. Default is True.
-
     Returns:
         tuple[xr.Dataset, dict[str, dict[str, Any]]]
             tuple representing the xarray dataset and the encoding config
     """
-    if has_featureid:
-        combined = xr.open_mfdataset(
-        nc_files,
-        data_vars="all",
-        combine="nested",
-        concat_dim=consts.DIM_FEATURE_ID,
-        preprocess=preprocess_sort,
-        combine_attrs="override"
-        )
-        combined = combined.sortby(consts.DIM_FEATURE_ID)
-    # else:
-    #     combined = xr.open_mfdataset(
-    #         nc_files,
-    #         combine="by_coords",
-    #         preprocess=preprocess_sort,
-    #         combine_attrs="override"
-    #     )
+
+    combined = xr.open_mfdataset(
+    nc_files,
+    data_vars="all",
+    combine="nested",
+    concat_dim=consts.DIM_FEATURE_ID,
+    preprocess=preprocess_sort,
+    combine_attrs="override"
+    )
+    combined = combined.sortby(consts.DIM_FEATURE_ID)
+
     encoding = {}
     for var in combined.data_vars:
         if consts.DIM_FEATURE_ID in combined[var].dims:
+            # To do: add feature_id chunking for these variables.
             encoding[var] = {
                 "zlib": True,
                 "complevel": 4,
