@@ -728,19 +728,19 @@ def create_combined_basin_netcdf_products (netcdf_folder: str, output_folder: st
             if len(matching_files) > 0:
                 print(f"Merging files for {output_class}, {category}, {tm}")
                 if is_gridded:
-                    merged_ds, encoding = create_multi_basin_netcdfs(ref_file, matching_files, None, 1.0, True)
+                    merged_ds = create_multi_basin_netcdfs(ref_file, matching_files, None, 1.0, True)
                 else:
-                    merged_ds, encoding = combined_non_gridded_netcdfs(matching_files)
+                    merged_ds = combined_non_gridded_netcdfs(matching_files)
 
                 # Write dataset
                 output_file = os.path.join(output_folder, f"nwm.{cycle_hr}.{output_class}.{category}.{tm}.{output_cycle_domain}.nc")
-                merged_ds.to_netcdf(output_file, encoding = encoding, engine='netcdf4')
+                merged_ds.to_netcdf(output_file, engine='netcdf4')
             else:
-                print(f"Warning: No matching files to combine for {output_cycle_type}, {output_class}, {category}, {output_cycle_domain}")
+                print(f"Warning: No matching files to combine for hour: {cycle_hr}, Cycle Type: {output_cycle_type}, Product: {output_class}.{category}.{output_cycle_domain}")
 
 def create_multi_basin_netcdfs(reference_netcdf: str, nc_files: list[str], variables_of_interest: list[str] = None, 
                               tolerance: float = 1.0, check_crs: bool = True 
-) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
+) -> xr.Dataset:
     """
     Merge multiple NetCDF subsets.
     Assumes same grid resolution, same coordinate system
@@ -758,8 +758,8 @@ def create_multi_basin_netcdfs(reference_netcdf: str, nc_files: list[str], varia
             Boolean variable to check if all the netcdfs have the same crs. Default is True.
 
     Returns:
-        tuple[xr.Dataset, dict[str, dict[str, Any]]]
-            tuple representing the xarray dataset and the encoding config
+        xr.Dataset
+            The combined xarray dataset with all attributes and metadata
     """
     # Check CRS and confirm that they are the same for all the netcdf files
     if check_crs:
@@ -778,9 +778,9 @@ def create_multi_basin_netcdfs(reference_netcdf: str, nc_files: list[str], varia
 
     # Gather the time and global attributes from the first dataset
     global_attrs = None
-    with xr.open_dataset(nc_files[0]) as first_da:
-        standardized_time = first_da.time.values
-        global_attrs = first_da.attrs.copy()
+    template_ds = xr.open_dataset(nc_files[0])
+    standardized_time = template_ds.time.values
+    global_attrs = template_ds.attrs.copy()
 
     # Automatically grab all data variables from the first file 
     # if variables of interest is not provided.
@@ -801,29 +801,20 @@ def create_multi_basin_netcdfs(reference_netcdf: str, nc_files: list[str], varia
                 reindexed_var_array.append(var_reindexed)
 
             # merge the variable for all individual basins
-            # get the attributes from the first element of the reindexed
-            var_attrs = reindexed_var_array[0].attrs.copy()
-            var_encoding = reindexed_var_array[0].encoding.copy()
             combined = reduce(lambda left, right: left.combine_first(right), reindexed_var_array)
-            combined.attrs = var_attrs
-            combined.encoding = var_encoding
-
             combined_variables_dict[var] = combined
-    
+
+    # Create netcdf dataset with combined variables
     ds_combined = xr.Dataset(data_vars=combined_variables_dict, 
                            coords={"time": standardized_time, "y": ref_grid.y, "x": ref_grid.x}, 
                            attrs=global_attrs)
-            
-    encoding_config = {}
-    for var_name in variables_of_interest:
-        encoding_config[str(var_name)] = {
-            "zlib": True,
-            "complevel": 4
-        }
 
-    return ds_combined, encoding_config
+    # Copy attributes from a reference file to the combined
+    ds_combined = copy_netcdf_attributes(template_ds, ds_combined, True, None)
 
-def combined_non_gridded_netcdfs(nc_files: list[str]) -> tuple[xr.Dataset, dict[str, dict[str, Any]]]:
+    return ds_combined
+
+def combined_non_gridded_netcdfs(nc_files: list[str]) -> xr.Dataset:
     """
     Merge multiple NetCDF files that are not gridded. This is specific for channel_rt and reservoir NWM products
 
@@ -832,11 +823,16 @@ def combined_non_gridded_netcdfs(nc_files: list[str]) -> tuple[xr.Dataset, dict[
             List of netcdf files to be merged/combined.
 
     Returns:
-        tuple[xr.Dataset, dict[str, dict[str, Any]]]
-            tuple representing the xarray dataset and the encoding config
+        xr.Dataset
+            The combined xarray dataset with all attributes and metadata
     """
 
-    combined = xr.open_mfdataset(
+    # Gather the global attributes from the first dataset
+    global_attrs = None
+    template_ds = xr.open_dataset(nc_files[0])
+    global_attrs = template_ds.attrs.copy()
+
+    ds_combined = xr.open_mfdataset(
     nc_files,
     data_vars="all",
     combine="nested",
@@ -844,24 +840,12 @@ def combined_non_gridded_netcdfs(nc_files: list[str]) -> tuple[xr.Dataset, dict[
     preprocess=preprocess_sort,
     combine_attrs="override"
     )
-    combined = combined.sortby(consts.DIM_FEATURE_ID)
+    ds_combined = ds_combined.sortby(consts.DIM_FEATURE_ID)
 
-    encoding = {}
-    for var in combined.data_vars:
-        if consts.DIM_FEATURE_ID in combined[var].dims:
-            # To do: add feature_id chunking for these variables.
-            encoding[var] = {
-                "zlib": True,
-                "complevel": 4,
-                "shuffle": True
-            }
-        else:
-            encoding[var] = {
-                "zlib": True,
-                "complevel": 4,
-                "shuffle": True
-            }
-    return combined, encoding
+    # Copy attributes from first dataset to the combined output.
+    ds_combined = copy_netcdf_attributes(template_ds, ds_combined, True, None)
+
+    return ds_combined
 
 def preprocess_sort(ds: xr.Dataset) -> xr.Dataset:
     """
@@ -872,11 +856,87 @@ def preprocess_sort(ds: xr.Dataset) -> xr.Dataset:
         ds: xr.Dataset
             xarray NetCDF dataset whose feature ids need to be sorted.
     Returns:
-        ds: xr.Dataset
+        xr.Dataset
             xarray NetCDF dataset with sorted feature ids.
     """
     if consts.DIM_FEATURE_ID in ds.dims and consts.DIM_FEATURE_ID in ds.coords:
         if not ds.indexes[consts.DIM_FEATURE_ID].is_monotonic_increasing:
             ds = ds.sortby(consts.DIM_FEATURE_ID)
     return ds
+
+def copy_netcdf_attributes(src_ds: xr.Dataset, dst_ds: xr.Dataset, 
+                            add_compression: bool, chunksizes: dict[str, str] | None) -> xr.Dataset:
+    """
+    Apply template attributes and encoding to a netcdf dataset.
+
+    Args:
+        src_ds: xr.Dataset
+            The reference xarray Dataset from which the attributes need to be copied.
+
+        dst_ds: xr.Dataset
+            The input xarray Dataset in which the attributes need to be updated.
+
+        add_compression: bool
+            A flag indicating whether to apply compression or not.
+
+        chunksizes : dict, optional
+            Example:
+                {
+                "time": 1,
+                "y": 512,
+                "x": 512
+                }
+    Returns:
+        xr. Dataset
+            Dataset containing the updated attribute values as per the NWM templates.
+    """
+
+    for var_name in src_ds.variables:
+        if var_name not in dst_ds.variables:
+            continue
+        src_var = src_ds[var_name]
+        dst_var = dst_ds[var_name]
+        dst_var.attrs = src_var.attrs.copy() # Preserve variable attributes
+
+        # Copy all reference encoding
+        dst_var.encoding.clear()
+        dst_var.encoding.update(src_var.encoding)
+
+        # Explicitly handle fill value
+        if "_FillValue" in src_var.encoding:
+            dst_var.encoding["_FillValue"] = src_var.encoding["_FillValue"]
+        else:
+            dst_var.encoding["_FillValue"] = None
+
+        # Explicitly handle coordinates
+        if "coordinates" in src_var.encoding:
+            dst_var.encoding["coordinates"] = src_var.encoding["coordinates"]
+        else:
+            dst_var.encoding["coordinates"] = None
+
+        # Remove xarray bookkeeping encoding items
+        for key in consts.NC_ENCODING_KEYS:
+            dst_var.encoding.pop(key, None)
+
+        if add_compression and var_name not in src_ds.coords:
+            dst_var.encoding["zlib"] = True
+            dst_var.encoding["complevel"] = 4
+            dst_var.encoding["shuffle"] = True
+
+        # Optional user-defined chunking
+        if chunksizes is not None:
+            dims = dst_ds[var_name].dims
+            dst_var.encoding["chunksizes"] = tuple(
+                chunksizes[d] for d in dims if d in chunksizes)
+
+    # Explicitly handle time and reference_time
+    for time_var in [consts.DIM_TIME, consts.DIM_REF_TIME]:
+        if time_var in src_ds and time_var in dst_ds:
+            dst_ds[time_var].encoding.update(
+                {
+                    "units": "minutes since 1970-01-01 00:00:00 UTC",
+                    "calendar": "proleptic_gregorian"
+                }
+            )
+    return dst_ds
 # endregion

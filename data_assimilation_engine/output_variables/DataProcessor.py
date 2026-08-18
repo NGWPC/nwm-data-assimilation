@@ -19,6 +19,7 @@ from .utils import (
     get_file_timestep_prefix,
     generate_formatted_timestring_for_naming,
     get_file_timestep_list,
+    copy_netcdf_attributes
 )
 from . import consts
 
@@ -26,6 +27,7 @@ class DataProcessor(DataReader):
     """
     Handles ngen and troute outputs and produces NWM products.
     """
+# region DataProcessor init and properties
     def __init__(self, catchment_netcdf_file: str, gpkg_file: str, chunk_size: int = 100) -> None:
         """
         Args:
@@ -55,6 +57,7 @@ class DataProcessor(DataReader):
 
         self._catchment_ds: xr.Dataset = self._dataset
         self._gpkg_file = gpkg_file
+        self._output_cycle = None
         self._output_class = None
         self._category = None
         self._domain = None
@@ -88,6 +91,10 @@ class DataProcessor(DataReader):
         self._log_file = None
 
     @property
+    def nwm_output_cycle(self):
+        return self._output_cycle
+
+    @property
     def nwm_output_class(self):
         return self._output_class
     
@@ -106,7 +113,11 @@ class DataProcessor(DataReader):
     @property
     def geo_id(self):
         return self._geo_id
-    
+
+    @nwm_output_cycle.setter
+    def nwm_output_cycle(self, value):
+        self._output_cycle = value
+
     @nwm_output_class.setter
     def nwm_output_class(self, value):
         self._output_class = value
@@ -167,7 +178,9 @@ class DataProcessor(DataReader):
         layers = gpd.list_layers(geopackage_path)
         tabular_layers = layers[layers[consts.GPKG_GEOMETRY_TYPE_IDENTIFIER].isna()]
         return layer_name.lower() in tabular_layers['name'].tolist()
-    
+# endregion
+
+# region Data processing
     def create_template_netcdf_using_config(self, mdata: NetCDFMetadata, template_netcdf_folder: str) -> bool:
         """
         Create a template netcdf file that aligns to a national reference grid defined in the metadata config.
@@ -224,7 +237,10 @@ class DataProcessor(DataReader):
                 dims = list(ds.sizes.keys())
                 zero_slices = {dim: slice(0, 0) for dim in dims}
                 ds_template = ds.isel(zero_slices)
-                ds_template.to_netcdf(template_nc_file)
+
+                # Transfer all the attributes from reference file before creating the template and save as netcdf
+                ds_template = copy_netcdf_attributes(ds, ds_template, False, None)
+                ds_template.to_netcdf(template_nc_file, engine = "netcdf4")
                 print(f"----Template netcdf saved to: {template_nc_file}")
             else: # gridded products - land and terrain_rt
                 ds = xr.open_dataset(file_name)
@@ -301,25 +317,17 @@ class DataProcessor(DataReader):
                 if consts.DIM_SNOW_LYR in ds_clipped.dims:
                     ds_clipped = ds_clipped.isel(**{consts.DIM_SNOW_LYR: [0]})
 
-                # Set values of NWM variables to zero in the template grid and compress
-                encoding_dict = {}
+                # Set values of NWM variables to zero in the template grid
                 nwm_vars = [name for name, var in ds_clipped.data_vars.items() 
                         if var.ndim > 0 and name not in ds_clipped.coords]
                 for var in nwm_vars:
                     ds_clipped[var] = ds_clipped[var] * 0
                     if ds_clipped[var].dtype == np.float64:
                         ds_clipped[var] = ds_clipped[var].astype(np.float32)
-                        encoding_dict[var] = {"zlib": True, "complevel": 4, "shuffle": True}
-                    
-                # Create crs as a scalar variable.
-                crs_attrs = ds_clipped["crs"].attrs
-                ds_clipped = ds_clipped.drop_encoding()
-                del ds_clipped["crs"]
-                ds_clipped["crs"] = xr.DataArray("", dims=())
-                ds_clipped["crs"].attrs = crs_attrs
 
-                # Save to nc file
-                ds_clipped.to_netcdf(template_nc_file, engine = "netcdf4", encoding = encoding_dict)
+                # Transfer the attributes before creating the template, compress and save as netcdf
+                ds_clipped = copy_netcdf_attributes(ds, ds_clipped, False, None)
+                ds_clipped.to_netcdf(template_nc_file, engine = "netcdf4")
                 print(f"----Template netcdf saved to: {template_nc_file}")
 
             self._template_netcdf_ds = xr.open_dataset(template_nc_file) # assign to class variable.
@@ -689,7 +697,6 @@ class DataProcessor(DataReader):
         variables_to_transfer.sort()
         for name in variables_to_transfer:
             source_da = ds_data[name]
-            template_da = ds_template[name]
 
             source_non_catchment_dims = [
                 dim
@@ -725,9 +732,6 @@ class DataProcessor(DataReader):
                 else:
                     processed_da = mapped_da.where(valid_mask_da, other=np.nan).astype(mapped_da.dtype) #.astype(np.float32)
 
-                processed_da.attrs = template_da.attrs.copy() # Preserve template attributes
-                processed_da.encoding = template_da.encoding.copy() # Preserve template encoding that got stripped
-                processed_da.attrs.pop("_ChunkSizes", None) # remove the stale chunk sizes.
                 output[name] = processed_da
 
                 # Unify the Dask chunk structure explicitly
@@ -763,8 +767,8 @@ class DataProcessor(DataReader):
                     # If it has other dimensions (but not time or catchment), copy its lazy dask representation
                     output[name] = dask_data_ds[name].copy(deep=False)
 
-        # Preserve global template attributes
-        output.attrs = ds_template.attrs.copy()
+        # Copy all attributes from template
+        output = copy_netcdf_attributes(ds_template, output, False, None)
 
         return output, grid_index
 
@@ -853,10 +857,7 @@ class DataProcessor(DataReader):
         """
         os.makedirs(output_dir, exist_ok=True)
         time_dim = consts.DIM_TIME
-        catchment_dim = consts.DIM_CATCHMENTS
         ref_time_dim = consts.DIM_REF_TIME
-
-        reference_epoch = np.datetime64("1970-01-01T00:00:00").astype("datetime64[m]")
 
         if self._output_class.startswith('analysis_assim'):
             # AnA numbers tm00 (most recent) -> tmNN (oldest). Sort by descending
@@ -867,14 +868,21 @@ class DataProcessor(DataReader):
         sorted_times = mapped_grid[time_dim].values
         sorted_indices = np.arange(len(sorted_times))
 
-        # Compute min, max and reference time
+        # Compute min, max and reference time.
+        # Get time string values for global attributes
         if self._output_class.startswith('analysis_assim'):
             time_value_min = np.int32(np.datetime64(sorted_times[-1]).astype("datetime64[m]"))
             time_value_max = np.int32(np.datetime64(sorted_times[0]).astype("datetime64[m]"))
+            min_time = sorted_times[-1]
         else:
             time_value_min = np.int32(np.datetime64(sorted_times[0]).astype("datetime64[m]"))
             time_value_max = np.int32(np.datetime64(sorted_times[-1]).astype("datetime64[m]"))
-        reference_time = np.int32(time_value_min - 60) 
+            min_time = sorted_times[0]
+
+        valid_time_str = str(min_time).split('.')[0].replace('T', '_')
+        ref_time_str = str(min_time - np.timedelta64(1, 'h')).split('.')[0].replace('T', '_')
+        reference_time = min_time - np.timedelta64(1, 'h')
+
         start_time = time.perf_counter()
 
         # Chunk up the grid
@@ -887,53 +895,31 @@ class DataProcessor(DataReader):
             batch_times = sorted_times[i:i + consts.NC_BATCH_SIZE]
             batch_ds = mapped_grid.isel({time_dim: batch_indices})
             batch_ds = batch_ds.load()
+            time_encoding = batch_ds[time_dim].encoding.copy()
+
             for time_step, snapshot_time_val in enumerate(batch_times):
                 ds_t = batch_ds.isel({time_dim: time_step})
-                time_value_mins = np.int32((snapshot_time_val - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-                ds_t = ds_t.expand_dims({time_dim: [time_value_mins]})
+                valid_time_str = str(snapshot_time_val).split('.')[0].replace('T', '_')
+                ds_t = ds_t.expand_dims({time_dim: [snapshot_time_val]})
+                ds_t[time_dim].encoding.update(time_encoding)
 
-                # Rebuild CRS info and mapping.
-                if "crs" in ds_t:
-                    ds_t = ds_t.drop_vars("crs")
-
-                ds_t["crs"] = np.array(b"", dtype="S1")
-                ds_t["crs"].attrs = self._template_netcdf_ds["crs"].attrs.copy()
-                for var in ds_t.data_vars:
-                    if not var == "crs":
-                        ds_t[var].attrs["grid_mapping"] = "crs"
-
-                # Add reference_time variable and attributes to netcdf
+                # Add reference_time variable to netcdf
                 ref_time_da = xr.DataArray(
                     data = [reference_time],
                     dims = [ref_time_dim],
-                    coords = {ref_time_dim: [reference_time]},
-                    attrs={
-                        "long_name": "model initialization time",
-                        "standard_name": "forecast_reference_time",
-                        "units": "minutes since 1970-01-01 00:00:00 UTC"
-                    }
+                    coords = {ref_time_dim: [reference_time]}
                 )
                 ds_t[ref_time_dim] = ref_time_da
 
-                # Transfer fill and missing values as in the template.
-                ds_t = self.attribute_fill_missing_values(ds_t)
-
-                # Delete some additional variables and attributes that are remnants of the processes.
-                ds_t = ds_t.drop_vars(catchment_dim, errors="ignore")
-                for var in ds_t.variables:
-                    ds_t[var].attrs.pop("coordinates", None)
+                # Copy all variable attributes and encoding as in the template.
+                ds_t = copy_netcdf_attributes(self._template_netcdf_ds, ds_t, True, None)
 
                 # Lastly, update time attributes.
-                ds_t[time_dim].encoding.clear()
-                ds_t[time_dim].encoding.update({
-                    "units": "minutes since 1970-01-01 00:00:00 UTC",
-                    "calendar": "proleptic_gregorian"})
-                ds_t[time_dim].attrs.update({
-                    "standard_name": "time",
-                    "units": "minutes since 1970-01-01 00:00:00 UTC",
-                    "valid_min": time_value_min,
-                    "valid_max": time_value_max
-                })
+                ds_t[time_dim].attrs["valid_min"] = np.int32(time_value_min)
+                ds_t[time_dim].attrs["valid_max"] = np.int32(time_value_max)
+
+                # Copy and update global attribute values as in the template.
+                ds_t = self.update_global_attributes(ds_t, valid_time_str, ref_time_str)
 
                 # Output filename and save
                 prefix = get_file_timestep_prefix(self._output_class)
@@ -1024,21 +1010,24 @@ class DataProcessor(DataReader):
 
         sorted_times = ds_sliced[time_dim].values
 
-
         # Compute min, max and reference time
         # The approach is different from the mapped products because each product uses different way of reporting time.
         # ngen catchment output reports in seconds since reference_epoch.
         # troute output reports in offset seconds since the model initialization time.
         # troute lakeout (waterbody) reports in minutes since reference epoch.
         if self._output_class.startswith('analysis_assim'):
-            time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-            time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+            time_value_min = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m"))
+            time_value_max = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m"))
+            min_time = sorted_times[-1]
         else:
-            time_value_min = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
-            time_value_max = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m")) # time to CF format
+            time_value_min = np.int32((sorted_times[0] - reference_epoch) / np.timedelta64(1, "m"))
+            time_value_max = np.int32((sorted_times[-1] - reference_epoch) / np.timedelta64(1, "m"))
+            min_time = sorted_times[0]
 
         # Get reference time for output
-        ref_time_val = time_value_min - 60 # 60 mins less than the smallest time.
+        # Get string formatted time for attributes
+        ref_time_str = str(min_time - np.timedelta64(1, 'h')).split('.')[0].replace('T', '_')
+        ref_time_val = min_time - np.timedelta64(1, 'h') # 60 mins less than the minimum time.
 
         re_index_args = {
             feature_id_dim: ds_sliced[feature_id_dim].values,
@@ -1052,11 +1041,16 @@ class DataProcessor(DataReader):
         # Create one netcdf each for each time step
         start_time = time.perf_counter()
 
+        # If a variable is in the NWM IGNORE list, log it and drop it from the template
+        variables_to_drop = [var for var in self._template_netcdf_ds.data_vars if var in consts.NWM_VARS_IGNORE_LIST]
+        self._template_netcdf_ds = self._template_netcdf_ds.drop_vars(variables_to_drop, errors='ignore')
+        print(f"----NWM Variable ignored for {mdata.category}: {variables_to_drop}")
+
         for time_step, snapshot_time_val in enumerate(sorted_times):
             populated_ds = self._template_netcdf_ds.reindex(**re_index_args, fill_value = np.nan)
             time_args = {time_dim: [snapshot_time_val]}
             populated_ds = populated_ds.assign_coords(**time_args)
-            populated_ds.attrs.update(self._template_netcdf_ds.attrs)
+            valid_time_str = str(snapshot_time_val).split('.')[0].replace('T', '_')
 
             # Populate variables defined in the template using the negen output and troute data
             for var_name in self._template_netcdf_ds.variables:
@@ -1077,10 +1071,10 @@ class DataProcessor(DataReader):
                     in_ngenout = var_name in self._catchment_ds.variables
                 
                 if not in_snapshot and not in_populated:
-                    warning_msg = var_name + " is missing from both troute and output datasets."
+                    warning_msg = "----" + var_name + " is missing from both troute and output datasets."
                     if warning_msg not in log_warnings:
                         log_warnings.append(warning_msg)
-                        print(f"{var_name} is missing from both troute and output datasets.")
+                        print(f"----{var_name} is missing from both troute and output datasets.")
                     continue
                 elif not in_snapshot and var_name.lower() != 'qbucket':
                     if self._template_netcdf_ds[var_name].ndim == 0: # Scalar variables not in the data, but in template
@@ -1178,33 +1172,15 @@ class DataProcessor(DataReader):
                     print(f"----The dimensions don't match between template ({template_var.dims}) and snapshot ({source_var.dims}) for {var_name}")
                     return False
                 
-            # Transfer fill and missing value from template
-            populated_ds = self.attribute_fill_missing_values(populated_ds)
+            # Copy all variable attributes and encoding from template
+            populated_ds = copy_netcdf_attributes(self._template_netcdf_ds, populated_ds, False, None)
 
-            # Prevent overwriting conflicts by clearing 'units' and calendar. Pop chunksizez as well
-            for var_name in self._template_netcdf_ds.variables:
-                if var_name in populated_ds.variables:
-                    populated_ds[var_name].attrs.pop('units', None)
-                    populated_ds[var_name].attrs.pop('calendar', None)
-                    populated_ds[var_name].attrs.pop("_ChunkSizes", None)
-            
             # Add valid min and max times to the "time" attributes
             populated_ds[time_dim].attrs["valid_min"] = np.int32(time_value_min)
             populated_ds[time_dim].attrs["valid_max"] = np.int32(time_value_max)
 
-            # Manually assign units and encoding for reference time. 
-            # Without this it was encoding as nanoseconds since 1970-01-01
-            populated_ds[ref_time_dim].attrs['units'] = "minutes since 1970-01-01 00:00:00"
-
-            # Rebuild CRS info and mapping.
-            if "crs" in populated_ds:
-                populated_ds = populated_ds.drop_vars("crs")
-            # ds_t["crs"] = xr.DataArray(0, dims=())
-            populated_ds["crs"] = np.array(b"", dtype="S1")
-            populated_ds["crs"].attrs = self._template_netcdf_ds["crs"].attrs.copy()
-            for var in populated_ds.data_vars:
-                if not var == "crs":
-                    populated_ds[var].attrs["grid_mapping"] = "crs"
+            # Copy and update global attribute values as in the template.
+            populated_ds = self.update_global_attributes(populated_ds, valid_time_str, ref_time_str)
 
             # Output filename and save
             os.makedirs(output_dir, exist_ok=True)
@@ -1216,57 +1192,40 @@ class DataProcessor(DataReader):
             formatted_t = f"{prefix}{sim_time_hr}"
             cycle_hr = output_cycle_hr.zfill(2)
             output_file = os.path.join(output_dir, f"nwm.t{cycle_hr}z.{self._geo_id}.{self._output_class}.{self._category}.{formatted_t}.{self._domain}.nc")
-            populated_ds.to_netcdf(output_file)
+            populated_ds.to_netcdf(output_file, engine = 'netcdf4')
+
         end_time = time.perf_counter()
         duration_minutes = (end_time - start_time) / 60
         print(f"----{self._category} products for each timestep written in: {duration_minutes:.2f} minutes")
         return True
 
-    def attribute_fill_missing_values(self, ds: xr.Dataset) -> xr.Dataset:
+    def update_global_attributes(self, ds: xr.Dataset, valid_time: str, init_time: str) -> xr.Dataset:
         """
-        This adjusts/updates the fill and missing values as identified in the template for NWM products.
-        
-        Args:
-            ds: xr.Dataset
-                The input xarray Dataset in which the attributes need to be updated.
+            This updates global attributes for NWM products.
+            
+            Args:
+                ds: xr.Dataset
+                    The input xarray Dataset in which the attributes need to be updated.
 
-        Returns:
-            xarray.Dataset
-                This dataset contains the updated fill and missing values as per the NWM templates
-        """
-
-        # Transfer all other attributes from template
-        for var_name in self._template_netcdf_ds.variables:
-            if var_name in ds.variables:
-                ds[var_name].attrs.update(self._template_netcdf_ds[var_name].attrs)
-                ds[var_name].encoding.update(self._template_netcdf_ds[var_name].encoding)
+                valid_time : str
+                    The model output valid time 
                 
-                # Copy Fill and missing values from the template DS
-                has_missing = 'missing_value' in self._template_netcdf_ds[var_name].encoding
-                has_fill = '_FillValue' in self._template_netcdf_ds[var_name].encoding
-                if  has_missing and has_fill:
-                    tgt_value = self._template_netcdf_ds[var_name].encoding['missing_value']
-                    ds[var_name].encoding['missing_value'] = tgt_value
-                    ds[var_name].encoding['_FillValue'] = tgt_value
-                elif has_missing and not has_fill:
-                    tgt_value = self._template_netcdf_ds[var_name].encoding['missing_value']
-                    ds[var_name].encoding['missing_value'] = tgt_value
-                    ds[var_name].encoding.pop('_FillValue', None)
-                    ds[var_name].attrs.pop("_FillValue", None)
-                elif has_fill and not has_missing:
-                    tgt_value = self._template_netcdf_ds[var_name].encoding['_FillValue']
-                    ds[var_name].encoding['_FillValue'] = tgt_value
-                    ds[var_name].encoding.pop('missing_value', None)
-                    ds[var_name].attrs.pop("missing_value", None)
-
-                # For coordinate variables such as x, y, latitude, longtiude
-                # we should not allow NaN fill value. Also update units if present in template
-                if var_name in ds.coords:
-                    if "_FillValue" in ds[var_name].encoding:
-                        ds[var_name].encoding["_FillValue"] = None
-                    if var_name in self._template_netcdf_ds and "units" in self._template_netcdf_ds[var_name].attrs:
-                        ds[var_name].attrs["units"] = self._template_netcdf_ds[var_name].attrs["units"]
+                ref_time : str
+                    The model initialization time 
+            Returns:
+                xarray.Dataset
+                    This dataset contains the updated attribute values as per the NWM templates
+        """
+        ds.attrs.update({'TITLE': 'OUTPUT FROM NWM v4.0'})
+        ds.attrs.update({'NWM_version_number': 'v4.0'})
+        ds.attrs.update({'model_initialization_time': init_time})
+        ds.attrs.update({'model_output_valid_time': valid_time})
+        ds.attrs.update({'model_output_type': self._category})
+        ds.attrs.update({'model_configuration': self._output_class})
+        if self._output_cycle[-1].isdigit(): # update ensemble member number
+            ds.attrs.update({'ensemble_member_number': np.int32(self._output_cycle[-1])})
         return ds
+# endregion
 
 # region data validation
     def find_positive_variables(self, ds: xr.Dataset, time_index: int) -> list[str]:
