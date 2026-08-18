@@ -183,18 +183,17 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     product_created = False
     for mdata in netcdf_metadata_list:
         if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
-            if mdata.category.startswith('terrain_rt') or mdata.category.startswith('land'):
-                _processor.nwm_output_cycle = mdata.output_cycle
-                _processor.nwm_output_class = mdata.output_class
-                _processor.nwm_category = mdata.category
-                _processor.nwm_domain = mdata.domain
-                template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
-                _processor.set_template_netcdf(template_files_dict[template_nc_name])
-                _processor.set_troute_netcdf(troute_output_netcdf)
-                _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
-                product_created = _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
-    if not product_created:
-        raise ValueError("FATAL: NWM Production creation failed. See log for more details.")
+            _processor.nwm_output_cycle = mdata.output_cycle
+            _processor.nwm_output_class = mdata.output_class
+            _processor.nwm_category = mdata.category
+            _processor.nwm_domain = mdata.domain
+            template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
+            _processor.set_template_netcdf(template_files_dict[template_nc_name])
+            _processor.set_troute_netcdf(troute_output_netcdf)
+            _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
+            product_created = _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
+            if not product_created:
+                raise ValueError(f"FATAL: NWM Production creation failed for {mdata.output_class}.{mdata.category}.{mdata.domain}. See log for more details.")
 
 def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
@@ -325,7 +324,7 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
             create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_cycle_domain, output_templates_folder)
             create_nwm_products_for_gpkg(root_output_folder, troute_output_netcdf, troute_lakeout_netcdf, 
                                          config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type, output_cycle_domain)
-            
+            print("NetCDF Production workflow completed successfully")
         case "mosaic":
             if len(args_list) < 7:
                 raise ValueError("'mosaic' action requires following arguments: " + 
@@ -340,5 +339,4 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
             output_cycle_domain = args_list[5]
             combine_basin_products(ngen_nwm_products_folder, mosaic_products_folder, config_json_file, 
                             output_cycle_hour, output_cycle_type, output_cycle_domain)
-
-    print("NetCDF Production workflow completed Successfully")
+            print("NetCDF mosaic workflow completed successfully")
