@@ -183,7 +183,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     product_created = False
     for mdata in netcdf_metadata_list:
         if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
-            if mdata.category.startswith('terrain_rt'):
+            if mdata.category.startswith('terrain_rt') or mdata.category.startswith('land'):
                 _processor.nwm_output_cycle = mdata.output_cycle
                 _processor.nwm_output_class = mdata.output_class
                 _processor.nwm_category = mdata.category

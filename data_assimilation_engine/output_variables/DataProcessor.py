@@ -239,17 +239,7 @@ class DataProcessor(DataReader):
                 ds_template = ds.isel(zero_slices)
 
                 # Transfer all the attributes from reference file before creating the template and save as netcdf
-                # for var_name in ds_template.variables:
-                #     print(f"----Before condition for VARIABLE: {var_name}, shape: {ds_template[var_name].shape}, dtype: {ds_template[var_name].dtype}")
-                #     print(f"----Variable encoding for {var_name}:")
-                #     for k, v in ds_template[var_name].encoding.items():
-                #         print(f"------{k}: {v}")
                 ds_template = copy_netcdf_attributes(ds, ds_template, False, None)
-                # for var_name in ds_template.variables:
-                #     print(f"----After condition for VARIABLE: {var_name}")
-                #     print(f"----Variable encoding for {var_name}:")
-                #     for k, v in ds_template[var_name].encoding.items():
-                #         print(f"------{k}: {v}")
 
                 for var_name in ds_template.variables:
                     print("------Testing variable for HDF5/NetCDF4 filter:", var_name)
@@ -257,6 +247,10 @@ class DataProcessor(DataReader):
                         ds_template[[var_name]].to_netcdf("debug.nc", engine="netcdf4")
                     except Exception as e:
                         print("------FAILED VARIABLE:", var_name)
+                        print(f"------Encoding: {ds_template[var_name].encoding}")
+                        print(f"------attrs: {ds_template[var_name].attrs}")
+                        print(f"------dims: {ds_template[var_name].dims}")
+                        print(f"------shape: {ds_template[var_name].shape}")
                         print(f"------{e}")
                         break
                 ds_template.to_netcdf(template_nc_file, engine = "netcdf4")
@@ -346,6 +340,18 @@ class DataProcessor(DataReader):
 
                 # Transfer the attributes before creating the template, compress and save as netcdf
                 ds_clipped = copy_netcdf_attributes(ds, ds_clipped, False, None)
+
+                for var_name in ds_clipped.variables:
+                    print("------Testing variable for HDF5/NetCDF4 filter:", var_name)
+                    try:
+                        ds_clipped[[var_name]].to_netcdf("debug.nc", engine="netcdf4")
+                    except Exception as e:
+                        print("------FAILED VARIABLE:", var_name)
+                        print(f"------Template Encoding: {ds_clipped[var_name].encoding}")
+                        print(f"------Template attrs: {ds_clipped[var_name].attrs}")
+                        print(f"------Template dims: {ds_clipped[var_name].dims}")
+                        print(f"------Template shape: {ds_clipped[var_name].shape}")
+                        print(f"------{e}")
                 ds_clipped.to_netcdf(template_nc_file, engine = "netcdf4")
                 print(f"----Template netcdf saved to: {template_nc_file}")
 
@@ -709,8 +715,10 @@ class DataProcessor(DataReader):
         output = ds_template.copy(deep=False)
         if time_dim in output.dims:
             output = output.drop_dims(time_dim)
-
-        output = output.expand_dims({time_dim: ds_data[time_dim]})
+        for var_name in output.data_vars:
+            if time_dim in ds_template[var_name].dims:
+                output[var_name] = output[var_name].expand_dims({time_dim: ds_data[time_dim]})
+        output = output.assign_coords({time_dim: ds_data[time_dim]})
 
         # Map variables to 2D grid
         variables_to_transfer.sort()
@@ -907,8 +915,11 @@ class DataProcessor(DataReader):
         # Chunk up the grid
         chunks = self.chunk_for_netcdf(mapped_grid, x_dim, y_dim, False)
         mapped_grid = mapped_grid.chunk(chunks)
+        for v in mapped_grid.variables:
+            if v == 'crs':
+                print (f"----Mapped grid has crs dims: {mapped_grid[v].dims}")
 
-        total_files = len(sorted_indices)
+        total_files = len(sorted_times)
         for i in range(0, total_files, consts.NC_BATCH_SIZE):
             batch_indices = sorted_indices[i:i + consts.NC_BATCH_SIZE]
             batch_times = sorted_times[i:i + consts.NC_BATCH_SIZE]
@@ -917,9 +928,16 @@ class DataProcessor(DataReader):
             time_encoding = batch_ds[time_dim].encoding.copy()
 
             for time_step, snapshot_time_val in enumerate(batch_times):
-                ds_t = batch_ds.isel({time_dim: time_step})
+                ds_t = batch_ds.isel({time_dim: [time_step]})
                 valid_time_str = str(snapshot_time_val).split('.')[0].replace('T', '_')
-                ds_t = ds_t.expand_dims({time_dim: [snapshot_time_val]})
+                extracted_time = ds_t[time_dim].values[0]
+
+                if extracted_time != snapshot_time_val:
+                    raise ValueError(
+                        f"Time mismatch: extracted={extracted_time}, "
+                        f"expected={snapshot_time_val}"
+                    )
+        #         ds_t = ds_t.expand_dims({time_dim: [snapshot_time_val]})
                 ds_t[time_dim].encoding.update(time_encoding)
 
                 # Add reference_time variable to netcdf
@@ -946,8 +964,11 @@ class DataProcessor(DataReader):
                         ds_t[[var_name]].to_netcdf("debug.nc", engine="netcdf4")
                     except Exception as e:
                         print("------FAILED VARIABLE:", var_name)
+                        print(f"------Encoding: {ds_t[var_name].encoding}")
+                        print(f"------attrs: {ds_t[var_name].attrs}")
+                        print(f"------dims: {ds_t[var_name].dims}")
+                        print(f"------shape: {ds_t[var_name].shape}")
                         print(f"------{e}")
-                        break
 
                 # Output filename and save
                 prefix = get_file_timestep_prefix(self._output_class)
@@ -1202,23 +1223,18 @@ class DataProcessor(DataReader):
                     return False
                 
             # Copy all variable attributes and encoding from template
-            # for var_name in populated_ds.variables:
-            #     print(f"----Before condition for VARIABLE: {var_name}, shape: {populated_ds[var_name].shape}, dtype: {populated_ds[var_name].dtype}")
-            #     print(f"----Variable encoding for {var_name}:")
-            #     for k, v in populated_ds[var_name].encoding.items():
-            #         print(f"------{k}: {v}")
             populated_ds = copy_netcdf_attributes(self._template_netcdf_ds, populated_ds, False, None)
-            # for var_name in populated_ds.variables:
-            #     print(f"----After condition for VARIABLE: {var_name}")
-            #     print(f"----Variable encoding for {var_name}:")
-            #     for k, v in populated_ds[var_name].encoding.items():
-            #         print(f"------{k}: {v}")
+
             for var_name in populated_ds.variables:
                 print("------Testing variable for HDF5/NetCDF4 filter:", var_name)
                 try:
                     populated_ds[[var_name]].to_netcdf("debug.nc", engine="netcdf4")
                 except Exception as e:
                     print("------FAILED VARIABLE:", var_name)
+                    print(f"------Encoding: {populated_ds[var_name].encoding}")
+                    print(f"------attrs: {populated_ds[var_name].attrs}")
+                    print(f"------dims: {populated_ds[var_name].dims}")
+                    print(f"------shape: {populated_ds[var_name].shape}")
                     print(f"------{e}")
                     break
             # Add valid min and max times to the "time" attributes
