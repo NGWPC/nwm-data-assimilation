@@ -940,6 +940,15 @@ class DataProcessor(DataReader):
                 # Copy and update global attribute values as in the template.
                 ds_t = self.update_global_attributes(ds_t, valid_time_str, ref_time_str)
 
+                for var_name in ds_t.variables:
+                    print("------Testing variable for HDF5/NetCDF4 filter:", var_name)
+                    try:
+                        ds_t[[var_name]].to_netcdf("debug.nc", engine="netcdf4")
+                    except Exception as e:
+                        print("------FAILED VARIABLE:", var_name)
+                        print(f"------{e}")
+                        break
+
                 # Output filename and save
                 prefix = get_file_timestep_prefix(self._output_class)
                 output_time_index = (i + time_step) # set correct timestep value for file name
