@@ -36,7 +36,7 @@ def create_dataprocessor(root_output_folder: str, netcdf_file: str, gpkg_file: s
         _processor.log_file = log_file
     return _processor
 
-def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = False) -> str:
+def download_netcdf_from_nomads(root_output_folder: str, output_cycle_type: str, re_download: bool = False) -> str:
     """
         Downloads one reference files per combination of NWM cycle, class, category and domain from the NOMADS server.
         It also creates a config file with the gathred metadata from the downloaded files.
@@ -44,6 +44,8 @@ def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = Fal
         Args:
             root_output_folder: str
                 The root folder where all intermediate and final datasets in post-processing are saved.
+            output_cycle_type: str
+            The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
             re_download : bool
                 This gives an option for the user to re-download the NOMADS data. Defaults to False.
 
@@ -51,7 +53,7 @@ def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = Fal
             str
                 A string representing the full file path of the created config json file.
         """
-    return utils.download_nwm_data_from_server(root_output_folder, re_download)
+    return utils.download_nwm_data_from_server(root_output_folder, output_cycle_type, re_download)
 
 def extract_netcdf_metadata(root_output_folder: str):
     """
@@ -314,7 +316,7 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
             output_cycle_type = args_list[8]
             output_cycle_domain = args_list[9]
 
-            config_json_file = download_netcdf_from_nomads(root_output_folder)
+            config_json_file = download_netcdf_from_nomads(root_output_folder, output_cycle_type)
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
             if not os.path.isfile(config_json_file):

@@ -206,7 +206,7 @@ def generate_formatted_timestring_for_naming(time_step: int, output_class: str, 
 # endregion
 
 # region data download
-def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
+def download_nwm_data_from_server(local_root: str, output_cycle_type: str, re_download: bool) -> str:
     """
     Main function to download a unique set of output files from the NWM server.
     The root URL and the subfolder where the content is downloaded is dictated through 
@@ -214,7 +214,9 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
 
     Args:
         local_root: str
-            The root folder for postprocessing outputs. 
+            The root folder for postprocessing outputs.
+        output_cycle_type: str
+            The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
         re_download: bool
             Argument indicating if the data exists and need to be redownloaded.
             Defaults to False.
@@ -223,7 +225,8 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
             The full file path of the metadata_config.json file.
     """
     os.makedirs(local_root, exist_ok = True)
-    nwm_data_folder = os.path.join(local_root, consts.NWM_DATA_LOCAL_FOLDER)
+    nwm_data_folder = os.path.join(local_root, consts.NWM_DATA_LOCAL_FOLDER, output_cycle_type)
+
     os.makedirs(nwm_data_folder, exist_ok = True)
 
     # Re-download if requested
@@ -234,7 +237,7 @@ def download_nwm_data_from_server(local_root: str, re_download: bool) -> str:
             os.makedirs(nwm_data_folder, exist_ok = True)
     
     formatted_date = datetime.now().strftime("%Y%m%d")
-    formatted_url = f"{consts.NOMADS_BASE_URL}/nwm.{formatted_date}/"
+    formatted_url = f"{consts.NOMADS_BASE_URL}/nwm.{formatted_date}/{output_cycle_type}/"
     existing_keys = build_existing_keys(nwm_data_folder) # build class, category, domain keys in local folder, if exists.
     download_nwm_data_recursive(formatted_url, nwm_data_folder, existing_keys)
 
@@ -256,6 +259,7 @@ def download_nwm_data_recursive(download_url: str, local_path: str,
         existing_keys: set[tuple[str, str, str]]
             A unique combination key of NWM class, category and domain.
     """
+
     response = requests.get(download_url)
     if response.status_code != 200:
         raise Exception(f"Failed to access {download_url}")
