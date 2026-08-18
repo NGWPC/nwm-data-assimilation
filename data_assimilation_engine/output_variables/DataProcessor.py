@@ -239,7 +239,26 @@ class DataProcessor(DataReader):
                 ds_template = ds.isel(zero_slices)
 
                 # Transfer all the attributes from reference file before creating the template and save as netcdf
+                # for var_name in ds_template.variables:
+                #     print(f"----Before condition for VARIABLE: {var_name}, shape: {ds_template[var_name].shape}, dtype: {ds_template[var_name].dtype}")
+                #     print(f"----Variable encoding for {var_name}:")
+                #     for k, v in ds_template[var_name].encoding.items():
+                #         print(f"------{k}: {v}")
                 ds_template = copy_netcdf_attributes(ds, ds_template, False, None)
+                # for var_name in ds_template.variables:
+                #     print(f"----After condition for VARIABLE: {var_name}")
+                #     print(f"----Variable encoding for {var_name}:")
+                #     for k, v in ds_template[var_name].encoding.items():
+                #         print(f"------{k}: {v}")
+
+                for var_name in ds_template.variables:
+                    print("------Testing variable for HDF5/NetCDF4 filter:", var_name)
+                    try:
+                        ds_template[[var_name]].to_netcdf("debug.nc", engine="netcdf4")
+                    except Exception as e:
+                        print("------FAILED VARIABLE:", var_name)
+                        print(f"------{e}")
+                        break
                 ds_template.to_netcdf(template_nc_file, engine = "netcdf4")
                 print(f"----Template netcdf saved to: {template_nc_file}")
             else: # gridded products - land and terrain_rt
@@ -1043,8 +1062,9 @@ class DataProcessor(DataReader):
 
         # If a variable is in the NWM IGNORE list, log it and drop it from the template
         variables_to_drop = [var for var in self._template_netcdf_ds.data_vars if var in consts.NWM_VARS_IGNORE_LIST]
-        self._template_netcdf_ds = self._template_netcdf_ds.drop_vars(variables_to_drop, errors='ignore')
-        print(f"----NWM Variable ignored for {mdata.category}: {variables_to_drop}")
+        if len(variables_to_drop) > 0:
+            self._template_netcdf_ds = self._template_netcdf_ds.drop_vars(variables_to_drop, errors='ignore')
+            print(f"----NWM Variables ignored for {mdata.category}: {variables_to_drop}")
 
         for time_step, snapshot_time_val in enumerate(sorted_times):
             populated_ds = self._template_netcdf_ds.reindex(**re_index_args, fill_value = np.nan)
@@ -1173,8 +1193,25 @@ class DataProcessor(DataReader):
                     return False
                 
             # Copy all variable attributes and encoding from template
+            # for var_name in populated_ds.variables:
+            #     print(f"----Before condition for VARIABLE: {var_name}, shape: {populated_ds[var_name].shape}, dtype: {populated_ds[var_name].dtype}")
+            #     print(f"----Variable encoding for {var_name}:")
+            #     for k, v in populated_ds[var_name].encoding.items():
+            #         print(f"------{k}: {v}")
             populated_ds = copy_netcdf_attributes(self._template_netcdf_ds, populated_ds, False, None)
-
+            # for var_name in populated_ds.variables:
+            #     print(f"----After condition for VARIABLE: {var_name}")
+            #     print(f"----Variable encoding for {var_name}:")
+            #     for k, v in populated_ds[var_name].encoding.items():
+            #         print(f"------{k}: {v}")
+            for var_name in populated_ds.variables:
+                print("------Testing variable for HDF5/NetCDF4 filter:", var_name)
+                try:
+                    populated_ds[[var_name]].to_netcdf("debug.nc", engine="netcdf4")
+                except Exception as e:
+                    print("------FAILED VARIABLE:", var_name)
+                    print(f"------{e}")
+                    break
             # Add valid min and max times to the "time" attributes
             populated_ds[time_dim].attrs["valid_min"] = np.int32(time_value_min)
             populated_ds[time_dim].attrs["valid_max"] = np.int32(time_value_max)

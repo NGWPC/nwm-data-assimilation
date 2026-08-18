@@ -183,15 +183,16 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     product_created = False
     for mdata in netcdf_metadata_list:
         if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
-            _processor.nwm_output_cycle = mdata.output_cycle
-            _processor.nwm_output_class = mdata.output_class
-            _processor.nwm_category = mdata.category
-            _processor.nwm_domain = mdata.domain
-            template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
-            _processor.set_template_netcdf(template_files_dict[template_nc_name])
-            _processor.set_troute_netcdf(troute_output_netcdf)
-            _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
-            product_created = _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
+            if mdata.category.startswith('channel_rt'):
+                _processor.nwm_output_cycle = mdata.output_cycle
+                _processor.nwm_output_class = mdata.output_class
+                _processor.nwm_category = mdata.category
+                _processor.nwm_domain = mdata.domain
+                template_nc_name = _processor.geo_id + '_' + mdata.output_class + '_' + mdata.category + '_' + mdata.domain
+                _processor.set_template_netcdf(template_files_dict[template_nc_name])
+                _processor.set_troute_netcdf(troute_output_netcdf)
+                _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
+                product_created = _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
     if not product_created:
         raise ValueError("FATAL: NWM Production creation failed. See log for more details.")
 
