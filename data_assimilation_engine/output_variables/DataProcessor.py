@@ -1054,9 +1054,9 @@ class DataProcessor(DataReader):
             populated_ds = populated_ds.assign_coords(**time_args)
             valid_time_str = str(snapshot_time_val).split('.')[0].replace('T', '_')
 
-            # Populate variables defined in the template using the negen output and troute data
+            # Populate variables defined in the template using the ngen output and troute data
             for var_name in self._template_netcdf_ds.variables:
-                # leave the dimensions out as they (except time) have already been populated.
+                # leave the dimensions out as they come from template already
                 if var_name in self._template_netcdf_ds.dims:
                     continue
                 
@@ -1153,11 +1153,14 @@ class DataProcessor(DataReader):
                 else:
                     troute_unsliced_var = ds_sliced[var_name]
                     if time_dim in troute_unsliced_var.dims:
-                        # this loop is in descending order of time. but, the source is in ascending order.
-                        # recalculate time index.
-                        total_timesteps = troute_unsliced_var.sizes[time_dim]
-                        inverted_time_index = total_timesteps - 1 - time_step
-                        source_var = troute_unsliced_var.isel({time_dim: inverted_time_index})
+                        # this loop is in descending order of time for analysis_assim.
+                        # We need to invert time index for AnA runs. Recalculate time index.
+                        if self._output_class.startswith('analysis_assim'):
+                            total_timesteps = troute_unsliced_var.sizes[time_dim]
+                            inverted_time_index = total_timesteps - 1 - time_step
+                            source_var = troute_unsliced_var.isel({time_dim: inverted_time_index})
+                        else:
+                            source_var = troute_unsliced_var.isel({time_dim: time_step})
                     else:
                         source_var = troute_unsliced_var
                 
@@ -1173,7 +1176,7 @@ class DataProcessor(DataReader):
                 else:
                     print(f"----The dimensions don't match between template ({template_var.dims}) and snapshot ({source_var.dims}) for {var_name}")
                     return False
-                
+
             # Copy all variable attributes and encoding from template
             populated_ds = copy_netcdf_attributes(self._template_netcdf_ds, populated_ds, False, None)
 

@@ -831,10 +831,8 @@ def combined_non_gridded_netcdfs(nc_files: list[str]) -> xr.Dataset:
             The combined xarray dataset with all attributes and metadata
     """
 
-    # Gather the global attributes from the first dataset
-    global_attrs = None
+    # Use the first dataset as template for attributes
     template_ds = xr.open_dataset(nc_files[0])
-    global_attrs = template_ds.attrs.copy()
 
     ds_combined = xr.open_mfdataset(
     nc_files,
@@ -845,6 +843,10 @@ def combined_non_gridded_netcdfs(nc_files: list[str]) -> xr.Dataset:
     combine_attrs="override"
     )
     ds_combined = ds_combined.sortby(consts.DIM_FEATURE_ID)
+
+    # crs variable was removed before combining because open_mfdataset adds concat_dim to crs).
+    # Add it back 
+    ds_combined["crs"] = template_ds["crs"]
 
     # Copy attributes from first dataset to the combined output.
     ds_combined = copy_netcdf_attributes(template_ds, ds_combined, True, None)
@@ -866,6 +868,12 @@ def preprocess_sort(ds: xr.Dataset) -> xr.Dataset:
     if consts.DIM_FEATURE_ID in ds.dims and consts.DIM_FEATURE_ID in ds.coords:
         if not ds.indexes[consts.DIM_FEATURE_ID].is_monotonic_increasing:
             ds = ds.sortby(consts.DIM_FEATURE_ID)
+
+    # crs variable is getting the feature_id dimension during concatenation.
+    # We will drop it temporarily and add it back
+    if "crs" in ds:
+        ds = ds.drop_vars("crs")
+
     return ds
 
 def copy_netcdf_attributes(src_ds: xr.Dataset, dst_ds: xr.Dataset, 
@@ -942,5 +950,9 @@ def copy_netcdf_attributes(src_ds: xr.Dataset, dst_ds: xr.Dataset,
                     "calendar": "proleptic_gregorian"
                 }
             )
+    # explicitly handle reservoir_type variable and add all types.
+    if 'reservoir_type' in dst_ds:
+        dst_ds['reservoir_type'].attrs.update({'flag_values': np.array([1, 2, 3, 4], dtype=np.int32)})
+        dst_ds['reservoir_type'].attrs.update({'flag_meanings': 'Level pool, USGS, USACE, RFC, AK RFC, Great Lakes, USBR'})
     return dst_ds
 # endregion
