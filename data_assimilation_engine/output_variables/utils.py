@@ -952,7 +952,7 @@ def copy_netcdf_attributes(src_ds: xr.Dataset, dst_ds: xr.Dataset,
             )
     # explicitly handle reservoir_type variable and add all types.
     if 'reservoir_type' in dst_ds:
-        dst_ds['reservoir_type'].attrs.update({'flag_values': np.array([1, 2, 3, 4], dtype=np.int32)})
+        dst_ds['reservoir_type'].attrs.update({'flag_values': np.array([1, 2, 3, 4, 5, 6, 7], dtype=np.int32)})
         dst_ds['reservoir_type'].attrs.update({'flag_meanings': 'Level pool, USGS, USACE, RFC, AK RFC, Great Lakes, USBR'})
     return dst_ds
 # endregion
