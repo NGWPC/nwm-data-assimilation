@@ -462,7 +462,7 @@ class DataProcessor(DataReader):
                 else:
                     print(f"----Warning: Variables with positive values were not found in the gridded dataset")
 
-                product_created = self.write_netcdf_per_timestep(mapped_grid, mdata.x_name, mdata.y_name, output_dir, output_cycle_hr)
+                product_created = self.write_netcdf_per_timestep(mapped_grid, mdata.x_name, mdata.y_name, output_dir, output_cycle_hr, hours_list[0])
                 if product_created:
                     print(f"----NWM output product generated for {mdata.output_class}.{mdata.category}.{mdata.domain}")
             elif produce_output and not is_gridded:
@@ -838,7 +838,7 @@ class DataProcessor(DataReader):
         return ds.isel({time_dim: sort_idx})
 
     def write_netcdf_per_timestep(self, mapped_grid: xr.Dataset, x_dim: str, y_dim: str, 
-                                  output_dir: str, output_cycle_hr: str) -> bool:
+                                  output_dir: str, output_cycle_hr: str, ref_time_factor: int) -> bool:
         """
         Writes one NetCDF per timestep for the various NWM cycle runs. It handles the product file naming as well.
         This is called only for land and terrain_rt NWM products.
@@ -853,6 +853,8 @@ class DataProcessor(DataReader):
                 The folder where the output product will be saved or overwritten if it exists.
             output_cycle_hr : str
                 The hour in a day (0-23) for which the outputs are produced after simulations are run.
+            ref_time_factor: int
+                The number of hour to subtract from minimum time in order to compute reference_time.
         Returns:
             bool
                 True if all files have been written successfully. Otherwise False.
@@ -882,8 +884,8 @@ class DataProcessor(DataReader):
             min_time = sorted_times[0]
 
         valid_time_str = str(min_time).split('.')[0].replace('T', '_')
-        ref_time_str = str(min_time - np.timedelta64(1, 'h')).split('.')[0].replace('T', '_')
-        reference_time = min_time - np.timedelta64(1, 'h')
+        ref_time_str = str(min_time - np.timedelta64(ref_time_factor, 'h')).split('.')[0].replace('T', '_')
+        reference_time = min_time - np.timedelta64(ref_time_factor, 'h')
 
         start_time = time.perf_counter()
 
@@ -1027,7 +1029,7 @@ class DataProcessor(DataReader):
 
         # Get reference time for output
         # Get string formatted time for attributes
-        ref_time_str = str(min_time - np.timedelta64(1, 'h')).split('.')[0].replace('T', '_')
+        ref_time_str = str(min_time - np.timedelta64(hours_list[0], 'h')).split('.')[0].replace('T', '_')
         ref_time_val = min_time - np.timedelta64(1, 'h') # 60 mins less than the minimum time.
 
         re_index_args = {
