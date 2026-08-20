@@ -422,9 +422,14 @@ class DataProcessor(DataReader):
                 if len(hours_list) > ngen_timesteps:
                     print(f"------Mismatch: {self._output_class}.{self._category} requires {len(hours_list)} timesteps. ngen output has {ngen_timesteps}. Process aborted.")
                     return False
+
                 # Extract only those timeslices that need to be produced
                 # for example, hours [3, 6, 9, 12...] correspond to indices [2, 5, 8, 11...]
-                target_indices = [hr - 1 for hr in hours_list]
+                # for analysis_assim, it will reorder because of index 0. So, we will leave it untouched
+                if mdata.output_class.startswith('analysis_assim'):
+                    target_indices = hours_list
+                else:
+                    target_indices = [hr - 1 for hr in hours_list]
                 ds_sliced = ds_filtered.isel(time=target_indices)
 
                 start_time = time.perf_counter()
@@ -884,6 +889,7 @@ class DataProcessor(DataReader):
             min_time = sorted_times[0]
 
         valid_time_str = str(min_time).split('.')[0].replace('T', '_')
+        ref_time_factor = 1 if ref_time_factor == 0 else ref_time_factor
         ref_time_str = str(min_time - np.timedelta64(ref_time_factor, 'h')).split('.')[0].replace('T', '_')
         reference_time = min_time - np.timedelta64(ref_time_factor, 'h')
 
@@ -996,13 +1002,17 @@ class DataProcessor(DataReader):
             print(f"------No hours identified in simulation times for {self._output_class}.{self._category}")
             return False
         troute_timesteps = troute_source_ds.sizes[time_dim]
-        if len(hours_list) != troute_timesteps:
+        if len(hours_list) > troute_timesteps:
             print(f"------Mismatch: {self._output_class}.{self._category} requires {len(hours_list)} timesteps. T-Route output has {troute_timesteps}. Process aborted.")
             return False
 
         # Extract only those timeslices that need to be produced
         # for example, hours [3, 6, 9, 12...] correspond to indices [2, 5, 8, 11...]
-        target_indices = [hr - 1 for hr in hours_list]
+        # for analysis_assim, it will reorder because of index 0. So, we will leave it untouched
+        if mdata.output_class.startswith('analysis_assim'):
+            target_indices = hours_list
+        else:
+            target_indices = [hr - 1 for hr in hours_list]
         ds_sliced = troute_source_ds.isel(time=target_indices)
 
         if self._output_class.startswith('analysis_assim'):
@@ -1029,8 +1039,9 @@ class DataProcessor(DataReader):
 
         # Get reference time for output
         # Get string formatted time for attributes
-        ref_time_str = str(min_time - np.timedelta64(hours_list[0], 'h')).split('.')[0].replace('T', '_')
-        ref_time_val = min_time - np.timedelta64(1, 'h') # 60 mins less than the minimum time.
+        ref_time_factor = 1 if hours_list[0] == 0 else hours_list[0]
+        ref_time_str = str(min_time - np.timedelta64(ref_time_factor, 'h')).split('.')[0].replace('T', '_')
+        ref_time_val = min_time - np.timedelta64(ref_time_factor, 'h')
 
         re_index_args = {
             feature_id_dim: ds_sliced[feature_id_dim].values,
