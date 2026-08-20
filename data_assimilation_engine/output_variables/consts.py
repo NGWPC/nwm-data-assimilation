@@ -6,7 +6,7 @@ NWM_VARIABLES_LIST = ['sfcheadsubrt', 'zwattablrt', 'inflow', 'outflow', 'reserv
 
 NWM_VARS_IGNORE_LIST = ['ACCET', 'ACCECAN', 'ACCEDIR', 'ACCETRAN', 'CANWAT', 'SOILSAT',
                         'EDIR', 'FSA', 'GRDFLX', 'ISNOW', 'UGDRNOFF', 'zwattablrt',
-                        'qBtmVertRunoff', 'qSfcLatRunoff']
+                        'qBtmVertRunoff', 'qSfcLatRunoff', 'reservoir_assimilated_value']
 
 NOMADS_BASE_URL = 'https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/prod'
 NWM_DATA_LOCAL_FOLDER = 'nwm_ref_files'
@@ -53,6 +53,15 @@ JSON_DOMAIN = 'domain'
 CSV_BASE_COLS = ['time step','time'] #use lowercase
 NC_BATCH_SIZE = 30
 NC_SPATIAL_CHUNK_SIZE = 500
+NC_ENCODING_KEYS = ["chunksizes",
+        "preferred_chunks",
+        "source",
+        "original_shape",
+        "contiguous",
+        "szip",
+        "zstd",
+        "bzip2",
+        "blosc"] 
 VALIDATION_SAMPLE_SIZE = 2
 
 NWM_PRODUCTS_LIST = ['analysis_assim.channel_rt.conus',

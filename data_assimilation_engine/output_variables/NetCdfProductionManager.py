@@ -36,7 +36,7 @@ def create_dataprocessor(root_output_folder: str, netcdf_file: str, gpkg_file: s
         _processor.log_file = log_file
     return _processor
 
-def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = False) -> str:
+def download_netcdf_from_nomads(root_output_folder: str, output_cycle_type: str, re_download: bool = False) -> str:
     """
         Downloads one reference files per combination of NWM cycle, class, category and domain from the NOMADS server.
         It also creates a config file with the gathred metadata from the downloaded files.
@@ -44,6 +44,8 @@ def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = Fal
         Args:
             root_output_folder: str
                 The root folder where all intermediate and final datasets in post-processing are saved.
+            output_cycle_type: str
+            The cycle type for the output products. For example, medium_range_mem1, analysis_assim_no_da
             re_download : bool
                 This gives an option for the user to re-download the NOMADS data. Defaults to False.
 
@@ -51,7 +53,7 @@ def download_netcdf_from_nomads(root_output_folder: str, re_download: bool = Fal
             str
                 A string representing the full file path of the created config json file.
         """
-    return utils.download_nwm_data_from_server(root_output_folder, re_download)
+    return utils.download_nwm_data_from_server(root_output_folder, output_cycle_type, re_download)
 
 def extract_netcdf_metadata(root_output_folder: str):
     """
@@ -181,6 +183,7 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
     product_created = False
     for mdata in netcdf_metadata_list:
         if mdata.output_cycle == output_cycle_type and mdata.domain == output_cycle_domain:
+            _processor.nwm_output_cycle = mdata.output_cycle
             _processor.nwm_output_class = mdata.output_class
             _processor.nwm_category = mdata.category
             _processor.nwm_domain = mdata.domain
@@ -189,8 +192,8 @@ def create_nwm_products_for_gpkg(root_output_folder: str, troute_output_netcdf: 
             _processor.set_troute_netcdf(troute_output_netcdf)
             _processor.set_troute_lakeout_netcdf(troute_lakeout_netcdf)
             product_created = _processor.produce_nwm_output_product(mdata, nwm_output_folder, formatted_hr)
-    if not product_created:
-        raise ValueError("FATAL: NWM Production creation failed. See log for more details.")
+            if not product_created:
+                raise ValueError(f"FATAL: NWM Production creation failed for {mdata.output_class}.{mdata.category}.{mdata.domain}. See log for more details.")
 
 def combine_basin_products(netcdf_folder: str, output_folder: str, config_json: str, 
                             output_cycle_hr: str, output_cycle_type: str, output_cycle_domain: str):
@@ -313,7 +316,7 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
             output_cycle_type = args_list[8]
             output_cycle_domain = args_list[9]
 
-            config_json_file = download_netcdf_from_nomads(root_output_folder)
+            config_json_file = download_netcdf_from_nomads(root_output_folder, output_cycle_type)
             if(_processor is None):
                 _processor = create_dataprocessor(root_output_folder, ngen_catchments_netcdf, ngen_geopackage)
             if not os.path.isfile(config_json_file):
@@ -321,7 +324,7 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
             create_template_files_for_gpkg(root_output_folder, ngen_catchments_netcdf, ngen_geopackage, config_json_file, output_cycle_domain, output_templates_folder)
             create_nwm_products_for_gpkg(root_output_folder, troute_output_netcdf, troute_lakeout_netcdf, 
                                          config_json_file, output_templates_folder, output_cycle_hour, output_cycle_type, output_cycle_domain)
-            
+            print("NetCDF Production workflow completed successfully")
         case "mosaic":
             if len(args_list) < 7:
                 raise ValueError("'mosaic' action requires following arguments: " + 
@@ -336,5 +339,4 @@ def netcdf_production_workflow(args_list: str) -> Any | None:
             output_cycle_domain = args_list[5]
             combine_basin_products(ngen_nwm_products_folder, mosaic_products_folder, config_json_file, 
                             output_cycle_hour, output_cycle_type, output_cycle_domain)
-
-    print("NetCDF Production workflow completed Successfully")
+            print("NetCDF mosaic workflow completed successfully")
