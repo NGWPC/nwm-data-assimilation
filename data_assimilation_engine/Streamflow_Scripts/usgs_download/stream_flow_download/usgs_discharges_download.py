@@ -3,6 +3,7 @@ import csv
 import json
 import sys
 import threading
+import random
 import concurrent.futures
 import time
 from datetime import datetime, timedelta, timezone
@@ -10,10 +11,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
-# Downloads tracker
-TRACKER_FILE = "usgs_tracker.json"
 # API Endpoint
-BASE_URL = "https://api.waterdata.usgs.gov/ogcapi/v0/collections/continuous/items"
+BASE_URL_PULL = "https://api.waterdata.usgs.gov/ogcapi/v0/collections/continuous/items"
 
 # Multi-threading sync
 tracker_lock = threading.Lock()
@@ -103,28 +102,60 @@ def fetch_usgs_data(row, session, now_utc, api_key, download_dir, log_dir, track
         "Accept": "application/json"
     }
 
-    try:
-        with session.get(BASE_URL, params=params, headers=headers, timeout=(10, 20)) as response:
+    # After failures due to threading deadlock and server rejects , the following is being tested
+    max_retries = 5
+    base_delay = 2   # Start with a 2-second backoff multiplier
+    max_delay = 30   # Never sleep longer than 30 seconds
+    retries = 0
+
+    while retries < max_retries:
+        try:
+            # Independent thread request with strict timeouts
+            response = requests.get(BASE_URL_PULL, params=params, headers=headers, timeout=(10, 20))
+            
+            # Check for Rate Limiting (HTTP 429) manually before raising exceptions
+            if response.status_code == 429:
+                retries += 1
+                if retries >= max_retries:
+                    write_to_log_file(log_dir, f"Gage {site_id}: Hit max retries ({max_retries}) for HTTP 429. Aborting.")
+                    return "failed"
+                
+                # Calculate Exponential Backoff with Jitter: base_delay * (2 ^ retry_number)
+                backoff = base_delay * (2 ** retries)
+                jitter = random.uniform(0.5, 1.5)
+                delay = min(backoff * jitter, max_delay)
+                
+                write_to_log_file(log_dir, f"Gage {site_id}: Rate limited (429). Retry {retries}/{max_retries}. Backing off for {delay:.2f}s...")
+                time.sleep(delay)
+                continue  # Jump to the next iteration of the while loop to retry
+
+            # Raise exceptions for other HTTP errors (401, 404, 500, etc.)
             response.raise_for_status()
             data = response.json()
-        
-        # Check if items were returned
-        if not data.get("features"):
-            write_to_log_file(log_dir, f"Gage {site_id}: Query executed cleanly but zero new discharge events were found.")
-            return "no_new_data"
+            response.close()  # Cleanly close socket immediately
 
-        # Save individual site data to your DROOT directory
-        output_path = os.path.join(download_dir, f"{site_id}.json")
-        with open(output_path, "w") as out_file:
-            json.dump(data, out_file, indent=2)
+            # Handle empty data sets
+            if not data.get("features"):
+                write_to_log_file(log_dir, f"Gage {site_id}: Query executed cleanly but zero records found.")
+                return "no_new_data"
+
+            # Save valid downloads to disk
+            output_path = os.path.join(download_dir, f"{site_id}.json")
+            with open(output_path, "w") as out_file:
+                json.dump(data, out_file, indent=2)
+
+            write_to_log_file(log_dir, f"Gage {site_id}: Successfully saved records to {output_path}")
+            update_tracker_for_site(tracker_file_path, site_id, now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+            return "success"  # Download successful, exit the function cleanly
+
+        except requests.exceptions.RequestException as e:
+            # Handle standard network drops/timeouts by treating them as retryable events
+            retries += 1
+            write_to_log_file(log_dir, f"Gage {site_id}: Network issue encountered ({e}). Retry {retries}/{max_retries}...")
+            time.sleep(base_delay * retries)
             
-        write_to_log_file(log_dir, f"Gage {site_id}: Successfully matched and saved features to {output_path}")
-        update_tracker_for_site(tracker_file_path, site_id, now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
-        return "success"
-
-    except Exception as e:
-        write_to_log_file(log_dir, f"Gage {site_id}: Processing exception encountered: {e}")
-        return "failed"
+    return "failed"
 
 def main():
     start_time = time.time()
@@ -174,7 +205,7 @@ def main():
     write_to_log_file(log_dir, f"INFO: Commencing batch file processing run: {filename}")
 
     # Using ThreadPoolExecutor to run downloads concurrently
-    MAX_WORKERS = 10
+    MAX_WORKERS = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # Submitting all download tasks to the thread pool
         future_to_site = {
