@@ -15,6 +15,7 @@ from dotenv import find_dotenv, load_dotenv
 from kerchunk.combine import MultiZarrToZarr
 from kerchunk.hdf import SingleHdf5ToZarr
 
+from utils.s3_paths import SMAP_NC_PREFIX
 from utils.utils import timing_block
 
 load_dotenv(find_dotenv())
@@ -315,7 +316,7 @@ def main(start_year=2015, end_year=2025):
 
                 with timing_block(f"Copying to s3 for year: {year} | month: {month}"):
                     s3_keys = archiver.copy_to_s3(
-                        "./smap_data/processed", "s3://ngwpc-forcing/smap_nc"
+                        "./smap_data/processed", "s3://{SMAP_NC_PREFIX}"
                     )
 
                 all_s3_keys.extend(s3_keys)
@@ -374,7 +375,8 @@ if __name__ == "__main__":
     #     )
     #     archiver.times = times
 
-    #     all_s3_keys = list_keys("ngwpc-forcing", "smap_nc/")
+    #     bucket, prefix = SMAP_NC_PREFIX.split("/", 1)
+    #     all_s3_keys = list_keys(bucket, f"{prefix}/")
     #     print(len(all_s3_keys))
 
     #     with timing_block("Creating individual Zarr JSON"):
@@ -456,7 +458,7 @@ if __name__ == "__main__":
     # ds["sm_surface"].plot()
 
     # fs = fsspec.filesystem("s3")
-    # s3_key = "s3://ngwpc-forcing/smap_nc/SMAP_L4_SM_gph_20150331T013000_Vv8010_001.nc"
+    # s3_key = "s3://{SMAP_NC_PREFIX}/SMAP_L4_SM_gph_20150331T013000_Vv8010_001.nc"
     # with fs.open(s3_key, "rb") as f:
     #     ds = xr.open_dataset(f)
 
