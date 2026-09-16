@@ -39,7 +39,7 @@ Precipitation is structurally different from both and is documented as its own g
 Observed reference data (SNOTEL, SNODAS, SMAP) is read from S3 under a shared root prefix:
 
 ```
-ngwpc-dev/nwm-tools/data/
+~/nwm-tools/data/
 - snotel_csv/   # SNOTEL station observations - timeseries, SWE
 - snodas_csv/   # SNODAS gridded observations (basin-averaged) - timeseries, SWE
 - snodas_nc/    # SNODAS gridded observations (raw netCDF) - mapping, SWE
