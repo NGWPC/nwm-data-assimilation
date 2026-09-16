@@ -11,7 +11,7 @@ The Data Assimilation Engine performs several tasks related to the postprocessin
 
 ## Installation
 ```bash
-git close https://github.com/N[GWPC]/nwm-data-assimilation.git
+git close https://github.com/[GH_ORG]/nwm-data-assimilation.git
 cd nwm-data-assimilation
 pip install -e .
 ```
