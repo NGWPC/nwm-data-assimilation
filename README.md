@@ -22,88 +22,46 @@ bash -c "$(curl -s https://raw.githubusercontent.com/NOAA-OWP/owp-open-source-pr
 
 ----
 
-# Project Title
+# NWM Output Variables Post-Processing Routines
 
-**Description**:  Put a meaningful, short, plain-language description of what
-this project is trying to accomplish and why it matters.
-Describe the problem(s) this project solves.
-Describe how this software can improve the lives of its audience.
-
-Other things to include:
-
-  - **Technology stack**: Indicate the technological nature of the software, including primary programming language(s) and whether the software is intended as standalone or as a module in a framework or other ecosystem.
-  - **Status**:  Alpha, Beta, 1.1, etc. It's OK to write a sentence, too. The goal is to let interested people know where this project is at. This is also a good place to link to the [CHANGELOG](CHANGELOG.md).
-  - **Links to production or demo instances**
-  - Describe what sets this apart from related-projects. Linking to another doc or page is OK if this can't be expressed in a sentence or two.
-
-
-**Screenshot**: If the software has visual components, place a screenshot after the description; e.g.,
-
-![](https://raw.githubusercontent.com/NOAA-OWP/owp-open-source-project-template/master/doc/Screenshot.png)
-
+**Description**:  The simulation NetCDF outputs from NGEN and T-Route needs to be post-processed to produce final NWM NetCDF products across various categories - channel, terrain, land and reservoir. This repository uses a set of national reference outputs from nomads (https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/prod) to extract the metadata for the final NWM output variables. The metadata include information such as the coordinate system variable units, long desriptive name of the NWM variables, fill value, and missing value. It also captures the pixel resolution (for spatial gridded products), origin, NWM output cycle. The various output cycles are the names of the folders in the nomads link above.
 
 ## Dependencies
 
-Describe any dependencies that must be installed for this software to work.
-This includes programming languages, databases or other storage mechanisms, build tools, frameworks, and so forth.
-If specific versions of other software are required, or known not to work, call that out.
+  - Python ~= 3.12
+  - Key dependencies and packages required are listed in `pyproject.toml`
 
 ## Installation
 
-Detailed instructions on how to install, configure, and get the project running.
-This should be frequently tested to ensure reliability. Alternatively, link to
-a separate [INSTALL](INSTALL.md) document.
-
-## Configuration
-
-If the software is configurable, describe it in detail, either here or in other documentation to which you link.
+Refer to [INSTALL](INSTALL.md) document to get started on working with routines for producing NWM NetCDF outputs.
 
 ## Usage
 
-Show users how to use the software.
-Be specific.
-Use appropriate formatting when showing code snippets.
+The various capatibilities/workflows for post-processing are listed in `postprocessing_wrapper_sample.py`. The main entrypoint for post-processing routines can be found in `data_assimilation_engine\output_variables\NetCdfProductionManger.py`
+    - The function arguments that require a folder path can be relative or absolute.
+    - The allowed actions are specified as the last argument to the entrypoint function `netcdf_production_workflow` in `NetCdfProductionManger.py`.  Those include "download ", "config", "template", "output", "all" and "mosaic". Each action performs a specific task.
+         - download: Downloads national reference NetCDF outputs for the requested output cycle.
+         - config: Creates the metadata config json that has metadata information about all NWM products.
+         - template: Creates template NetCDF files that mimic the national reference NetCDF files but span the extent of the NGEN simulation geopackage
+         - output: Generates output NetCDF with the simulation computational output values.
+         - all: Performs all the steps above in series.
+         - mosaic: Merges multiple geopackage level NetCDF outputs into a single NetCDF dataset.
 
-## How to test the software
 
-If the software includes automated tests, detail how to run those tests.
 
-## Known issues
+## Known limitations
 
 Document any known significant shortcomings with the software.
 
-## Getting help
-
-Instruct users how to get help with this software; this might include links to an issue tracker, wiki, mailing list, etc.
-
-**Example**
-
-If you have questions, concerns, bug reports, etc, please file an issue in this repository's Issue Tracker.
 
 ## Getting involved
 
-This section should detail why people should get involved and describe key areas you are
-currently focusing on; e.g., trying to get feedback on features, fixing certain bugs, building
-important pieces, etc.
-
-General instructions on _how_ to contribute should be stated with a link to [CONTRIBUTING](CONTRIBUTING.md).
-
+General instructions on _how_ to contribute can be found in [CONTRIBUTING](CONTRIBUTING.md).
 
 ----
-
 ## Open source licensing info
-
-These links must be included in the final version of your project README (keep this section,
-as is, but remove this sentence):
 
 1. [TERMS](TERMS.md)
 2. [LICENSE](LICENSE)
-
-
 ----
 
-## Credits and references
-
-1. Projects that inspired you
-2. Related projects
-3. Books, papers, talks, or other sources that have meaningful impact or influence on this project

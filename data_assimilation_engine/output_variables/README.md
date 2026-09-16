@@ -8,7 +8,7 @@ utils.py: These scripts provide support to DataProcessor and also handle referen
 # Script Usage
 
 #### download_netcdf_from_nomads:
-This function downloads one reference files per combination of NWM cycle, class, category and domain from the NOMADS server. It also creates a config file with the gathred metadata from the downloaded files.
+This function downloads one reference files per combination of NWM cycle, class, category and domain from the NOMADS server. It also creates a config file with the gathered metadata from the downloaded files.
 
 Positional Arguments:  
 - root_output_folder: str - The root folder where all intermediate and final datasets in post-processing are saved.
@@ -27,11 +27,12 @@ Positional Arguments:
 - root_output_folder: str - The root folder where all intermediate and final datasets in post-processing are saved.
 - netcdf_file : str - The absolute or relative path to the ngen output NetCDF file.
 - gpkg_file : str - The absolute or relative path to the geopackage file that was used for ngen run.
+- config_json: str - The full or relative file path to config json file.
 - output_cycle_domain: str - The domain for the output products. For example, conus, hawaii, alaska
 - output_templates_folder: str | None - The folder path to where the output templates need to be stored. If None provided, it defaults to a subfolder with the `root_output_folder`
 
 #### create_nwm_products_for_gpkg:
-This function creates output NWM products using the template files. These output products span the extent of the diviides layer in the geopackage.
+This function creates output NWM products using the template files. These output products span the extent of the divides layer in the geopackage.
 
 Positional Arguments:  
 - root_output_folder: str - The root folder where all intermediate and final datasets in post-processing are saved.
